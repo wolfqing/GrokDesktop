@@ -7,25 +7,16 @@ struct ComposerView: View {
     @Environment(\.palette) private var palette
     @Environment(\.l10n) private var l10n
 
-    var body: some View {
-        ZStack(alignment: .topLeading) {
-            VStack(spacing: 0) {
-                HStack(alignment: .center, spacing: 10) {
-                    Button {
-                        model.showAttachMenu.toggle()
-                    } label: {
-                        Image(systemName: model.showAttachMenu ? "xmark" : "plus")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(palette.secondary)
-                            .frame(width: 28, height: 28)
-                    }
-                    .buttonStyle(.plain)
-                    .help(l10n.uploadFile)
+    private var isChinese: Bool { model.language.resolved() == .chinese }
 
-                    TextField(l10n.whatsOnYourMind, text: $model.draft, axis: .vertical)
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ZStack(alignment: .topLeading) {
+                VStack(alignment: .leading, spacing: 10) {
+                    TextField(l10n.askAnything, text: $model.draft, axis: .vertical)
                         .textFieldStyle(.plain)
                         .font(.system(size: 16))
-                        .lineLimit(1...6)
+                        .lineLimit(1...8)
                         .onSubmit {
                             if model.requireCmdEnter || NSEvent.modifierFlags.contains(.shift) {
                                 model.draft += "\n"
@@ -37,59 +28,152 @@ struct ComposerView: View {
                             model.showPalette = value.hasPrefix("/") && !value.contains("\n")
                         }
 
-                    Menu {
-                        ForEach(ModelTier.allCases) { tier in
-                            Button(tier.menuTitle) {
-                                model.client.modelTier = tier
+                    HStack(spacing: 8) {
+                        Button {
+                            model.showAttachMenu.toggle()
+                        } label: {
+                            Image(systemName: model.showAttachMenu ? "xmark" : "plus")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(palette.secondary)
+                                .frame(width: 26, height: 26)
+                        }
+                        .buttonStyle(.plain)
+                        .help(l10n.uploadFile)
+
+                        Menu {
+                            ForEach(AgentMode.allCases) { mode in
+                                Button(mode.title) { model.client.mode = mode }
                             }
+                        } label: {
+                            chip(model.client.mode.title)
                         }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text(model.client.modelTier.menuTitle)
-                            Image(systemName: "chevron.down")
-                                .font(.system(size: 8, weight: .semibold))
+                        .menuStyle(.borderlessButton)
+
+                        Button {
+                            model.draft += model.draft.isEmpty ? "@" : " @"
+                        } label: {
+                            chip(l10n.helpApprove, icon: "person.crop.circle.badge.checkmark")
                         }
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(palette.text)
-                    }
-                    .menuStyle(.borderlessButton)
-                    .fixedSize()
+                        .buttonStyle(.plain)
 
-                    Button {
-                        // Voice is not in the Build CLI path yet.
-                    } label: {
-                        Image(systemName: "mic")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(palette.secondary)
-                            .frame(width: 28, height: 28)
-                    }
-                    .buttonStyle(.plain)
-                    .help("语音稍后接入")
+                        Spacer()
 
-                    Button(action: submit) {
-                        Image(systemName: sendSymbol)
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(palette.sendGlyph)
-                            .frame(width: 34, height: 34)
-                            .background(palette.send, in: Circle())
+                        usageChip
+
+                        Menu {
+                            ForEach(BuildModel.allCases) { item in
+                                Button(item.title) { model.client.buildModel = item }
+                            }
+                        } label: {
+                            Text(model.client.buildModel.title)
+                                .font(.system(size: 13, weight: .medium))
+                        }
+                        .menuStyle(.borderlessButton)
+
+                        Menu {
+                            ForEach(EffortLevel.allCases) { level in
+                                Button(level.title(chinese: isChinese)) { model.client.effort = level }
+                            }
+                        } label: {
+                            Text(model.client.effort.title(chinese: isChinese))
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(Color.purple)
+                        }
+                        .menuStyle(.borderlessButton)
+
+                        Button {} label: {
+                            Image(systemName: "mic")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(palette.secondary)
+                        }
+                        .buttonStyle(.plain)
+
+                        Button(action: submit) {
+                            Image(systemName: sendSymbol)
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(canSend || model.client.isTurnRunning ? palette.sendGlyph : palette.secondary)
+                                .frame(width: 30, height: 30)
+                                .background(
+                                    canSend || model.client.isTurnRunning ? palette.send : palette.chip,
+                                    in: Circle()
+                                )
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
-                    .disabled(!canSend && !model.client.isTurnRunning)
                 }
-                .padding(.leading, 12)
-                .padding(.trailing, 8)
-                .padding(.vertical, 8)
-            }
-            .background(palette.input, in: Capsule())
-            .overlay(Capsule().stroke(palette.hairline, lineWidth: 1))
-            .shadow(color: Color.black.opacity(palette.isDark ? 0.35 : 0.06), radius: 18, y: 6)
+                .padding(14)
+                .background(palette.input, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .stroke(palette.hairline, lineWidth: 1)
+                )
 
-            if model.showAttachMenu {
-                attachMenu
-                    .offset(x: 8, y: 56)
-                    .zIndex(4)
+                if model.showAttachMenu {
+                    attachMenu
+                        .offset(x: 12, y: 88)
+                        .zIndex(4)
+                }
             }
+
+            HStack {
+                Menu {
+                    ForEach(model.visibleProjects) { project in
+                        Button(project.name) {
+                            model.client.workingDirectory = URL(fileURLWithPath: project.path)
+                            model.refreshWorkspace()
+                        }
+                    }
+                    Button(l10n.addProject) { model.showCreateProject = true }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "folder")
+                        Text(model.workspace.name.isEmpty ? model.client.workingDirectory.lastPathComponent : model.workspace.name)
+                        Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
+                    }
+                    .font(.system(size: 12))
+                    .foregroundStyle(palette.secondary)
+                }
+                .menuStyle(.borderlessButton)
+
+                Spacer()
+
+                Text(l10n.local)
+                    .font(.system(size: 12))
+                    .foregroundStyle(palette.secondary)
+                Text(l10n.mainAgent)
+                    .font(.system(size: 12))
+                    .foregroundStyle(palette.secondary)
+            }
+            .padding(.horizontal, 6)
         }
+    }
+
+    private var usageChip: some View {
+        HStack(spacing: 5) {
+            Circle()
+                .trim(from: 0, to: CGFloat(min(max(model.workspace.contextPercent, 1), 100)) / 100)
+                .stroke(Color.orange, lineWidth: 2)
+                .rotationEffect(.degrees(-90))
+                .frame(width: 12, height: 12)
+            Text("\(model.workspace.contextPercent)%")
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(palette.secondary)
+        }
+        .help(l10n.usage)
+    }
+
+    private func chip(_ title: String, icon: String? = nil) -> some View {
+        HStack(spacing: 4) {
+            if let icon {
+                Image(systemName: icon)
+            }
+            Text(title)
+        }
+        .font(.system(size: 12, weight: .medium))
+        .foregroundStyle(palette.secondary)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(palette.chip, in: Capsule())
     }
 
     private var attachMenu: some View {
@@ -121,8 +205,7 @@ struct ComposerView: View {
     private func attachItem(_ title: String, systemImage: String, trailing: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 10) {
-                Image(systemName: systemImage)
-                    .frame(width: 16)
+                Image(systemName: systemImage).frame(width: 16)
                 Text(title)
                 Spacer()
                 if trailing {
@@ -142,8 +225,7 @@ struct ComposerView: View {
 
     private var sendSymbol: String {
         if model.client.isTurnRunning { return "stop.fill" }
-        if canSend { return "arrow.up" }
-        return "waveform"
+        return "arrow.up"
     }
 
     private var canSend: Bool {

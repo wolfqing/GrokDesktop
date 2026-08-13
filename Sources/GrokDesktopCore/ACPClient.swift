@@ -18,8 +18,26 @@ public final class ACPClient: ObservableObject {
     @Published public private(set) var permission: PermissionRequest?
     @Published public private(set) var lastError: String?
     @Published public var workingDirectory: URL
-    @Published public var modelTier: ModelTier = .auto
+    @Published public var modelTier: ModelTier = .expert
+    @Published public var buildModel: BuildModel = .grokBuild
+    @Published public var effort: EffortLevel = .xhigh
     @Published public var mode: AgentMode = .normal
+
+    public var runningTools: Int {
+        items.reduce(0) { count, item in
+            if case .tool(_, _, let status, _) = item, status == "running" || status == "pending" {
+                return count + 1
+            }
+            return count
+        }
+    }
+
+    public var finishedTools: Int {
+        items.reduce(0) { count, item in
+            if case .tool = item { return count + 1 }
+            return count
+        }
+    }
 
     private var process: Process?
     private var stdinHandle: FileHandle?
@@ -174,11 +192,13 @@ public final class ACPClient: ObservableObject {
 
         var params: [String: Any] = [
             "sessionId": sessionID,
-            "prompt": [["type": "text", "text": trimmed]]
+            "prompt": [["type": "text", "text": trimmed]],
+            "model": buildModel.rawValue
         ]
-        if let model = modelTier.modelID {
-            params["model"] = model
-        }
+        params["_meta"] = [
+            "effort": effort.rawValue,
+            "yoloMode": mode == .alwaysApprove
+        ]
         do {
             _ = try await request(method: "session/prompt", params: params)
         } catch {

@@ -55,7 +55,7 @@ final class AppModel: ObservableObject {
     @Published var draft = ""
     @Published var showSettings = false
     @Published var showPalette = false
-    @Published var showInspector = false
+    @Published var showInspector = true
     @Published var showSearchField = false
     @Published var showAttachMenu = false
     @Published var showCreateProject = false
@@ -75,6 +75,7 @@ final class AppModel: ObservableObject {
     @Published var skillsTab = 0
     @Published var newProjectName = ""
     @Published var newProjectFolder: URL?
+    @Published var workspace = WorkspaceSnapshot()
 
     @AppStorage("appearancePreference") var appearanceRaw = AppearancePreference.system.rawValue
     @AppStorage("languagePreference") var languageRaw = AppLanguage.system.rawValue
@@ -130,6 +131,7 @@ final class AppModel: ObservableObject {
         if locator.locate() == nil {
             firstRunReason = .missingCLI
         }
+        refreshWorkspace()
     }
 
     func refreshAll() {
@@ -178,6 +180,30 @@ final class AppModel: ObservableObject {
 
     func refreshSessions() {
         sessions = sessionIndex.load()
+        refreshWorkspace()
+    }
+
+    func refreshWorkspace() {
+        let sessionDir = sessions.first(where: { $0.id == client.sessionID })?.directory
+        workspace = WorkspaceSnapshot.load(cwd: client.workingDirectory, sessionDirectory: sessionDir)
+    }
+
+    func openInFinder() {
+        NSWorkspace.shared.open(client.workingDirectory)
+    }
+
+    func openInTerminal() {
+        let script = """
+        tell application "Terminal"
+          activate
+          do script "cd \(client.workingDirectory.path.replacingOccurrences(of: "\"", with: "\\\""))"
+        end tell
+        """
+        NSAppleScript(source: script)?.executeAndReturnError(nil)
+    }
+
+    func commitOrPushHint() -> String {
+        "cd \(workspace.path) && git status"
     }
 
     func openChat() {
@@ -208,6 +234,7 @@ final class AppModel: ObservableObject {
         panel.directoryURL = client.workingDirectory
         guard panel.runModal() == .OK, let url = panel.url else { return }
         client.workingDirectory = url
+        refreshWorkspace()
         startNewSession()
     }
 
@@ -220,6 +247,7 @@ final class AppModel: ObservableObject {
         namedProjects.insert(project, at: 0)
         projectStore.save(namedProjects)
         client.workingDirectory = folder
+        refreshWorkspace()
         showCreateProject = false
         newProjectName = ""
         newProjectFolder = nil
@@ -249,6 +277,7 @@ final class AppModel: ObservableObject {
                 if !isPrivateChat {
                     refreshSessions()
                 }
+                refreshWorkspace()
             } catch {
                 present(error)
             }

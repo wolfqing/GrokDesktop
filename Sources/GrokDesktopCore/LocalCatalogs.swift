@@ -1,14 +1,38 @@
 import Foundation
 
+public enum SubscriptionPlan: String, CaseIterable, Sendable {
+    case grok
+    case superGrok
+    case superGrokHeavy
+
+    public var wordmark: String {
+        switch self {
+        case .grok: return "Grok"
+        case .superGrok: return "SuperGrok"
+        case .superGrokHeavy: return "SuperGrok Heavy"
+        }
+    }
+}
+
 public struct AccountProfile: Sendable, Equatable {
     public var email: String?
     public var name: String?
     public var userID: String?
+    public var teamID: String?
+    public var plan: SubscriptionPlan
 
-    public init(email: String? = nil, name: String? = nil, userID: String? = nil) {
+    public init(
+        email: String? = nil,
+        name: String? = nil,
+        userID: String? = nil,
+        teamID: String? = nil,
+        plan: SubscriptionPlan = .grok
+    ) {
         self.email = email
         self.name = name
         self.userID = userID
+        self.teamID = teamID
+        self.plan = plan
     }
 
     public var displayName: String {
@@ -35,14 +59,34 @@ public struct AccountProfile: Sendable, Equatable {
             let last = dict["last_name"] as? String ?? ""
             let combined = [first, last].filter { !$0.isEmpty }.joined(separator: " ")
             if email != nil || !combined.isEmpty {
+                let teamID = dict["team_id"] as? String
+                let plan = inferredPlan(from: dict)
                 return AccountProfile(
                     email: email,
                     name: combined.isEmpty ? nil : combined,
-                    userID: dict["user_id"] as? String
+                    userID: dict["user_id"] as? String,
+                    teamID: teamID,
+                    plan: plan
                 )
             }
         }
         return AccountProfile()
+    }
+
+    private static func inferredPlan(from dict: [String: Any]) -> SubscriptionPlan {
+        let blobs = [
+            dict["plan"] as? String,
+            dict["subscription"] as? String,
+            dict["product"] as? String,
+            dict["tier"] as? String,
+            dict["principal_type"] as? String
+        ].compactMap { $0?.lowercased() }.joined(separator: " ")
+        if blobs.contains("heavy") { return .superGrokHeavy }
+        if blobs.contains("super") { return .superGrok }
+        if let team = dict["team_id"] as? String, !team.isEmpty {
+            return .superGrok
+        }
+        return .grok
     }
 }
 

@@ -25,7 +25,7 @@ struct RootView: View {
                     }
                 }
                 .frame(maxWidth: .infinity)
-                if model.showInspector {
+                if model.showInspector && model.destination == .chat {
                     Rectangle()
                         .fill(palette.hairline)
                         .frame(width: 1)

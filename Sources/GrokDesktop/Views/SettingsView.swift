@@ -1,3 +1,4 @@
+import GrokDesktopCore
 import SwiftUI
 
 struct SettingsView: View {
@@ -133,7 +134,7 @@ struct SettingsView: View {
             row {
                 HStack {
                     GrokMark(size: 18)
-                    Text("SuperGrok")
+                    Text(model.account.plan.wordmark)
                     Spacer()
                     Button(l10n.manage) { model.settingsSection = .billing }
                         .buttonStyle(GrokSecondaryButtonStyle())
@@ -297,9 +298,19 @@ struct SettingsView: View {
             HStack(alignment: .top, spacing: 14) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(l10n.currentPlan).font(.system(size: 12)).foregroundStyle(palette.secondary)
-                    HStack { GrokMark(size: 18); Text("SuperGrok").font(.system(size: 18, weight: .semibold)) }
-                    Button(l10n.switchPlan) { model.login() }
-                        .buttonStyle(GrokSecondaryButtonStyle())
+                    HStack { GrokMark(size: 18); Text(model.account.plan.wordmark).font(.system(size: 18, weight: .semibold)) }
+                    Menu {
+                        ForEach(SubscriptionPlan.allCases, id: \.self) { plan in
+                            Button(plan.wordmark) { model.account.plan = plan }
+                        }
+                    } label: {
+                        Text(l10n.switchPlan)
+                            .font(.system(size: 13, weight: .medium))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
+                            .background(palette.chip, in: Capsule())
+                    }
+                    .menuStyle(.borderlessButton)
                 }
                 .padding(16)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -328,7 +339,7 @@ struct SettingsView: View {
 
     private var usagePage: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(l10n.weeklyLimit).font(.system(size: 13)).foregroundStyle(palette.secondary)
+            Text(l10n.weeklyPlanLimit).font(.system(size: 13)).foregroundStyle(palette.secondary)
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Text("0% \(l10n.used)").font(.system(size: 22, weight: .semibold))

@@ -9,7 +9,7 @@ struct FirstRunView: View {
     var body: some View {
         VStack(spacing: 18) {
             Spacer()
-            SuperGrokWordmark(markSize: 40)
+            SuperGrokWordmark(markSize: 40, title: model.account.plan.wordmark)
             Text(message)
                 .font(.system(size: 15))
                 .foregroundStyle(palette.secondary)

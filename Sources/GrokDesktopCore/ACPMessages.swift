@@ -252,6 +252,33 @@ public enum ModelTier: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+public enum EffortLevel: String, CaseIterable, Identifiable, Sendable {
+    case low
+    case medium
+    case high
+    case xhigh
+
+    public var id: String { rawValue }
+
+    public func title(chinese: Bool) -> String {
+        switch self {
+        case .low: return chinese ? "低" : "Low"
+        case .medium: return chinese ? "中" : "Med"
+        case .high: return chinese ? "高" : "High"
+        case .xhigh: return chinese ? "极高" : "Max"
+        }
+    }
+}
+
+public enum BuildModel: String, CaseIterable, Identifiable, Sendable {
+    case grokBuild = "grok-build"
+    case grok46 = "grok-4.6"
+    case grok45 = "grok-4.5"
+
+    public var id: String { rawValue }
+    public var title: String { rawValue }
+}
+
 public enum AgentMode: String, CaseIterable, Identifiable, Sendable {
     case normal
     case plan

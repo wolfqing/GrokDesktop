@@ -51,7 +51,7 @@ struct ChatView: View {
     private var composerBlock: some View {
         VStack(spacing: 10) {
             ComposerView()
-                .frame(maxWidth: 680)
+                .frame(maxWidth: 760)
             if model.isPrivateChat {
                 HStack(spacing: 6) {
                     Image(systemName: "eyeglasses")
@@ -94,6 +94,14 @@ struct ChatView: View {
                 .foregroundStyle(model.isPrivateChat ? Color.blue : palette.secondary)
             }
             .buttonStyle(.plain)
+            Button {
+                model.showInspector.toggle()
+            } label: {
+                Image(systemName: "sidebar.right")
+                    .foregroundStyle(model.showInspector ? palette.text : palette.secondary)
+            }
+            .buttonStyle(.plain)
+            .help(l10n.inspector)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
@@ -102,7 +110,7 @@ struct ChatView: View {
     private var emptyState: some View {
         VStack(spacing: 22) {
             Spacer()
-            SuperGrokWordmark(markSize: 48)
+            SuperGrokWordmark(markSize: 48, title: model.account.plan.wordmark)
             composerBlock
             Spacer()
             Spacer(minLength: 24)

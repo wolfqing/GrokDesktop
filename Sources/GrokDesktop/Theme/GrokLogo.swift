@@ -35,17 +35,20 @@ struct GrokMark: View {
 
 struct SuperGrokWordmark: View {
     var markSize: CGFloat = 46
+    var title: String = "Grok"
     @Environment(\.palette) private var palette
 
     var body: some View {
         HStack(spacing: 12) {
             GrokMark(size: markSize)
-            Text("SuperGrok")
+            Text(title)
                 .font(.system(size: markSize * 0.92, weight: .medium, design: .default))
                 .tracking(-0.8)
                 .foregroundStyle(palette.text)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("SuperGrok")
+        .accessibilityLabel(title)
     }
 }

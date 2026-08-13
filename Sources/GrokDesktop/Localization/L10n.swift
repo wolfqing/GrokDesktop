@@ -1,4 +1,5 @@
 import Foundation
+import GrokDesktopCore
 import SwiftUI
 
 enum AppLanguage: String, CaseIterable, Identifiable {
@@ -122,6 +123,29 @@ struct L10n {
     var recent: String { t("Recent", "最近") }
     var project: String { t("Project", "项目") }
     var addConnector: String { t("Add connector", "添加连接器") }
+    var environment: String { t("Environment", "环境信息") }
+    var changes: String { t("Changes", "变更") }
+    var local: String { t("Local", "本地") }
+    var commitOrPush: String { t("Commit or push", "提交或推送") }
+    var compareBranch: String { t("Compare branch", "比较分支") }
+    var subagents: String { t("Subagents", "子智能体") }
+    var running: String { t("running", "运行中") }
+    var completed: String { t("done", "完成") }
+    var sources: String { t("Sources", "来源") }
+    var webSearch: String { t("Web search", "网页搜索") }
+    var viewAll: String { t("View all", "查看全部") }
+    var mainAgent: String { t("Main Agent", "主 Agent") }
+    var askAnything: String { t("Ask anything, @ to mention, / for actions", "随便问，@ 引用文件，/ 执行命令") }
+    var helpApprove: String { t("Help me approve", "帮我批准") }
+    var artifacts: String { t("Artifacts", "产物") }
+    var files: String { t("Files", "文件") }
+    var backgroundTasks: String { t("Background tasks", "后台任务") }
+    var inspector: String { t("Inspector", "右边栏") }
+    var weeklyPlanLimit: String { t("Weekly limit", "每周额度") }
+
+    func planTitle(_ plan: SubscriptionPlan) -> String {
+        plan.wordmark
+    }
 }
 
 private struct L10nKey: EnvironmentKey {
