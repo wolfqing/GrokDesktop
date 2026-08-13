@@ -143,9 +143,10 @@ final class AppModel: ObservableObject {
     }
 
     var filteredSessions: [SessionRecord] {
+        let visible = sessions.filter { !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return sessions }
-        return sessions.filter {
+        guard !query.isEmpty else { return visible }
+        return visible.filter {
             $0.title.localizedCaseInsensitiveContains(query)
                 || $0.cwd.localizedCaseInsensitiveContains(query)
         }
@@ -360,14 +361,22 @@ final class AppModel: ObservableObject {
     }
 
     func openUsage() {
-        if let grok = locator.locate() {
-            let process = Process()
-            process.executableURL = grok
-            process.arguments = ["-p", "/usage"]
-            try? process.run()
-        }
         settingsSection = .usage
         showSettings = true
+        openAccountUsage()
+    }
+
+    func openAccountUsage() {
+        // grok.com settings Usage for SuperGrok / grok.com accounts
+        if let url = URL(string: "https://grok.com/") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    func openAPIUsage() {
+        if let url = URL(string: "https://console.x.ai/") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     private func present(_ error: Error) {

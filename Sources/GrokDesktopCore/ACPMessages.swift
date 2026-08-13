@@ -282,6 +282,7 @@ public enum BuildModel: String, CaseIterable, Identifiable, Sendable {
 public enum AgentMode: String, CaseIterable, Identifiable, Sendable {
     case normal
     case plan
+    case auto
     case alwaysApprove
 
     public var id: String { rawValue }
@@ -290,6 +291,7 @@ public enum AgentMode: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .normal: return "Normal"
         case .plan: return "Plan"
+        case .auto: return "Auto"
         case .alwaysApprove: return "Always-approve"
         }
     }
@@ -297,7 +299,8 @@ public enum AgentMode: String, CaseIterable, Identifiable, Sendable {
     public var next: AgentMode {
         switch self {
         case .normal: return .plan
-        case .plan: return .alwaysApprove
+        case .plan: return .auto
+        case .auto: return .alwaysApprove
         case .alwaysApprove: return .normal
         }
     }

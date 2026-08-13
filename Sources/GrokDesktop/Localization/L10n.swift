@@ -142,6 +142,9 @@ struct L10n {
     var backgroundTasks: String { t("Background tasks", "后台任务") }
     var inspector: String { t("Inspector", "右边栏") }
     var weeklyPlanLimit: String { t("Weekly limit", "每周额度") }
+    var openGrokUsage: String { t("Open grok.com usage", "打开 grok.com 用量") }
+    var openAPIUsage: String { t("Open API console usage", "打开 API 控制台用量") }
+    var usageForAccount: String { t("Usage for", "当前账号") }
 
     func planTitle(_ plan: SubscriptionPlan) -> String {
         plan.wordmark

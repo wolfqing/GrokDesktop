@@ -283,13 +283,15 @@ struct SidebarView: View {
             Text(title)
                 .font(.system(size: 13.5))
                 .lineLimit(1)
+                .truncationMode(.tail)
                 .foregroundStyle(palette.text)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, minHeight: 18, maxHeight: 18, alignment: .leading)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 6)
                 .background(selected ? palette.selected : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .buttonStyle(.plain)
+        .frame(height: 30)
     }
 
     private func iconButton(_ systemImage: String, action: @escaping () -> Void) -> some View {

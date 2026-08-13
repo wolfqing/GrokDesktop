@@ -320,7 +320,7 @@ struct SettingsView: View {
                     Text(l10n.extraCredits).font(.system(size: 12)).foregroundStyle(palette.secondary)
                     Text("US$0.00").font(.system(size: 24, weight: .semibold))
                     HStack {
-                        Button(l10n.buyMore) { model.openUsage() }
+                        Button(l10n.buyMore) { model.openAccountUsage() }
                             .buttonStyle(GrokSecondaryButtonStyle())
                         Button(l10n.viewUsage) { model.settingsSection = .usage }
                             .buttonStyle(GrokSecondaryButtonStyle())
@@ -339,24 +339,48 @@ struct SettingsView: View {
 
     private var usagePage: some View {
         VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text(l10n.usageForAccount)
+                    .foregroundStyle(palette.secondary)
+                Text(model.account.email ?? l10n.notSignedIn)
+                    .font(.system(size: 14, weight: .medium))
+            }
             Text(l10n.weeklyPlanLimit).font(.system(size: 13)).foregroundStyle(palette.secondary)
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text("0% \(l10n.used)").font(.system(size: 22, weight: .semibold))
+                    Text("\(model.workspace.contextPercent)% \(l10n.used)")
+                        .font(.system(size: 22, weight: .semibold))
                     Spacer()
+                    Text(l10n.t("This session context", "当前会话上下文"))
+                        .font(.system(size: 12))
+                        .foregroundStyle(palette.secondary)
                 }
                 Capsule().fill(palette.chip).frame(height: 8)
+                    .overlay(alignment: .leading) {
+                        Capsule()
+                            .fill(Color.orange)
+                            .frame(width: max(8, 240 * CGFloat(min(model.workspace.contextPercent, 100)) / 100), height: 8)
+                    }
             }
             .padding(16)
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(palette.hairline))
+
+            HStack(spacing: 10) {
+                Button(l10n.openGrokUsage) { model.openAccountUsage() }
+                    .buttonStyle(GrokPrimaryButtonStyle())
+                Button(l10n.openAPIUsage) { model.openAPIUsage() }
+                    .buttonStyle(GrokSecondaryButtonStyle())
+            }
+
             Text(l10n.extraCredits)
             HStack {
                 VStack(alignment: .leading) {
-                    Text("US$0.00").font(.system(size: 18, weight: .semibold))
-                    Text(l10n.extraCredits).foregroundStyle(palette.secondary)
+                    Text(model.account.plan.wordmark).font(.system(size: 18, weight: .semibold))
+                    Text(model.account.email ?? l10n.notSignedIn)
+                        .foregroundStyle(palette.secondary)
                 }
                 Spacer()
-                Button(l10n.buyMore) { model.openUsage() }
+                Button(l10n.buyMore) { model.openAccountUsage() }
                     .buttonStyle(GrokSecondaryButtonStyle())
             }
             .padding(16)

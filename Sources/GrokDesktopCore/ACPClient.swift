@@ -141,6 +141,9 @@ public final class ACPClient: ObservableObject {
         if mode == .alwaysApprove {
             meta["yoloMode"] = true
         }
+        if mode == .auto {
+            meta["autoMode"] = true
+        }
         let result = try await request(
             method: "session/new",
             params: [
@@ -197,7 +200,8 @@ public final class ACPClient: ObservableObject {
         ]
         params["_meta"] = [
             "effort": effort.rawValue,
-            "yoloMode": mode == .alwaysApprove
+            "yoloMode": mode == .alwaysApprove,
+            "autoMode": mode == .auto
         ]
         do {
             _ = try await request(method: "session/prompt", params: params)

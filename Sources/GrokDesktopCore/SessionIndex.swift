@@ -7,14 +7,24 @@ public struct SessionRecord: Identifiable, Hashable, Sendable {
     public var updatedAt: Date
     public var model: String?
     public var directory: URL
+    public var messageCount: Int
 
-    public init(id: String, cwd: String, title: String, updatedAt: Date, model: String?, directory: URL) {
+    public init(
+        id: String,
+        cwd: String,
+        title: String,
+        updatedAt: Date,
+        model: String?,
+        directory: URL,
+        messageCount: Int = 0
+    ) {
         self.id = id
         self.cwd = cwd
         self.title = title
         self.updatedAt = updatedAt
         self.model = model
         self.directory = directory
+        self.messageCount = messageCount
     }
 
     public var cwdName: String {
@@ -70,20 +80,43 @@ public struct SessionIndex {
         let id = (info["id"] as? String)
             ?? summaryURL.deletingLastPathComponent().lastPathComponent
         let cwd = (info["cwd"] as? String) ?? ""
-        let title = (dict["generated_title"] as? String)
+        let rawTitle = (dict["generated_title"] as? String)
             ?? (dict["session_summary"] as? String)
-            ?? "Untitled"
+            ?? ""
+        let title = Self.displayTitle(rawTitle, cwd: cwd)
+        let messages = dict["num_messages"] as? Int
+            ?? dict["num_chat_messages"] as? Int
+            ?? 0
+        if title.isEmpty && messages == 0 {
+            return nil
+        }
         let updated = parseDate(dict["updated_at"] as? String)
             ?? parseDate(dict["last_active_at"] as? String)
             ?? .distantPast
         return SessionRecord(
             id: id,
             cwd: cwd,
-            title: title,
+            title: title.isEmpty ? Self.fallbackTitle(cwd: cwd) : title,
             updatedAt: updated,
             model: dict["current_model_id"] as? String,
-            directory: summaryURL.deletingLastPathComponent()
+            directory: summaryURL.deletingLastPathComponent(),
+            messageCount: messages
         )
+    }
+
+    private static func displayTitle(_ raw: String, cwd: String) -> String {
+        let collapsed = raw
+            .replacingOccurrences(of: "\r", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\t", with: " ")
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
+        return collapsed
+    }
+
+    private static func fallbackTitle(cwd: String) -> String {
+        let name = URL(fileURLWithPath: cwd).lastPathComponent
+        return name.isEmpty ? "Untitled" : name
     }
 
     private func parseDate(_ raw: String?) -> Date? {
