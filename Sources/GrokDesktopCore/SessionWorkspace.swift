@@ -20,6 +20,7 @@ public final class SessionWorkspace: Identifiable {
     public var loadedOnAgent = false
     public var allowEditsThisSession = false
     public var itemDates: [String: Date] = [:]
+    public var itemImages: [String: [URL]] = [:]
     public var todos: [AgentTodo] = []
     public var tasks: [AgentTask] = []
 

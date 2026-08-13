@@ -9,6 +9,10 @@ struct ComposerView: View {
 
     private var isChinese: Bool { model.language.resolved() == .chinese }
 
+    private var draftImages: [URL] {
+        PromptMedia.imageURLs(in: model.draft)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let pending = model.pendingBusySend {
@@ -16,6 +20,15 @@ struct ComposerView: View {
             }
             ZStack(alignment: .topLeading) {
                 VStack(alignment: .leading, spacing: 10) {
+                    if !draftImages.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(draftImages, id: \.path) { url in
+                                    DraftImageThumb(url: url)
+                                }
+                            }
+                        }
+                    }
                     TextField(l10n.askAnything, text: $model.draft, axis: .vertical)
                         .textFieldStyle(.plain)
                         .font(.system(size: 16))
@@ -64,33 +77,69 @@ struct ComposerView: View {
                         usageChip
 
                         Menu {
-                            ForEach(ModelTier.allCases) { tier in
-                                Button(tier.menuTitle) { model.client.apply(tier: tier) }
+                            Section(l10n.t("Model", "模型")) {
+                                ForEach(BuildModel.allCases) { item in
+                                    Button {
+                                        model.client.buildModel = item
+                                    } label: {
+                                        menuLabel(item.menuTitle, selected: model.client.buildModel == item)
+                                    }
+                                }
+                            }
+                            Section(l10n.t("Reasoning", "推理强度")) {
+                                ForEach(EffortLevel.allCases) { level in
+                                    Button {
+                                        model.client.effort = level
+                                    } label: {
+                                        menuLabel(level.title(chinese: isChinese), selected: model.client.effort == level)
+                                    }
+                                }
+                            }
+                            Section(l10n.t("Preset", "预设")) {
+                                ForEach(ModelTier.allCases) { tier in
+                                    Button(tier.menuTitle) { model.client.apply(tier: tier) }
+                                }
                             }
                         } label: {
-                            chip(model.client.modelTier.menuTitle)
+                            HStack(spacing: 5) {
+                                Text(model.client.buildModel.shortTitle)
+                                Text(model.client.effort.title(chinese: isChinese))
+                                    .foregroundStyle(Color.purple)
+                                Image(systemName: "chevron.down")
+                                    .font(.system(size: 8, weight: .semibold))
+                                    .foregroundStyle(palette.secondary)
+                            }
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(palette.text)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(palette.chip, in: Capsule())
                         }
                         .menuStyle(.borderlessButton)
                         .fixedSize()
-                        .help(model.client.modelTier.menuSubtitle)
+                        .help("\(model.client.buildModel.menuTitle) · \(model.client.effort.title(chinese: isChinese))")
 
-                        Menu {
-                            ForEach(EffortLevel.allCases) { level in
-                                Button(level.title(chinese: isChinese)) { model.client.effort = level }
+                        if model.client.hasActiveWork {
+                            Button {
+                                model.client.stopWork()
+                            } label: {
+                                Image(systemName: "stop.fill")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundStyle(palette.sendGlyph)
+                                    .frame(width: 30, height: 30)
+                                    .background(palette.send, in: Circle())
                             }
-                        } label: {
-                            chip(model.client.effort.title(chinese: isChinese), accent: Color.purple)
+                            .buttonStyle(.plain)
+                            .help(l10n.stop)
                         }
-                        .menuStyle(.borderlessButton)
-                        .fixedSize()
 
                         Button(action: { submit() }) {
                             Image(systemName: sendSymbol)
                                 .font(.system(size: 12, weight: .bold))
-                                .foregroundStyle(canSend || model.client.isTurnRunning ? palette.sendGlyph : palette.secondary)
+                                .foregroundStyle(canSend ? palette.sendGlyph : palette.secondary)
                                 .frame(width: 30, height: 30)
                                 .background(
-                                    canSend || model.client.isTurnRunning ? palette.send : palette.chip,
+                                    canSend ? palette.send : palette.chip,
                                     in: Circle()
                                 )
                         }
@@ -183,6 +232,16 @@ struct ComposerView: View {
             .background(palette.chip, in: Capsule())
     }
 
+    private func menuLabel(_ title: String, selected: Bool) -> some View {
+        HStack {
+            Text(title)
+            if selected {
+                Spacer()
+                Image(systemName: "checkmark")
+            }
+        }
+    }
+
     private var attachMenu: some View {
         VStack(alignment: .leading, spacing: 0) {
             attachItem(l10n.t("Attach file (@)", "附加文件 (@)"), systemImage: "doc") { attachFiles() }
@@ -222,9 +281,7 @@ struct ComposerView: View {
     }
 
     private var sendSymbol: String {
-        if model.pendingBusySend != nil { return "arrow.up" }
-        if model.client.isTurnRunning && !canSend { return "stop.fill" }
-        return "arrow.up"
+        "arrow.up"
     }
 
     private var canSend: Bool {
@@ -314,6 +371,34 @@ struct ComposerView: View {
     }
 }
 
+private struct DraftImageThumb: View {
+    let url: URL
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        Group {
+            if let image = NSImage(contentsOf: url) {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 72, height: 72)
+                    .clipped()
+            } else {
+                Image(systemName: "photo")
+                    .foregroundStyle(palette.secondary)
+                    .frame(width: 72, height: 72)
+            }
+        }
+        .background(palette.chip)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(palette.hairline, lineWidth: 1)
+        )
+        .help(url.lastPathComponent)
+    }
+}
+
 struct BusySendBar: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.palette) private var palette
@@ -325,9 +410,26 @@ struct BusySendBar: View {
             Text(l10n.busySendTitle)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(palette.secondary)
-            Text(text)
-                .font(.system(size: 14))
-                .lineLimit(3)
+            let images = PromptMedia.imageURLs(in: text)
+            let shown = PromptMedia.displayText(text)
+            if !images.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(images, id: \.path) { url in
+                            DraftImageThumb(url: url)
+                        }
+                    }
+                }
+            }
+            if !shown.isEmpty {
+                Text(shown)
+                    .font(.system(size: 14))
+                    .lineLimit(3)
+            } else if images.isEmpty {
+                Text(text)
+                    .font(.system(size: 14))
+                    .lineLimit(3)
+            }
             Text(l10n.busySendDetail)
                 .font(.system(size: 11))
                 .foregroundStyle(palette.secondary)

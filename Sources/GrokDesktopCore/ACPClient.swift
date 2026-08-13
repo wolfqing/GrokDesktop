@@ -35,6 +35,7 @@ public final class ACPClient: ObservableObject {
     @Published public private(set) var authPresence: AuthPresence = .signedOut
     @Published public private(set) var authChallenge: AuthChallenge?
     @Published public private(set) var itemDates: [String: Date] = [:]
+    @Published public private(set) var itemImages: [String: [URL]] = [:]
     @Published public private(set) var todos: [AgentTodo] = []
     @Published public private(set) var tasks: [AgentTask] = []
     @Published public var allowEditsThisSession = false
@@ -223,6 +224,7 @@ public final class ACPClient: ObservableObject {
         workspace.mode = mode
         workspace.loadedOnAgent = true
         workspace.itemDates = [:]
+        workspace.itemImages = [:]
         workspace.todos = []
         workspace.tasks = []
         lastError = nil
@@ -260,6 +262,7 @@ public final class ACPClient: ObservableObject {
             workspace.planMarkdown = transcript.planMarkdown
             workspace.hunks = transcript.hunks
             workspace.itemDates = transcript.itemDates
+            workspace.itemImages = transcript.itemImages
             workspace.todos = transcript.todos
             workspace.tasks = transcript.tasks
         }
@@ -323,6 +326,7 @@ public final class ACPClient: ObservableObject {
             let userID = UUID().uuidString
             workspace.items.append(.user(id: userID, text: trimmed))
             workspace.itemDates[userID] = Date()
+            workspace.itemImages[userID] = PromptMedia.imageURLs(in: trimmed)
         }
         workspace.isTurnRunning = true
         workspace.assistantBufferID = nil
@@ -334,7 +338,7 @@ public final class ACPClient: ObservableObject {
         apply(tier: modelTier)
         var params: [String: Any] = [
             "sessionId": id,
-            "prompt": [["type": "text", "text": trimmed]],
+            "prompt": PromptMedia.promptBlocks(from: trimmed),
             "model": buildModel.rawValue
         ]
         var meta: [String: Any] = [
@@ -391,6 +395,42 @@ public final class ACPClient: ObservableObject {
             workspace.isTurnRunning = false
         }
         syncFromCurrent()
+    }
+
+    public func stopWork(sessionID target: String? = nil) {
+        let id = target ?? sessionID
+        if let id {
+            fire(method: "session/cancel", params: ["sessionId": id])
+            if let workspace = workspaceByID[id] {
+                workspace.isTurnRunning = false
+                for index in workspace.todos.indices where workspace.todos[index].isActive {
+                    workspace.todos[index].status = "cancelled"
+                }
+                for task in workspace.tasks where task.isRunning {
+                    killTask(task.id, sessionID: id)
+                }
+            }
+        }
+        syncFromCurrent()
+    }
+
+    public func killTask(_ taskID: String, sessionID target: String? = nil) {
+        let id = target ?? sessionID
+        var params: [String: Any] = ["taskId": taskID, "task_id": taskID]
+        if let id {
+            params["sessionId"] = id
+        }
+        fire(method: "x.ai/task/kill", params: params)
+        let workspace = id.flatMap { workspaceByID[$0] } ?? currentWorkspace
+        if let workspace, let index = workspace.tasks.firstIndex(where: { $0.id == taskID }) {
+            workspace.tasks[index].status = "cancelled"
+            workspace.tasks[index].endedAt = Date()
+        }
+        syncFromCurrent()
+    }
+
+    public var hasActiveWork: Bool {
+        isTurnRunning || todos.contains(where: \.isActive) || tasks.contains(where: \.isRunning)
     }
 
     public func answerPermission(optionID: String, rememberSession: Bool = false, sessionID target: String? = nil) {
@@ -487,6 +527,7 @@ public final class ACPClient: ObservableObject {
         sessionAllowTitles = []
         sessionDirectory = nil
         itemDates = [:]
+        itemImages = [:]
         todos = []
         tasks = []
         if process?.isRunning == true {
@@ -722,11 +763,6 @@ public final class ACPClient: ObservableObject {
         let id = update.sessionId ?? sessionID
         guard let id else { return }
         let workspace = ensureWorkspace(id: id, cwd: workingDirectory, directory: sessionDirectory)
-        if update.kind == .userMessageChunk,
-           case .user(_, let existing)? = workspace.items.last,
-           existing.hasSuffix(update.text) || existing == update.text {
-            return
-        }
         let previousIDs = Set(workspace.items.map(\.id))
         TranscriptLoader.apply(
             update: update,
@@ -735,6 +771,7 @@ public final class ACPClient: ObservableObject {
             assistantID: &workspace.assistantBufferID,
             thoughtID: &workspace.thoughtBufferID,
             itemDates: &workspace.itemDates,
+            itemImages: &workspace.itemImages,
             todos: &workspace.todos,
             tasks: &workspace.tasks
         )
@@ -778,6 +815,7 @@ public final class ACPClient: ObservableObject {
             mode = workspace.mode
             allowEditsThisSession = workspace.allowEditsThisSession
             itemDates = workspace.itemDates
+            itemImages = workspace.itemImages
             todos = workspace.todos
             tasks = workspace.tasks
         }

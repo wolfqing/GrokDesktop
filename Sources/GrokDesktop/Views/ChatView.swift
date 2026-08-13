@@ -1,3 +1,4 @@
+import AppKit
 import GrokDesktopCore
 import SwiftUI
 
@@ -189,7 +190,7 @@ struct ChatView: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(palette.secondary)
                     .help("Shift+Tab")
-                Text(model.client.modelTier.menuTitle)
+                Text("\(model.client.buildModel.shortTitle) \(model.client.effort.title(chinese: model.language.resolved() == .chinese))")
                     .font(.system(size: 11))
                     .foregroundStyle(palette.secondary)
                 Button {
@@ -267,8 +268,8 @@ struct ChatView: View {
             tail = "t\(status)\(detail.count)"
         case .thought(_, let text):
             tail = "h\(text.count)"
-        case .user(_, let text):
-            tail = "u\(text.count)"
+        case .user(let id, let text):
+            tail = "u\(text.count)i\(model.client.itemImages[id]?.count ?? 0)"
         case .notice(_, let text):
             tail = "n\(text.count)"
         case .none:
@@ -323,6 +324,17 @@ struct ChatView: View {
                 Text("\(progress.done)/\(progress.total)")
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .foregroundStyle(palette.secondary)
+                if model.client.hasActiveWork {
+                    Button(l10n.stop) {
+                        model.client.stopWork()
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(palette.sendGlyph)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(palette.send, in: Capsule())
+                }
             }
             if progress.total > 0 {
                 GeometryReader { geo in
@@ -400,16 +412,29 @@ struct ChatView: View {
     private func messageRow(_ item: ConversationItem) -> some View {
         switch item {
         case .user(let id, let text):
+            let images = PromptMedia.resolvedImages(stored: model.client.itemImages[id], text: text)
+            let shown = PromptMedia.displayText(text)
             HStack {
                 Spacer(minLength: 80)
                 VStack(alignment: .trailing, spacing: 4) {
                     timestamp(id, always: true)
-                    Text(text)
-                        .font(.system(size: model.compactChat ? 14 : 16))
-                        .textSelection(.enabled)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, model.compactChat ? 8 : 12)
-                        .background(palette.selected, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    VStack(alignment: .trailing, spacing: 8) {
+                        ForEach(images, id: \.path) { url in
+                            PromptImageView(url: url)
+                        }
+                        if !shown.isEmpty {
+                            Text(shown)
+                                .font(.system(size: model.compactChat ? 14 : 16))
+                                .textSelection(.enabled)
+                        } else if images.isEmpty {
+                            Text(text)
+                                .font(.system(size: model.compactChat ? 14 : 16))
+                                .textSelection(.enabled)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, model.compactChat ? 8 : 12)
+                    .background(palette.selected, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                     Button {
                         copyPrompt(id, text)
                     } label: {
@@ -473,5 +498,38 @@ struct ChatView: View {
                 .foregroundStyle(palette.secondary)
                 .padding(.horizontal, 28)
         }
+    }
+}
+
+private struct PromptImageView: View {
+    let url: URL
+    @Environment(\.palette) private var palette
+    @Environment(\.l10n) private var l10n
+
+    var body: some View {
+        Button {
+            NSWorkspace.shared.open(url)
+        } label: {
+            if let image = NSImage(contentsOf: url) {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: 360, maxHeight: 260)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            } else {
+                HStack(spacing: 8) {
+                    Image(systemName: "photo")
+                    Text(url.lastPathComponent)
+                        .lineLimit(1)
+                }
+                .font(.system(size: 12))
+                .foregroundStyle(palette.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(palette.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+        }
+        .buttonStyle(.plain)
+        .help(l10n.t("Open image", "打开图片"))
     }
 }

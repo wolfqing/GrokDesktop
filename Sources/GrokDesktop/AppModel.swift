@@ -65,6 +65,7 @@ final class AppModel: ObservableObject {
     @Published var search = ""
     @Published var draft = ""
     @Published var showSettings = false
+    @Published var showAbout = false
     @Published var showPalette = false
     @Published var showInspector = true
     @Published var showSearchField = false

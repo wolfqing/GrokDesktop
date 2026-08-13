@@ -30,6 +30,11 @@ struct GrokDesktopApp: App {
         .windowToolbarStyle(.unifiedCompact(showsTitle: false))
         .defaultSize(width: 1280, height: 840)
         .commands {
+            CommandGroup(replacing: .appInfo) {
+                Button(model.copy.t("About Grok Desktop", "关于 Grok Desktop")) {
+                    model.showAbout = true
+                }
+            }
             CommandGroup(replacing: .newItem) {
                 Button(model.copy.newChat) { model.startNewSession() }
                     .keyboardShortcut("n", modifiers: .command)

@@ -95,8 +95,8 @@ struct DashboardView: View {
                     }
                 }
                 .buttonStyle(GrokSecondaryButtonStyle())
-                if workspace.isTurnRunning {
-                    Button(l10n.t("Stop", "停止")) { model.client.cancelTurn(sessionID: workspace.id) }
+                if workspace.isTurnRunning || workspace.todos.contains(where: \.isActive) || workspace.tasks.contains(where: \.isRunning) {
+                    Button(l10n.stop) { model.client.stopWork(sessionID: workspace.id) }
                         .buttonStyle(GrokSecondaryButtonStyle())
                 }
             }

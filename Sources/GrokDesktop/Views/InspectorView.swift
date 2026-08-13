@@ -104,6 +104,14 @@ struct InspectorView: View {
                         .font(.system(size: 11, weight: .medium, design: .monospaced))
                         .foregroundStyle(palette.secondary)
                 }
+                if model.client.hasActiveWork {
+                    Button(l10n.stop) {
+                        model.client.stopWork()
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color.orange)
+                }
             }
             if todoProgress.total > 0 {
                 GeometryReader { geo in
@@ -149,7 +157,7 @@ struct InspectorView: View {
                     HStack(alignment: .top, spacing: 6) {
                         RunningStatusIcon(
                             active: task.isRunning,
-                            idleSystemImage: "checkmark.circle",
+                            idleSystemImage: task.status == "cancelled" ? "xmark.circle" : "checkmark.circle",
                             color: task.isRunning ? Color.orange : palette.secondary,
                             size: 12
                         )
@@ -159,9 +167,16 @@ struct InspectorView: View {
                                 .font(.system(size: 12))
                                 .lineLimit(2)
                             HStack(spacing: 6) {
-                                Text(task.isRunning ? l10n.running : l10n.completed)
+                                Text(task.isRunning ? l10n.running : (task.status == "cancelled" ? l10n.t("Cancelled", "已取消") : l10n.completed))
                                 if let elapsed = task.elapsed {
                                     Text(elapsedLabel(elapsed))
+                                }
+                                if task.isRunning {
+                                    Button(l10n.stop) {
+                                        model.client.killTask(task.id)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .foregroundStyle(Color.orange)
                                 }
                             }
                             .font(.system(size: 10))
@@ -302,8 +317,15 @@ struct InspectorView: View {
         VStack(alignment: .leading, spacing: 8) {
             sectionTitle(l10n.t("Timeline", "时间线"))
             let users = model.client.items.compactMap { item -> String? in
-                if case .user(_, let text) = item { return text }
-                return nil
+                guard case .user(let id, let text) = item else { return nil }
+                let shown = PromptMedia.displayText(text)
+                let count = PromptMedia.resolvedImages(stored: model.client.itemImages[id], text: text).count
+                if shown.isEmpty && count > 0 {
+                    return count == 1
+                        ? l10n.t("Image", "图片")
+                        : l10n.t("\(count) images", "\(count) 张图片")
+                }
+                return shown.isEmpty ? text : shown
             }
             if users.isEmpty {
                 Text(l10n.t("No turns yet.", "还没有回合。"))

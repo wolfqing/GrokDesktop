@@ -38,6 +38,11 @@ struct RootView: View {
                 }
             }
 
+            if model.showAbout {
+                AboutView()
+                    .transition(.opacity)
+                    .zIndex(2)
+            }
             if model.showSettings {
                 SettingsView()
                     .transition(.opacity)
@@ -90,6 +95,7 @@ struct RootView: View {
         .foregroundStyle(palette.text)
         .background(palette.canvas)
         .animation(.easeInOut(duration: 0.18), value: model.showSettings)
+        .animation(.easeInOut(duration: 0.18), value: model.showAbout)
         .animation(.easeInOut(duration: 0.18), value: model.destination)
         .animation(.easeInOut(duration: 0.18), value: model.sidebarCollapsed)
         .animation(.easeInOut(duration: 0.18), value: model.appearanceRaw)

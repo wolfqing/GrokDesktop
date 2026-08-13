@@ -35,6 +35,7 @@ public struct Transcript: Sendable {
     public var planMarkdown: String
     public var hunks: [FileHunk]
     public var itemDates: [String: Date]
+    public var itemImages: [String: [URL]]
     public var todos: [AgentTodo]
     public var tasks: [AgentTask]
 
@@ -44,6 +45,7 @@ public struct Transcript: Sendable {
         planMarkdown: String = "",
         hunks: [FileHunk] = [],
         itemDates: [String: Date] = [:],
+        itemImages: [String: [URL]] = [:],
         todos: [AgentTodo] = [],
         tasks: [AgentTask] = []
     ) {
@@ -52,6 +54,7 @@ public struct Transcript: Sendable {
         self.planMarkdown = planMarkdown
         self.hunks = hunks
         self.itemDates = itemDates
+        self.itemImages = itemImages
         self.todos = todos
         self.tasks = tasks
     }
@@ -63,6 +66,7 @@ public enum TranscriptLoader {
         var items: [ConversationItem] = []
         var planEntries: [PlanEntry] = []
         var itemDates: [String: Date] = [:]
+        var itemImages: [String: [URL]] = [:]
         var todos: [AgentTodo] = []
         var tasks: [AgentTask] = []
         var assistantID: String?
@@ -85,6 +89,7 @@ public enum TranscriptLoader {
                     assistantID: &assistantID,
                     thoughtID: &thoughtID,
                     itemDates: &itemDates,
+                    itemImages: &itemImages,
                     todos: &todos,
                     tasks: &tasks
                 )
@@ -103,6 +108,7 @@ public enum TranscriptLoader {
             planMarkdown: planMarkdown,
             hunks: loadHunks(sessionDirectory: sessionDirectory),
             itemDates: itemDates,
+            itemImages: itemImages,
             todos: todos,
             tasks: tasks
         )
@@ -138,6 +144,7 @@ public enum TranscriptLoader {
         assistantID: inout String?,
         thoughtID: inout String?,
         itemDates: inout [String: Date],
+        itemImages: inout [String: [URL]],
         todos: inout [AgentTodo],
         tasks: inout [AgentTask]
     ) {
@@ -146,13 +153,32 @@ public enum TranscriptLoader {
         case .userMessageChunk:
             assistantID = nil
             thoughtID = nil
+            let incomingImages = update.imageURLs + PromptMedia.imageURLs(in: update.text)
             if let last = items.indices.last, case .user(let id, let text) = items[last] {
-                items[last] = .user(id: id, text: text + update.text)
+                PromptMedia.merge(
+                    incomingImages,
+                    displayNumber: update.imageDisplayNumber,
+                    onto: id,
+                    itemImages: &itemImages
+                )
                 if itemDates[id] == nil, let timestamp = update.timestamp {
                     itemDates[id] = timestamp
                 }
-            } else {
-                items.append(.user(id: UUID().uuidString, text: update.text))
+                if !update.text.isEmpty,
+                   text != update.text,
+                   !text.hasSuffix(update.text),
+                   !PromptMedia.samePrompt(text, update.text) {
+                    items[last] = .user(id: id, text: text + update.text)
+                }
+            } else if !update.text.isEmpty || !incomingImages.isEmpty {
+                let id = UUID().uuidString
+                items.append(.user(id: id, text: update.text))
+                PromptMedia.merge(
+                    incomingImages,
+                    displayNumber: update.imageDisplayNumber,
+                    onto: id,
+                    itemImages: &itemImages
+                )
             }
         case .agentMessageChunk:
             thoughtID = nil

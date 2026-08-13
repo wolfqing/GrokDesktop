@@ -84,6 +84,7 @@ expect(planUpdate.planEntries.count == 1, "plan parse")
 var toolItems: [ConversationItem] = []
 var toolPlan: [PlanEntry] = []
 var toolDates: [String: Date] = [:]
+var toolImages: [String: [URL]] = [:]
 var toolTodos: [AgentTodo] = []
 var toolTasks: [AgentTask] = []
 var toolAssistant: String?
@@ -102,6 +103,7 @@ TranscriptLoader.apply(
     assistantID: &toolAssistant,
     thoughtID: &toolThought,
     itemDates: &toolDates,
+    itemImages: &toolImages,
     todos: &toolTodos,
     tasks: &toolTasks
 )
@@ -119,6 +121,7 @@ TranscriptLoader.apply(
     assistantID: &toolAssistant,
     thoughtID: &toolThought,
     itemDates: &toolDates,
+    itemImages: &toolImages,
     todos: &toolTodos,
     tasks: &toolTasks
 )
@@ -146,6 +149,7 @@ TranscriptLoader.apply(
     assistantID: &toolAssistant,
     thoughtID: &toolThought,
     itemDates: &toolDates,
+    itemImages: &toolImages,
     todos: &toolTodos,
     tasks: &toolTasks
 )
@@ -327,5 +331,76 @@ PromptTimestamp.applyTask(
 )
 expect(tasks[0].status == "completed", "task completed")
 expect(abs((tasks[0].elapsed ?? 0) - 18) < 0.01, "task elapsed")
+
+let imageURL = FileManager.default.temporaryDirectory.appendingPathComponent("grok-media-test.png")
+try? Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]).write(to: imageURL)
+let mentioned = PromptMedia.imageURLs(in: "@\(imageURL.path) look at this")
+expect(mentioned.count == 1, "extract @image path")
+expect(mentioned[0].path == imageURL.path, "extract keeps image path")
+expect(PromptMedia.displayText("@\(imageURL.path) look at this") == "look at this", "strip @image from display")
+expect(PromptMedia.displayText("[Image #1] look at this [Image #2]") == "look at this", "strip image tokens")
+expect(PromptMedia.samePrompt("@\(imageURL.path) look at this", "[Image #1] look at this"), "same prompt after image tokens")
+let imageUpdate = SessionUpdate.parse(params: [
+    "update": [
+        "sessionUpdate": "user_message_chunk",
+        "content": [
+            "type": "image",
+            "mimeType": "image/png",
+            "uri": imageURL.absoluteString,
+            "_meta": ["xai.dev/imageDisplayNumber": 1]
+        ]
+    ]
+] as [String: Any])
+expect(imageUpdate.imageURLs.count == 1, "parse image uri")
+expect(imageUpdate.imageDisplayNumber == 1, "parse image display number")
+expect(imageUpdate.text.isEmpty, "image chunk has no text")
+var mediaItems: [ConversationItem] = []
+var mediaPlan: [PlanEntry] = []
+var mediaDates: [String: Date] = [:]
+var mediaImages: [String: [URL]] = [:]
+var mediaTodos: [AgentTodo] = []
+var mediaTasks: [AgentTask] = []
+var mediaAssistant: String?
+var mediaThought: String?
+TranscriptLoader.apply(
+    update: SessionUpdate.parse(params: [
+        "update": [
+            "sessionUpdate": "user_message_chunk",
+            "content": ["type": "text", "text": "[Image #1] look at this"]
+        ]
+    ] as [String: Any]),
+    items: &mediaItems,
+    planEntries: &mediaPlan,
+    assistantID: &mediaAssistant,
+    thoughtID: &mediaThought,
+    itemDates: &mediaDates,
+    itemImages: &mediaImages,
+    todos: &mediaTodos,
+    tasks: &mediaTasks
+)
+TranscriptLoader.apply(
+    update: imageUpdate,
+    items: &mediaItems,
+    planEntries: &mediaPlan,
+    assistantID: &mediaAssistant,
+    thoughtID: &mediaThought,
+    itemDates: &mediaDates,
+    itemImages: &mediaImages,
+    todos: &mediaTodos,
+    tasks: &mediaTasks
+)
+expect(mediaItems.count == 1, "image chunk stays on same user turn")
+if case .user(let mediaID, let mediaText) = mediaItems[0] {
+    expect(mediaText == "[Image #1] look at this", "image chunk does not append empty text")
+    expect(mediaImages[mediaID]?.count == 1, "image attached to user prompt")
+    expect(PromptMedia.displayText(mediaText) == "look at this", "history display hides image token")
+} else {
+    fail("expected user item with image")
+}
+let blocks = PromptMedia.promptBlocks(from: "@\(imageURL.path) look at this")
+expect(blocks.count == 2, "prompt sends text + image")
+expect(blocks[0]["type"] as? String == "text", "first block is text")
+expect((blocks[0]["text"] as? String)?.contains("[Image #1]") == true, "text uses image token")
+expect(blocks[1]["type"] as? String == "image", "second block is image")
 
 print("GrokDesktopSmoke ok")

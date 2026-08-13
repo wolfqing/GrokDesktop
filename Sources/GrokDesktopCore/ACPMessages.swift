@@ -117,6 +117,8 @@ public struct SessionUpdate: Equatable {
     public var status: String?
     public var planEntries: [PlanEntry]
     public var timestamp: Date?
+    public var imageURLs: [URL]
+    public var imageDisplayNumber: Int?
     public var raw: [String: Any]
 
     public static func == (lhs: SessionUpdate, rhs: SessionUpdate) -> Bool {
@@ -128,6 +130,8 @@ public struct SessionUpdate: Equatable {
             && lhs.status == rhs.status
             && lhs.planEntries == rhs.planEntries
             && lhs.timestamp == rhs.timestamp
+            && lhs.imageURLs == rhs.imageURLs
+            && lhs.imageDisplayNumber == rhs.imageDisplayNumber
     }
 
     public init(
@@ -139,6 +143,8 @@ public struct SessionUpdate: Equatable {
         status: String? = nil,
         planEntries: [PlanEntry] = [],
         timestamp: Date? = nil,
+        imageURLs: [URL] = [],
+        imageDisplayNumber: Int? = nil,
         raw: [String: Any] = [:]
     ) {
         self.kind = kind
@@ -149,6 +155,8 @@ public struct SessionUpdate: Equatable {
         self.status = status
         self.planEntries = planEntries
         self.timestamp = timestamp
+        self.imageURLs = imageURLs
+        self.imageDisplayNumber = imageDisplayNumber
         self.raw = raw
     }
 
@@ -160,6 +168,7 @@ public struct SessionUpdate: Equatable {
         let kind = SessionUpdateKind(rawValue: kindRaw) ?? .unknown
         let meta = params["_meta"] as? [String: Any] ?? [:]
         let updateMeta = update["_meta"] as? [String: Any] ?? [:]
+        let images = PromptMedia.images(in: update)
         return SessionUpdate(
             kind: kind,
             sessionId: params["sessionId"] as? String ?? params["session_id"] as? String,
@@ -174,6 +183,8 @@ public struct SessionUpdate: Equatable {
                     ?? params["timestamp"]
                     ?? envelopeTimestamp
             ),
+            imageURLs: images.urls,
+            imageDisplayNumber: images.displayNumber,
             raw: update
         )
     }
@@ -326,12 +337,28 @@ public enum EffortLevel: String, CaseIterable, Identifiable, Sendable {
 }
 
 public enum BuildModel: String, CaseIterable, Identifiable, Sendable {
-    case grokBuild = "grok-build"
     case grok46 = "grok-4.6"
     case grok45 = "grok-4.5"
+    case grokBuild = "grok-build"
 
     public var id: String { rawValue }
     public var title: String { rawValue }
+
+    public var shortTitle: String {
+        switch self {
+        case .grok46: return "4.6"
+        case .grok45: return "4.5"
+        case .grokBuild: return "Build"
+        }
+    }
+
+    public var menuTitle: String {
+        switch self {
+        case .grok46: return "Grok 4.6"
+        case .grok45: return "Grok 4.5"
+        case .grokBuild: return "Grok Build"
+        }
+    }
 }
 
 public enum AgentMode: String, CaseIterable, Identifiable, Sendable {
