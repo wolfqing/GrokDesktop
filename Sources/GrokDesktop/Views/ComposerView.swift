@@ -56,7 +56,7 @@ struct ComposerView: View {
                                 model.suppressSuggest = false
                                 return
                             }
-                            model.showPalette = value.hasPrefix("/") && !value.contains("\n")
+                            model.showPalette = value.hasPrefix("/") && !value.contains(where: \.isWhitespace)
                             model.updateMentions(from: value)
                         }
 

@@ -227,6 +227,8 @@ public final class ACPClient: ObservableObject {
         workspace.itemImages = [:]
         workspace.todos = []
         workspace.tasks = []
+        workspace.stopRequested = false
+        workspace.isTurnRunning = false
         lastError = nil
         state = .ready
         syncFromCurrent()
@@ -328,6 +330,7 @@ public final class ACPClient: ObservableObject {
             workspace.itemDates[userID] = Date()
             workspace.itemImages[userID] = PromptMedia.imageURLs(in: trimmed)
         }
+        workspace.stopRequested = false
         workspace.isTurnRunning = true
         workspace.assistantBufferID = nil
         workspace.thoughtBufferID = nil
@@ -353,13 +356,19 @@ public final class ACPClient: ObservableObject {
         do {
             _ = try await request(method: "session/prompt", params: params)
         } catch {
-            workspace.lastError = error.localizedDescription
-            workspace.items.append(.notice(id: UUID().uuidString, text: error.localizedDescription))
-            lastError = error.localizedDescription
+            if !workspace.stopRequested, !Self.isCancelError(error) {
+                workspace.lastError = error.localizedDescription
+                workspace.items.append(.notice(id: UUID().uuidString, text: error.localizedDescription))
+                lastError = error.localizedDescription
+            }
         }
         workspace.isTurnRunning = false
         workspace.refreshArtifacts()
         syncFromCurrent()
+        if workspace.stopRequested {
+            workspace.promptQueue.removeAll()
+            return
+        }
         if let next = workspace.promptQueue.first {
             workspace.promptQueue.removeFirst()
             try await send(text: next, sessionID: id)
@@ -388,13 +397,7 @@ public final class ACPClient: ObservableObject {
     }
 
     public func cancelTurn(sessionID target: String? = nil) {
-        let id = target ?? sessionID
-        guard let id else { return }
-        fire(method: "session/cancel", params: ["sessionId": id])
-        if let workspace = workspaceByID[id] {
-            workspace.isTurnRunning = false
-        }
-        syncFromCurrent()
+        stopWork(sessionID: target)
     }
 
     public func stopWork(sessionID target: String? = nil) {
@@ -402,15 +405,19 @@ public final class ACPClient: ObservableObject {
         if let id {
             fire(method: "session/cancel", params: ["sessionId": id])
             if let workspace = workspaceByID[id] {
-                workspace.isTurnRunning = false
-                for index in workspace.todos.indices where workspace.todos[index].isActive {
-                    workspace.todos[index].status = "cancelled"
+                let runningTaskIDs = workspace.tasks.filter(\.isRunning).map(\.id)
+                workspace.markWorkStopped()
+                if let permission = workspace.permission {
+                    workspace.permission = nil
+                    respond(id: permission.id, result: ["outcome": ["outcome": "cancelled"]])
                 }
-                for task in workspace.tasks where task.isRunning {
-                    killTask(task.id, sessionID: id)
+                for taskID in runningTaskIDs {
+                    let params: [String: Any] = ["taskId": taskID, "task_id": taskID, "sessionId": id]
+                    fire(method: "x.ai/task/kill", params: params)
                 }
             }
         }
+        isTurnRunning = false
         syncFromCurrent()
     }
 
@@ -430,7 +437,8 @@ public final class ACPClient: ObservableObject {
     }
 
     public var hasActiveWork: Bool {
-        isTurnRunning || todos.contains(where: \.isActive) || tasks.contains(where: \.isRunning)
+        guard currentWorkspace?.stopRequested != true else { return false }
+        return isTurnRunning || todos.contains(where: \.isActive) || tasks.contains(where: \.isRunning)
     }
 
     public func answerPermission(optionID: String, rememberSession: Bool = false, sessionID target: String? = nil) {
@@ -775,6 +783,9 @@ public final class ACPClient: ObservableObject {
             todos: &workspace.todos,
             tasks: &workspace.tasks
         )
+        if workspace.stopRequested {
+            workspace.markWorkStopped()
+        }
         let stamp = update.timestamp ?? Date()
         for item in workspace.items where previousIDs.contains(item.id) == false {
             if workspace.itemDates[item.id] == nil {
@@ -852,6 +863,11 @@ public final class ACPClient: ObservableObject {
                 continuation.resume(throwing: error)
             }
         }
+    }
+
+    private static func isCancelError(_ error: Error) -> Bool {
+        let text = error.localizedDescription.lowercased()
+        return text.contains("cancel") || text.contains("abort") || text.contains("interrupt")
     }
 
     private func fire(method: String, params: [String: Any]) {

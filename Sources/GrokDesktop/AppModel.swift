@@ -623,7 +623,19 @@ final class AppModel: ObservableObject {
 
     func runSkill(_ skill: SkillRecord) {
         destination = .chat
-        draft = "/\(skill.slug) "
+        insertSlashPrompt("/\(skill.slug)")
+    }
+
+    func insertSlashPrompt(_ command: String) {
+        var text = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !text.hasPrefix("/") {
+            text = "/\(text)"
+        }
+        draft = text + " "
+        showPalette = false
+        mentionQuery = nil
+        mentionMatches = []
+        suppressSuggest = true
     }
 
     func addAutomation(_ record: AutomationRecord) {

@@ -8,6 +8,7 @@ struct CommandItem: Identifiable {
     var detail: String
     var icon: String
     var section: String
+    var insertsIntoDraft = false
 }
 
 private struct SuggestHeightKey: PreferenceKey {
@@ -122,8 +123,12 @@ struct CommandPalette: View {
                         detail: item.detail,
                         selected: hovered == item.id
                     ) {
-                        model.handleCommand(item.command)
-                        model.draft = ""
+                        if item.insertsIntoDraft {
+                            model.insertSlashPrompt(item.command)
+                        } else {
+                            model.handleCommand(item.command)
+                            model.draft = ""
+                        }
                     }
                     .onHover { hovering in
                         hovered = hovering ? item.id : (hovered == item.id ? nil : hovered)
@@ -195,7 +200,8 @@ struct CommandPalette: View {
                 title: $0.title,
                 detail: $0.slug,
                 icon: "sparkles",
-                section: l10n.t("Skills", "技能")
+                section: l10n.t("Skills", "技能"),
+                insertsIntoDraft: true
             )
         })
         return rows

@@ -177,6 +177,12 @@ let ws = SessionWorkspace(id: "abc", cwd: URL(fileURLWithPath: "/tmp"), title: "
 expect(ws.isLive == false, "empty workspace not live")
 ws.isTurnRunning = true
 expect(ws.isLive, "running workspace is live")
+ws.todos = [AgentTodo(id: "1", content: "One", status: "in_progress")]
+ws.markWorkStopped()
+expect(ws.stopRequested, "stop requested")
+expect(ws.isTurnRunning == false, "stop clears turn")
+expect(ws.todos[0].status == "cancelled", "stop cancels todos")
+expect(ws.isLive == false, "stopped workspace is not live")
 
 expect(DiagnosticExport.redact("token: xai-SECRET123 and ok") .contains("[redacted]"), "redact api key")
 expect(DiagnosticExport.redact("hello").contains("hello"), "keep plain text")
