@@ -109,12 +109,6 @@ struct ChatView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            if model.sidebarCollapsed {
-                Button { model.sidebarCollapsed = false } label: {
-                    GrokMark(size: 18)
-                }
-                .buttonStyle(.plain)
-            }
             if !model.client.items.isEmpty {
                 Button(model.client.workingDirectory.path) {
                     model.chooseWorkingDirectory()

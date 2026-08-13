@@ -15,8 +15,19 @@ struct GrokDesktopApp: App {
             RootView()
                 .environmentObject(model)
                 .preferredColorScheme(model.appearance.colorScheme)
+                .toolbar {
+                    ToolbarItem(placement: .navigation) {
+                        Button {
+                            model.sidebarCollapsed.toggle()
+                        } label: {
+                            Image(systemName: "sidebar.left")
+                        }
+                        .help(model.sidebarCollapsed ? model.copy.t("Expand sidebar", "展开侧栏") : model.copy.collapseSidebar)
+                    }
+                }
         }
         .windowStyle(.hiddenTitleBar)
+        .windowToolbarStyle(.unifiedCompact(showsTitle: false))
         .defaultSize(width: 1280, height: 840)
         .commands {
             CommandGroup(replacing: .newItem) {

@@ -10,8 +10,8 @@ struct SidebarView: View {
         VStack(alignment: .leading, spacing: 0) {
             header
                 .padding(.horizontal, 14)
-                .padding(.top, 16)
-                .padding(.bottom, 10)
+                .padding(.top, 8)
+                .padding(.bottom, 8)
 
             if model.sidebarCollapsed {
                 collapsedRail
@@ -25,26 +25,28 @@ struct SidebarView: View {
     }
 
     private var header: some View {
-        HStack {
-            if model.sidebarCollapsed {
-                Button { model.sidebarCollapsed = false } label: {
-                    GrokMark(size: 20)
-                }
-                .buttonStyle(.plain)
-                .frame(maxWidth: .infinity)
-            } else {
-                GrokMark(size: 22)
-                Spacer()
+        HStack(spacing: 8) {
+            GrokMark(size: 20)
+            if !model.sidebarCollapsed {
+                Text("Grok build")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(palette.text)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
                 Button {
-                    model.sidebarCollapsed = true
+                    model.showSearchField.toggle()
                 } label: {
-                    Image(systemName: "chevron.left.2")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(palette.secondary)
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(model.showSearchField ? palette.text : palette.secondary)
                         .frame(width: 28, height: 28)
+                        .background(
+                            model.showSearchField ? palette.selected : Color.clear,
+                            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        )
                 }
                 .buttonStyle(.plain)
-                .help(l10n.collapseSidebar)
+                .help(l10n.search)
             }
         }
     }
@@ -66,8 +68,10 @@ struct SidebarView: View {
 
     private var expandedContent: some View {
         VStack(alignment: .leading, spacing: 2) {
-            navRow(l10n.search, systemImage: "magnifyingglass", selected: model.showSearchField) {
-                model.showSearchField.toggle()
+            if model.showSearchField {
+                searchField
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
             }
             navRow(l10n.newChat, systemImage: "square.and.pencil", selected: model.destination == .chat) {
                 model.openChat()
@@ -83,12 +87,6 @@ struct SidebarView: View {
             }
             navRow(l10n.skillsAndConnectors, systemImage: "square.grid.2x2", selected: model.destination == .skills) {
                 model.destination = .skills
-            }
-
-            if model.showSearchField {
-                searchField
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
             }
 
             ScrollView {
