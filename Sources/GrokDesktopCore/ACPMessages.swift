@@ -30,13 +30,15 @@ public struct JSONRPCEnvelope {
     public var params: [String: Any]
     public var result: Any?
     public var error: [String: Any]?
+    public var timestamp: Any?
 
-    public init(id: JSONRPCID? = nil, method: String? = nil, params: [String: Any] = [:], result: Any? = nil, error: [String: Any]? = nil) {
+    public init(id: JSONRPCID? = nil, method: String? = nil, params: [String: Any] = [:], result: Any? = nil, error: [String: Any]? = nil, timestamp: Any? = nil) {
         self.id = id
         self.method = method
         self.params = params
         self.result = result
         self.error = error
+        self.timestamp = timestamp
     }
 
     public static func decode(_ data: Data) throws -> JSONRPCEnvelope {
@@ -49,7 +51,8 @@ public struct JSONRPCEnvelope {
             method: dict["method"] as? String,
             params: dict["params"] as? [String: Any] ?? [:],
             result: dict["result"],
-            error: dict["error"] as? [String: Any]
+            error: dict["error"] as? [String: Any],
+            timestamp: dict["timestamp"]
         )
     }
 
@@ -100,6 +103,8 @@ public enum SessionUpdateKind: String, Sendable {
     case toolCallUpdate = "tool_call_update"
     case plan = "plan"
     case turnCompleted = "turn_completed"
+    case taskBackgrounded = "task_backgrounded"
+    case taskCompleted = "task_completed"
     case unknown
 }
 
@@ -111,6 +116,7 @@ public struct SessionUpdate: Equatable {
     public var toolCallId: String?
     public var status: String?
     public var planEntries: [PlanEntry]
+    public var timestamp: Date?
     public var raw: [String: Any]
 
     public static func == (lhs: SessionUpdate, rhs: SessionUpdate) -> Bool {
@@ -121,6 +127,7 @@ public struct SessionUpdate: Equatable {
             && lhs.toolCallId == rhs.toolCallId
             && lhs.status == rhs.status
             && lhs.planEntries == rhs.planEntries
+            && lhs.timestamp == rhs.timestamp
     }
 
     public init(
@@ -131,6 +138,7 @@ public struct SessionUpdate: Equatable {
         toolCallId: String? = nil,
         status: String? = nil,
         planEntries: [PlanEntry] = [],
+        timestamp: Date? = nil,
         raw: [String: Any] = [:]
     ) {
         self.kind = kind
@@ -140,15 +148,18 @@ public struct SessionUpdate: Equatable {
         self.toolCallId = toolCallId
         self.status = status
         self.planEntries = planEntries
+        self.timestamp = timestamp
         self.raw = raw
     }
 
-    public static func parse(params: [String: Any]) -> SessionUpdate {
+    public static func parse(params: [String: Any], envelopeTimestamp: Any? = nil) -> SessionUpdate {
         let update = params["update"] as? [String: Any] ?? params
         let kindRaw = (update["sessionUpdate"] as? String)
             ?? (update["session_update"] as? String)
             ?? ""
         let kind = SessionUpdateKind(rawValue: kindRaw) ?? .unknown
+        let meta = params["_meta"] as? [String: Any] ?? [:]
+        let updateMeta = update["_meta"] as? [String: Any] ?? [:]
         return SessionUpdate(
             kind: kind,
             sessionId: params["sessionId"] as? String ?? params["session_id"] as? String,
@@ -157,6 +168,12 @@ public struct SessionUpdate: Equatable {
             toolCallId: update["toolCallId"] as? String ?? update["tool_call_id"] as? String,
             status: update["status"] as? String,
             planEntries: parsePlanEntries(update["entries"]),
+            timestamp: PromptTimestamp.parse(
+                meta["agentTimestampMs"]
+                    ?? updateMeta["agentTimestampMs"]
+                    ?? params["timestamp"]
+                    ?? envelopeTimestamp
+            ),
             raw: update
         )
     }

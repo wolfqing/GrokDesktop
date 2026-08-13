@@ -20,6 +20,8 @@ public final class SessionWorkspace: Identifiable {
     public var loadedOnAgent = false
     public var allowEditsThisSession = false
     public var itemDates: [String: Date] = [:]
+    public var todos: [AgentTodo] = []
+    public var tasks: [AgentTask] = []
 
     public init(id: String, cwd: URL, directory: URL? = nil, title: String = "") {
         self.id = id

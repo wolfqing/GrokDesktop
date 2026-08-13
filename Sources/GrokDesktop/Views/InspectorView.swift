@@ -30,6 +30,7 @@ struct InspectorView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     contextSection
+                    tasksSection
                     planSection
                     changesSection
                     timelineSection
@@ -56,7 +57,7 @@ struct InspectorView: View {
                 Text("\(model.workspace.contextPercent)%")
                     .font(.system(size: 16, weight: .semibold, design: .monospaced))
                 Spacer()
-                Text(model.client.modelTier.menuTitle)
+                Text(l10n.sessionContext)
                     .font(.system(size: 12))
                     .foregroundStyle(palette.secondary)
             }
@@ -91,6 +92,114 @@ struct InspectorView: View {
         case .ready: return l10n.t("Session ready", "会话就绪")
         case .failed(let message): return message
         }
+    }
+
+    private var tasksSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                sectionTitle(l10n.tasks)
+                Spacer()
+                if todoProgress.total > 0 {
+                    Text("\(todoProgress.done)/\(todoProgress.total)")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundStyle(palette.secondary)
+                }
+            }
+            if todoProgress.total > 0 {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(palette.chip)
+                        Capsule()
+                            .fill(Color.orange)
+                            .frame(width: geo.size.width * CGFloat(todoProgress.done) / CGFloat(max(todoProgress.total, 1)))
+                    }
+                }
+                .frame(height: 6)
+            }
+            if model.client.todos.isEmpty && model.client.tasks.isEmpty {
+                Text(l10n.noTasks)
+                    .font(.system(size: 12))
+                    .foregroundStyle(palette.secondary)
+            }
+            ForEach(model.client.todos) { todo in
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: todoIcon(todo.status))
+                        .font(.system(size: 11))
+                        .foregroundStyle(todoColor(todo.status))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(todo.content)
+                            .font(.system(size: 12))
+                            .strikethrough(todo.isDone || todo.isCancelled)
+                        Text(todoStatusLabel(todo.status))
+                            .font(.system(size: 10))
+                            .foregroundStyle(palette.secondary)
+                    }
+                }
+            }
+            if !model.client.tasks.isEmpty {
+                Text(l10n.backgroundTasks)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(palette.secondary)
+                    .padding(.top, 4)
+                ForEach(Array(model.client.tasks.suffix(12))) { task in
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: task.isRunning ? "circle.dotted" : "checkmark.circle")
+                            .font(.system(size: 11))
+                            .foregroundStyle(task.isRunning ? Color.orange : palette.secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(task.title)
+                                .font(.system(size: 12))
+                                .lineLimit(2)
+                            HStack(spacing: 6) {
+                                Text(task.isRunning ? l10n.running : l10n.completed)
+                                if let elapsed = task.elapsed {
+                                    Text(elapsedLabel(elapsed))
+                                }
+                            }
+                            .font(.system(size: 10))
+                            .foregroundStyle(palette.secondary)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var todoProgress: (done: Int, total: Int) {
+        PromptTimestamp.progress(for: model.client.todos)
+    }
+
+    private func todoIcon(_ status: String) -> String {
+        switch status {
+        case "completed": return "checkmark.circle.fill"
+        case "in_progress": return "circle.dotted"
+        case "cancelled": return "xmark.circle"
+        default: return "circle"
+        }
+    }
+
+    private func todoColor(_ status: String) -> Color {
+        switch status {
+        case "completed": return .green
+        case "in_progress": return .orange
+        case "cancelled": return palette.secondary
+        default: return palette.secondary
+        }
+    }
+
+    private func todoStatusLabel(_ status: String) -> String {
+        switch status {
+        case "completed": return l10n.completed
+        case "in_progress": return l10n.running
+        case "cancelled": return l10n.t("Cancelled", "已取消")
+        default: return l10n.t("Pending", "待办")
+        }
+    }
+
+    private func elapsedLabel(_ value: TimeInterval) -> String {
+        if value < 60 { return String(format: "%.0fs", value) }
+        if value < 3600 { return String(format: "%.0fm", value / 60) }
+        return String(format: "%.1fh", value / 3600)
     }
 
     private var planSection: some View {
@@ -205,21 +314,17 @@ struct InspectorView: View {
     private var workflowsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             sectionTitle(l10n.t("Workflows", "工作流"))
-            let names = workflowNames()
-            if names.isEmpty {
-                Button("/workflows") {
-                    model.draft = "/workflows "
-                    model.destination = .chat
+            if model.officialWorkflows.isEmpty {
+                Button(l10n.t("Open workflows", "打开工作流")) {
+                    model.destination = .automations
                 }
                 .buttonStyle(GrokSecondaryButtonStyle())
             } else {
-                ForEach(names, id: \.self) { name in
+                ForEach(model.officialWorkflows.prefix(8)) { item in
                     Button {
-                        model.destination = .chat
-                        model.draft = "/\(name) "
+                        model.runWorkflow(item)
                     } label: {
-                        Text(name)
-                            .font(.system(size: 12))
+                        Text(item.name).font(.system(size: 12))
                     }
                     .buttonStyle(.plain)
                 }
@@ -269,21 +374,6 @@ struct InspectorView: View {
             }
             .font(.system(size: 13))
         }
-    }
-
-    private func workflowNames() -> [String] {
-        let roots = [
-            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".grok/workflows"),
-            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".grok/bundled/workflows")
-        ]
-        var names: [String] = []
-        for root in roots {
-            guard let urls = try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil) else {
-                continue
-            }
-            names.append(contentsOf: urls.map { $0.deletingPathExtension().lastPathComponent })
-        }
-        return names
     }
 
     private func sectionTitle(_ title: String) -> some View {

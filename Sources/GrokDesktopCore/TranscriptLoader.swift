@@ -34,17 +34,26 @@ public struct Transcript: Sendable {
     public var planEntries: [PlanEntry]
     public var planMarkdown: String
     public var hunks: [FileHunk]
+    public var itemDates: [String: Date]
+    public var todos: [AgentTodo]
+    public var tasks: [AgentTask]
 
     public init(
         items: [ConversationItem] = [],
         planEntries: [PlanEntry] = [],
         planMarkdown: String = "",
-        hunks: [FileHunk] = []
+        hunks: [FileHunk] = [],
+        itemDates: [String: Date] = [:],
+        todos: [AgentTodo] = [],
+        tasks: [AgentTask] = []
     ) {
         self.items = items
         self.planEntries = planEntries
         self.planMarkdown = planMarkdown
         self.hunks = hunks
+        self.itemDates = itemDates
+        self.todos = todos
+        self.tasks = tasks
     }
 }
 
@@ -53,6 +62,9 @@ public enum TranscriptLoader {
         let updates = sessionDirectory.appendingPathComponent("updates.jsonl")
         var items: [ConversationItem] = []
         var planEntries: [PlanEntry] = []
+        var itemDates: [String: Date] = [:]
+        var todos: [AgentTodo] = []
+        var tasks: [AgentTask] = []
         var assistantID: String?
         var thoughtID: String?
 
@@ -65,13 +77,16 @@ public enum TranscriptLoader {
                     continue
                 }
                 let params = payload["params"] as? [String: Any] ?? payload
-                let update = SessionUpdate.parse(params: params)
+                let update = SessionUpdate.parse(params: params, envelopeTimestamp: payload["timestamp"])
                 apply(
                     update: update,
                     items: &items,
                     planEntries: &planEntries,
                     assistantID: &assistantID,
-                    thoughtID: &thoughtID
+                    thoughtID: &thoughtID,
+                    itemDates: &itemDates,
+                    todos: &todos,
+                    tasks: &tasks
                 )
             }
         }
@@ -86,7 +101,10 @@ public enum TranscriptLoader {
             items: items,
             planEntries: planEntries,
             planMarkdown: planMarkdown,
-            hunks: loadHunks(sessionDirectory: sessionDirectory)
+            hunks: loadHunks(sessionDirectory: sessionDirectory),
+            itemDates: itemDates,
+            todos: todos,
+            tasks: tasks
         )
     }
 
@@ -118,14 +136,21 @@ public enum TranscriptLoader {
         items: inout [ConversationItem],
         planEntries: inout [PlanEntry],
         assistantID: inout String?,
-        thoughtID: inout String?
+        thoughtID: inout String?,
+        itemDates: inout [String: Date],
+        todos: inout [AgentTodo],
+        tasks: inout [AgentTask]
     ) {
+        let previous = Set(items.map(\.id))
         switch update.kind {
         case .userMessageChunk:
             assistantID = nil
             thoughtID = nil
             if let last = items.indices.last, case .user(let id, let text) = items[last] {
                 items[last] = .user(id: id, text: text + update.text)
+                if itemDates[id] == nil, let timestamp = update.timestamp {
+                    itemDates[id] = timestamp
+                }
             } else {
                 items.append(.user(id: UUID().uuidString, text: update.text))
             }
@@ -154,13 +179,21 @@ public enum TranscriptLoader {
                 ))
             }
             assistantID = nil
+            PromptTimestamp.applyTodos(from: update, into: &todos)
         case .plan:
             if !update.planEntries.isEmpty {
                 planEntries = update.planEntries
             }
+        case .taskBackgrounded, .taskCompleted:
+            PromptTimestamp.applyTask(from: update, into: &tasks)
         case .turnCompleted, .unknown:
             assistantID = nil
             thoughtID = nil
+        }
+        if let timestamp = update.timestamp {
+            for item in items where previous.contains(item.id) == false {
+                itemDates[item.id] = timestamp
+            }
         }
     }
 

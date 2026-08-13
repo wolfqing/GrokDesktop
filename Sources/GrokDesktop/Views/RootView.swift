@@ -59,6 +59,14 @@ struct RootView: View {
                 resumePicker
                     .zIndex(6)
             }
+            if model.showAddWorkflow {
+                addWorkflowSheet
+                    .zIndex(6)
+            }
+            if model.showAddMCP {
+                addMCPSheet
+                    .zIndex(6)
+            }
             if let toast = model.toast {
                 Text(toast)
                     .font(.system(size: 13, weight: .medium))
@@ -144,6 +152,81 @@ struct RootView: View {
             }
             .padding(18)
             .frame(width: 460)
+            .background(palette.elevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+    }
+
+    private var addWorkflowSheet: some View {
+        ZStack {
+            palette.overlay.ignoresSafeArea()
+                .onTapGesture { model.showAddWorkflow = false }
+            VStack(alignment: .leading, spacing: 12) {
+                Text(model.copy.t("New workflow", "新建工作流"))
+                    .font(.system(size: 16, weight: .semibold))
+                TextField("review-changes", text: $model.newWorkflowName)
+                    .textFieldStyle(.plain)
+                    .padding(10)
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.hairline))
+                TextField(model.copy.t("What it does", "做什么"), text: $model.newWorkflowDetail, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .lineLimit(2...4)
+                    .padding(10)
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.hairline))
+                Text(model.copy.t("Saves ~/.grok/workflows/<name>.rhai and runs /workflow <name>.", "保存到 ~/.grok/workflows/<name>.rhai，并运行 /workflow <name>。"))
+                    .font(.system(size: 12))
+                    .foregroundStyle(palette.secondary)
+                HStack {
+                    Spacer()
+                    Button(model.copy.create) { model.createOfficialWorkflow() }
+                        .buttonStyle(GrokPrimaryButtonStyle())
+                        .disabled(model.newWorkflowName.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+            .padding(20)
+            .frame(width: 460)
+            .background(palette.elevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+    }
+
+    private var addMCPSheet: some View {
+        ZStack {
+            palette.overlay.ignoresSafeArea()
+                .onTapGesture { model.showAddMCP = false }
+            VStack(alignment: .leading, spacing: 12) {
+                Text(model.copy.t("Add MCP server", "添加 MCP"))
+                    .font(.system(size: 16, weight: .semibold))
+                TextField("brave-search", text: $model.mcpName)
+                    .textFieldStyle(.plain)
+                    .padding(10)
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.hairline))
+                Picker(model.copy.t("Transport", "传输"), selection: $model.mcpTransport) {
+                    Text("stdio").tag("stdio")
+                    Text("http").tag("http")
+                    Text("sse").tag("sse")
+                }
+                .pickerStyle(.segmented)
+                TextField(
+                    model.mcpTransport == "stdio" ? "npx" : "https://mcp.example.com/mcp",
+                    text: $model.mcpCommand
+                )
+                .textFieldStyle(.plain)
+                .padding(10)
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.hairline))
+                if model.mcpTransport == "stdio" {
+                    TextField("-y @modelcontextprotocol/server-github", text: $model.mcpArgs)
+                        .textFieldStyle(.plain)
+                        .padding(10)
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.hairline))
+                }
+                HStack {
+                    Spacer()
+                    Button(model.copy.add) { model.addMCPServer() }
+                        .buttonStyle(GrokPrimaryButtonStyle())
+                        .disabled(model.mcpName.isEmpty || model.mcpCommand.isEmpty)
+                }
+            }
+            .padding(20)
+            .frame(width: 480)
             .background(palette.elevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
     }

@@ -225,7 +225,7 @@ struct SettingsView: View {
             }
             toggle(l10n.wrapCode, isOn: $model.wrapCodeLines)
             toggle(l10n.t("Compact conversation", "紧凑对话"), isOn: $model.compactChat)
-            toggle(l10n.t("Show timestamps", "显示时间戳"), isOn: $model.showTimestamps)
+            toggle(l10n.t("Show timestamps on replies", "回复也显示时间戳"), isOn: $model.showTimestamps)
             toggle(
                 l10n.t("Show thinking blocks", "显示思考块"),
                 isOn: Binding(
@@ -440,11 +440,14 @@ struct SettingsView: View {
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text(l10n.extraCredits).font(.system(size: 12)).foregroundStyle(palette.secondary)
-                    Text("US$0.00").font(.system(size: 24, weight: .semibold))
+                    Text(model.accountUsage.prepaidDisplay).font(.system(size: 24, weight: .semibold))
                     HStack {
                         Button(l10n.buyMore) { model.openAccountUsage() }
                             .buttonStyle(GrokSecondaryButtonStyle())
-                        Button(l10n.viewUsage) { model.settingsSection = .usage }
+                        Button(l10n.viewUsage) {
+                            model.settingsSection = .usage
+                            model.refreshAccountUsage()
+                        }
                             .buttonStyle(GrokSecondaryButtonStyle())
                     }
                 }
@@ -457,6 +460,7 @@ struct SettingsView: View {
                 .foregroundStyle(palette.secondary)
         }
         .padding(.top, 8)
+        .onAppear { model.refreshAccountUsage() }
     }
 
     private var usagePage: some View {
@@ -466,14 +470,18 @@ struct SettingsView: View {
                     .foregroundStyle(palette.secondary)
                 Text(model.account.email ?? l10n.notSignedIn)
                     .font(.system(size: 14, weight: .medium))
+                Spacer()
+                Button(l10n.refreshUsage) { model.refreshAccountUsage() }
+                    .buttonStyle(GrokSecondaryButtonStyle())
+                    .disabled(model.isRefreshingUsage)
             }
-            Text(l10n.weeklyPlanLimit).font(.system(size: 13)).foregroundStyle(palette.secondary)
+            Text(periodTitle).font(.system(size: 13)).foregroundStyle(palette.secondary)
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text("\(model.workspace.contextPercent)% \(l10n.used)")
+                    Text(usageHeadline)
                         .font(.system(size: 22, weight: .semibold))
                     Spacer()
-                    Text(l10n.t("This session context", "当前会话上下文"))
+                    Text(l10n.grokBuildUsage)
                         .font(.system(size: 12))
                         .foregroundStyle(palette.secondary)
                 }
@@ -481,24 +489,43 @@ struct SettingsView: View {
                     .overlay(alignment: .leading) {
                         Capsule()
                             .fill(Color.orange)
-                            .frame(width: max(8, 240 * CGFloat(min(model.workspace.contextPercent, 100)) / 100), height: 8)
+                            .frame(width: max(8, 240 * CGFloat(min(model.accountUsage.displayPercent, 100)) / 100), height: 8)
                     }
+                if let reset = resetLabel {
+                    Text("\(l10n.nextReset): \(reset)")
+                        .font(.system(size: 12))
+                        .foregroundStyle(palette.secondary)
+                }
+                if let error = model.accountUsage.error, !model.accountUsage.isLoaded {
+                    Text(error == "Not signed in" ? l10n.notSignedIn : l10n.usageUnavailable)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color.orange)
+                }
             }
             .padding(16)
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(palette.hairline))
 
-            HStack(spacing: 10) {
-                Button(l10n.openGrokUsage) { model.openAccountUsage() }
-                    .buttonStyle(GrokPrimaryButtonStyle())
-                Button(l10n.openAPIUsage) { model.openAPIUsage() }
-                    .buttonStyle(GrokSecondaryButtonStyle())
+            if !model.accountUsage.products.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(model.accountUsage.products) { product in
+                        HStack {
+                            Text(product.name)
+                            Spacer()
+                            Text(product.percent.map { "\($0)% \(l10n.used)" } ?? "—")
+                                .foregroundStyle(palette.secondary)
+                        }
+                        .font(.system(size: 13))
+                    }
+                }
+                .padding(16)
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(palette.hairline))
             }
 
             Text(l10n.extraCredits)
             HStack {
                 VStack(alignment: .leading) {
-                    Text(model.account.plan.wordmark).font(.system(size: 18, weight: .semibold))
-                    Text(model.account.email ?? l10n.notSignedIn)
+                    Text(model.accountUsage.prepaidDisplay).font(.system(size: 18, weight: .semibold))
+                    Text(model.account.plan.wordmark)
                         .foregroundStyle(palette.secondary)
                 }
                 Spacer()
@@ -507,8 +534,50 @@ struct SettingsView: View {
             }
             .padding(16)
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(palette.hairline))
+
+            if model.accountUsage.hasPayAsYouGo {
+                HStack {
+                    Text(l10n.t("Pay as you go", "按量付费"))
+                    Spacer()
+                    Text(String(format: "US$%.2f / US$%.2f", model.accountUsage.onDemandUsed, model.accountUsage.onDemandCap))
+                        .foregroundStyle(palette.secondary)
+                }
+                .font(.system(size: 13))
+                .padding(16)
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(palette.hairline))
+            }
+
+            HStack(spacing: 10) {
+                Button(l10n.openGrokUsage) { model.openAccountUsage() }
+                    .buttonStyle(GrokSecondaryButtonStyle())
+                Button(l10n.openAPIUsage) { model.openAPIUsage() }
+                    .buttonStyle(GrokSecondaryButtonStyle())
+            }
         }
         .padding(.top, 8)
+        .onAppear { model.refreshAccountUsage() }
+    }
+
+    private var periodTitle: String {
+        switch model.accountUsage.periodKind {
+        case .monthly: return l10n.monthlyPlanLimit
+        case .weekly, .unknown: return l10n.weeklyPlanLimit
+        }
+    }
+
+    private var usageHeadline: String {
+        if model.accountUsage.isLoaded || model.accountUsage.fetchedAt != nil {
+            return "\(model.accountUsage.displayPercent)% \(l10n.used)"
+        }
+        if model.isRefreshingUsage {
+            return l10n.t("Loading…", "正在同步…")
+        }
+        return "— \(l10n.used)"
+    }
+
+    private var resetLabel: String? {
+        guard let date = model.accountUsage.periodEnd else { return nil }
+        return date.formatted(date: .abbreviated, time: .shortened)
     }
 
     private var dataPage: some View {
@@ -560,18 +629,59 @@ struct SettingsView: View {
 
     private var extensionsPage: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(l10n.t("MCP, skills, plugins and hooks live in ~/.grok.", "MCP、skills、plugins、hooks 都在 ~/.grok。"))
+            HStack {
+                Text("MCP")
+                    .font(.system(size: 15, weight: .semibold))
+                Spacer()
+                Button(l10n.t("Add MCP", "添加 MCP")) { model.showAddMCP = true }
+                    .buttonStyle(GrokPrimaryButtonStyle())
+            }
+            Text(l10n.t("Adds and removes servers with `grok mcp`, writing ~/.grok/config.toml.", "通过 `grok mcp` 增删，写入 ~/.grok/config.toml。"))
+                .font(.system(size: 12))
                 .foregroundStyle(palette.secondary)
-            labeledList(l10n.t("MCP", "MCP"), model.extensions.mcp.isEmpty ? [l10n.noConnectors] : model.extensions.mcp)
+            if model.mcpServers.isEmpty {
+                Text(l10n.noConnectors)
+                    .font(.system(size: 13))
+                    .foregroundStyle(palette.secondary)
+            } else {
+                ForEach(model.mcpServers) { server in
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(server.name).font(.system(size: 14, weight: .medium))
+                            Text(server.detail)
+                                .font(.system(size: 11))
+                                .foregroundStyle(palette.secondary)
+                                .lineLimit(2)
+                        }
+                        Spacer()
+                        Toggle("", isOn: Binding(
+                            get: { server.enabled },
+                            set: { _ in model.toggleMCPServer(server) }
+                        ))
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        Button(role: .destructive) {
+                            model.removeMCPServer(server)
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.vertical, 6)
+                }
+            }
             labeledList("Skills", model.skills.prefix(8).map(\.title))
             labeledList("Plugins", model.extensions.plugins.isEmpty ? [l10n.t("None installed", "未安装")] : model.extensions.plugins)
             labeledList("Hooks", model.extensions.hooks.isEmpty ? [l10n.t("None", "无")] : model.extensions.hooks)
             Button(l10n.t("Open config.toml", "打开 config.toml")) {
                 model.configStore.openInEditor()
             }
-            .buttonStyle(GrokPrimaryButtonStyle())
+            .buttonStyle(GrokSecondaryButtonStyle())
         }
         .padding(.top, 8)
+        .onAppear {
+            model.mcpServers = model.mcpCatalog.load(locator: model.locator, cwd: model.client.workingDirectory)
+        }
     }
 
     private func labeledList(_ title: String, _ rows: [String]) -> some View {

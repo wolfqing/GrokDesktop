@@ -131,9 +131,15 @@ struct ChatView: View {
                 Text(model.client.modelTier.menuTitle)
                     .font(.system(size: 11))
                     .foregroundStyle(palette.secondary)
-                Text("\(model.workspace.contextPercent)%")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(palette.secondary)
+                Button {
+                    model.openUsage()
+                } label: {
+                    Text(model.accountUsage.isLoaded ? "\(model.accountUsage.displayPercent)%" : "\(model.workspace.contextPercent)%")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(palette.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("/usage")
             }
             Spacer()
             Button {
@@ -186,10 +192,10 @@ struct ChatView: View {
     }
 
     @ViewBuilder
-    private func timestamp(_ id: String) -> some View {
-        if model.showTimestamps, let date = model.client.itemDates[id] {
-            Text(date, style: .time)
-                .font(.system(size: 11))
+    private func timestamp(_ id: String, always: Bool = false) -> some View {
+        if always || model.showTimestamps, let date = model.client.itemDates[id] {
+            Text(PromptTimestamp.format(date))
+                .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(palette.secondary)
         }
     }
@@ -201,7 +207,7 @@ struct ChatView: View {
             HStack {
                 Spacer(minLength: 80)
                 VStack(alignment: .trailing, spacing: 4) {
-                    timestamp(id)
+                    timestamp(id, always: true)
                     Text(text)
                         .font(.system(size: model.compactChat ? 14 : 16))
                         .padding(.horizontal, 16)

@@ -36,7 +36,7 @@ struct L10n {
     var newChat: String { t("New Chat", "新对话") }
     var imagine: String { t("Imagine", "Imagine") }
     var liveAgents: String { t("Live agents", "进行中") }
-    var automations: String { t("Automations", "自动化") }
+    var automations: String { t("Workflows", "工作流") }
     var skillsAndConnectors: String { t("Skills and Connectors", "技能与连接器") }
     var projects: String { t("Projects", "项目") }
     var history: String { t("History", "历史") }
@@ -141,11 +141,29 @@ struct L10n {
     var artifacts: String { t("Artifacts", "产物") }
     var files: String { t("Files", "文件") }
     var backgroundTasks: String { t("Background tasks", "后台任务") }
+    var tasks: String { t("Tasks", "任务") }
+    var noTasks: String { t("No tasks yet.", "还没有任务。") }
     var inspector: String { t("Inspector", "右边栏") }
     var weeklyPlanLimit: String { t("Weekly limit", "每周额度") }
-    var openGrokUsage: String { t("Open grok.com usage", "打开 grok.com 用量") }
+    var monthlyPlanLimit: String { t("Monthly limit", "每月额度") }
+    var openGrokUsage: String { t("Manage on grok.com", "在 grok.com 管理") }
     var openAPIUsage: String { t("Open API console usage", "打开 API 控制台用量") }
     var usageForAccount: String { t("Usage for", "当前账号") }
+    var sendNow: String { t("Send now", "立即发送") }
+    var editPrompt: String { t("Edit", "编辑") }
+    var cancelPrompt: String { t("Cancel", "取消") }
+    var busySendTitle: String { t("Agent is still working", "任务还在进行") }
+    var busySendDetail: String {
+        t(
+            "Send now cancels the current turn and runs this next. Edit keeps the text. Cancel drops it.",
+            "立即发送会取消当前回合并马上发这条。编辑回到输入框。取消则丢弃。"
+        )
+    }
+    var nextReset: String { t("Next reset", "下次重置") }
+    var refreshUsage: String { t("Refresh", "刷新") }
+    var usageUnavailable: String { t("Couldn't load account usage", "无法同步账号用量") }
+    var sessionContext: String { t("This session context", "当前会话上下文") }
+    var grokBuildUsage: String { t("Grok Build usage", "Grok Build 用量") }
 
     func planTitle(_ plan: SubscriptionPlan) -> String {
         plan.wordmark

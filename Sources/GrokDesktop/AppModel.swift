@@ -98,6 +98,19 @@ final class AppModel: ObservableObject {
     @Published var sidebarNotice: String?
     @Published var needsFolderPick = false
     @Published var personas: [String] = []
+    @Published var officialWorkflows: [WorkflowRecord] = []
+    @Published var mcpServers: [MCPServerRecord] = []
+    @Published var showAddWorkflow = false
+    @Published var showAddMCP = false
+    @Published var newWorkflowName = ""
+    @Published var newWorkflowDetail = ""
+    @Published var mcpName = ""
+    @Published var mcpTransport = "stdio"
+    @Published var mcpCommand = ""
+    @Published var mcpArgs = ""
+    @Published var accountUsage = AccountUsage()
+    @Published var isRefreshingUsage = false
+    @Published var pendingBusySend: String?
 
     @AppStorage("appearancePreference") var appearanceRaw = AppearancePreference.system.rawValue
     @AppStorage("languagePreference") var languageRaw = AppLanguage.system.rawValue
@@ -146,6 +159,8 @@ final class AppModel: ObservableObject {
     let automationStore = AutomationStore()
     let projectStore = ProjectStore()
     let skillCatalog = SkillCatalog()
+    let workflowCatalog = WorkflowCatalog()
+    let mcpCatalog = MCPCatalog()
 
     init(
         locator: GrokBinaryLocator = GrokBinaryLocator(),
@@ -158,6 +173,7 @@ final class AppModel: ObservableObject {
         refreshAll()
         firstRunReason = bootstrapReason()
         refreshWorkspace()
+        refreshAccountUsage()
     }
 
     var liveSessions: [SessionRecord] {
@@ -194,6 +210,8 @@ final class AppModel: ObservableObject {
         showThinkingBlocks = grokConfig.showThinking
         extensions = ExtensionInventory.load(mcpNames: grokConfig.mcpNames)
         personas = Self.loadPersonas()
+        officialWorkflows = workflowCatalog.load(cwd: client.workingDirectory)
+        mcpServers = mcpCatalog.load(locator: locator, cwd: client.workingDirectory)
     }
 
     private func restoreWorkingDirectory() {
@@ -502,6 +520,60 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func beginBusySend(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        pendingBusySend = trimmed
+        draft = ""
+        showAttachMenu = false
+        showPalette = false
+    }
+
+    func confirmBusySendNow() {
+        guard let text = pendingBusySend else { return }
+        pendingBusySend = nil
+        destination = .chat
+        Task {
+            do {
+                try await client.sendNow(text: text)
+                if !isPrivateChat {
+                    refreshSessions()
+                }
+                refreshWorkspace()
+            } catch {
+                present(error)
+            }
+        }
+    }
+
+    func confirmBusyEdit() {
+        if let text = pendingBusySend {
+            draft = text
+        }
+        pendingBusySend = nil
+    }
+
+    func confirmBusyCancel() {
+        pendingBusySend = nil
+    }
+
+    func refreshAccountUsage() {
+        guard !isRefreshingUsage else { return }
+        isRefreshingUsage = true
+        Task {
+            let result = await AccountUsageService.load()
+            accountUsage = result.usage
+            if let profile = result.profile {
+                if account.email == nil { account.email = profile.email }
+                if account.name == nil { account.name = profile.name }
+                if account.userID == nil { account.userID = profile.userID }
+                if account.teamID == nil { account.teamID = profile.teamID }
+                if account.plan == .grok { account.plan = profile.plan }
+            }
+            isRefreshingUsage = false
+        }
+    }
+
     func runSkill(_ skill: SkillRecord) {
         destination = .chat
         draft = "/\(skill.slug) "
@@ -519,6 +591,80 @@ final class AppModel: ObservableObject {
         destination = .chat
         draft = record.prompt
         sendDraft()
+    }
+
+    func runWorkflow(_ record: WorkflowRecord) {
+        destination = .chat
+        draft = "/workflow \(record.name)"
+        sendDraft()
+    }
+
+    func createOfficialWorkflow() {
+        do {
+            let record = try workflowCatalog.create(
+                name: newWorkflowName,
+                detail: newWorkflowDetail,
+                scope: "user",
+                cwd: client.workingDirectory
+            )
+            officialWorkflows = workflowCatalog.load(cwd: client.workingDirectory)
+            showAddWorkflow = false
+            newWorkflowName = ""
+            newWorkflowDetail = ""
+            flash(copy.t("Saved \(record.name).rhai", "已保存 \(record.name).rhai"))
+            runWorkflow(record)
+        } catch {
+            flash(error.localizedDescription)
+        }
+    }
+
+    func deleteWorkflow(_ record: WorkflowRecord) {
+        do {
+            try workflowCatalog.delete(record)
+            officialWorkflows = workflowCatalog.load(cwd: client.workingDirectory)
+        } catch {
+            flash(error.localizedDescription)
+        }
+    }
+
+    func addMCPServer() {
+        let args = mcpArgs.split(whereSeparator: \.isWhitespace).map(String.init)
+        do {
+            try mcpCatalog.add(
+                name: mcpName,
+                transport: mcpTransport,
+                commandOrURL: mcpCommand,
+                args: args,
+                locator: locator
+            )
+            mcpServers = mcpCatalog.load(locator: locator, cwd: client.workingDirectory)
+            grokConfig = configStore.load()
+            showAddMCP = false
+            mcpName = ""
+            mcpCommand = ""
+            mcpArgs = ""
+            flash(copy.t("Added MCP server", "已添加 MCP"))
+        } catch {
+            flash(error.localizedDescription)
+        }
+    }
+
+    func removeMCPServer(_ record: MCPServerRecord) {
+        do {
+            try mcpCatalog.remove(name: record.name, locator: locator)
+            mcpServers = mcpCatalog.load(locator: locator, cwd: client.workingDirectory)
+        } catch {
+            flash(error.localizedDescription)
+        }
+    }
+
+    func toggleMCPServer(_ record: MCPServerRecord) {
+        do {
+            try mcpCatalog.setEnabled(record.name, enabled: !record.enabled, locator: locator)
+            mcpServers = mcpCatalog.load(locator: locator, cwd: client.workingDirectory)
+        } catch {
+            flash(error.localizedDescription)
+        }
     }
 
     func createAutomation() {
@@ -605,8 +751,12 @@ final class AppModel: ObservableObject {
                 destination = .chat
                 sendDraft()
             }
-        case "/usage":
-            openUsage()
+        case "/usage", "/cost":
+            if rest == "manage" {
+                openAccountUsage()
+            } else {
+                openUsage()
+            }
         case "/quit", "/exit":
             NSApp.terminate(nil)
         default:
@@ -635,6 +785,8 @@ final class AppModel: ObservableObject {
                     NSWorkspace.shared.open(url)
                 }
                 firstRunReason = client.authPresence.isReady ? nil : .unsigned
+                account = AccountProfile.load()
+                refreshAccountUsage()
             } catch {
                 fallbackLogin()
             }
@@ -650,6 +802,7 @@ final class AppModel: ObservableObject {
                 account = AccountProfile.load()
                 loginCode = ""
                 firstRunReason = bootstrapReason()
+                refreshAccountUsage()
             } catch {
                 fallbackLogin()
             }
@@ -665,6 +818,7 @@ final class AppModel: ObservableObject {
         process.waitUntilExit()
         client.refreshAuth()
         account = AccountProfile()
+        accountUsage = AccountUsage()
         firstRunReason = bootstrapReason()
     }
 
@@ -694,6 +848,7 @@ final class AppModel: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
             self.client.refreshAuth()
             self.account = AccountProfile.load()
+            self.refreshAccountUsage()
             if self.client.authPresence.isReady {
                 self.firstRunReason = nil
             }
@@ -703,12 +858,11 @@ final class AppModel: ObservableObject {
     func openUsage() {
         settingsSection = .usage
         showSettings = true
-        openAccountUsage()
+        refreshAccountUsage()
     }
 
     func openAccountUsage() {
-        // grok.com settings Usage for SuperGrok / grok.com accounts
-        if let url = URL(string: "https://grok.com/") {
+        if let url = URL(string: "https://grok.com/?_s=usage") {
             NSWorkspace.shared.open(url)
         }
     }

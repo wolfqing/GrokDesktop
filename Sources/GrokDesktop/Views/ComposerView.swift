@@ -11,6 +11,9 @@ struct ComposerView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if let pending = model.pendingBusySend {
+                BusySendBar(text: pending)
+            }
             ZStack(alignment: .topLeading) {
                 VStack(alignment: .leading, spacing: 10) {
                     TextField(l10n.askAnything, text: $model.draft, axis: .vertical)
@@ -18,8 +21,13 @@ struct ComposerView: View {
                         .font(.system(size: 16))
                         .lineLimit(1...8)
                         .onSubmit {
-                            if model.requireCmdEnter || NSEvent.modifierFlags.contains(.shift) {
+                            let modifiers = NSEvent.modifierFlags
+                            if model.requireCmdEnter && !modifiers.contains(.command) && !modifiers.contains(.control) {
                                 model.draft += "\n"
+                            } else if modifiers.contains(.shift) {
+                                model.draft += "\n"
+                            } else if model.client.isTurnRunning && canSend && (modifiers.contains(.command) || modifiers.contains(.control)) {
+                                submit(forceNow: true)
                             } else {
                                 submit()
                             }
@@ -76,7 +84,7 @@ struct ComposerView: View {
                         }
                         .menuStyle(.borderlessButton)
 
-                        Button(action: submit) {
+                        Button(action: { submit() }) {
                             Image(systemName: sendSymbol)
                                 .font(.system(size: 12, weight: .bold))
                                 .foregroundStyle(canSend || model.client.isTurnRunning ? palette.sendGlyph : palette.secondary)
@@ -136,17 +144,26 @@ struct ComposerView: View {
     }
 
     private var usageChip: some View {
-        HStack(spacing: 5) {
-            Circle()
-                .trim(from: 0, to: CGFloat(min(max(model.workspace.contextPercent, 1), 100)) / 100)
-                .stroke(Color.orange, lineWidth: 2)
-                .rotationEffect(.degrees(-90))
-                .frame(width: 12, height: 12)
-            Text("\(model.workspace.contextPercent)%")
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
-                .foregroundStyle(palette.secondary)
+        Button {
+            model.openUsage()
+        } label: {
+            HStack(spacing: 5) {
+                Circle()
+                    .trim(from: 0, to: CGFloat(min(max(usagePercent, 1), 100)) / 100)
+                    .stroke(Color.orange, lineWidth: 2)
+                    .rotationEffect(.degrees(-90))
+                    .frame(width: 12, height: 12)
+                Text(model.accountUsage.isLoaded ? "\(usagePercent)%" : "—")
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundStyle(palette.secondary)
+            }
         }
-        .help("/context")
+        .buttonStyle(.plain)
+        .help("/usage")
+    }
+
+    private var usagePercent: Int {
+        model.accountUsage.displayPercent
     }
 
     private func chip(_ title: String) -> some View {
@@ -197,7 +214,8 @@ struct ComposerView: View {
     }
 
     private var sendSymbol: String {
-        if model.client.isTurnRunning { return "stop.fill" }
+        if model.pendingBusySend != nil { return "arrow.up" }
+        if model.client.isTurnRunning && !canSend { return "stop.fill" }
         return "arrow.up"
     }
 
@@ -205,10 +223,25 @@ struct ComposerView: View {
         !model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    private func submit() {
+    private func submit(forceNow: Bool = false) {
         model.showAttachMenu = false
+        let text = model.draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if model.pendingBusySend != nil, text.isEmpty {
+            model.confirmBusySendNow()
+            return
+        }
         if model.client.isTurnRunning {
-            model.client.cancelTurn()
+            if text.isEmpty {
+                model.client.cancelTurn()
+                return
+            }
+            if forceNow {
+                model.pendingBusySend = text
+                model.draft = ""
+                model.confirmBusySendNow()
+                return
+            }
+            model.beginBusySend(text)
             return
         }
         if model.draft.hasPrefix("/") && !model.draft.contains(" ") && model.draft.count > 1 {
@@ -270,5 +303,58 @@ struct ComposerView: View {
         } else {
             model.draft += " " + refs
         }
+    }
+}
+
+struct BusySendBar: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.palette) private var palette
+    @Environment(\.l10n) private var l10n
+    let text: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(l10n.busySendTitle)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(palette.secondary)
+            Text(text)
+                .font(.system(size: 14))
+                .lineLimit(3)
+            Text(l10n.busySendDetail)
+                .font(.system(size: 11))
+                .foregroundStyle(palette.secondary)
+            HStack(spacing: 8) {
+                Button(l10n.sendNow) { model.confirmBusySendNow() }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 13, weight: .medium))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(palette.send, in: Capsule())
+                    .foregroundStyle(palette.sendGlyph)
+                    .keyboardShortcut(.return, modifiers: [])
+
+                Button(l10n.editPrompt) { model.confirmBusyEdit() }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 13, weight: .medium))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(palette.chip, in: Capsule())
+                    .keyboardShortcut(.escape, modifiers: [])
+
+                Button(l10n.cancelPrompt) { model.confirmBusyCancel() }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 13, weight: .medium))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(palette.chip, in: Capsule())
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(palette.elevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(palette.hairline, lineWidth: 1)
+        )
     }
 }

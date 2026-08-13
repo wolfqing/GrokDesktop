@@ -35,6 +35,8 @@ public final class ACPClient: ObservableObject {
     @Published public private(set) var authPresence: AuthPresence = .signedOut
     @Published public private(set) var authChallenge: AuthChallenge?
     @Published public private(set) var itemDates: [String: Date] = [:]
+    @Published public private(set) var todos: [AgentTodo] = []
+    @Published public private(set) var tasks: [AgentTask] = []
     @Published public var allowEditsThisSession = false
     @Published public private(set) var capabilities = AgentCapabilities()
     @Published public var gitStatusText = ""
@@ -220,6 +222,9 @@ public final class ACPClient: ObservableObject {
         workspace.lastError = nil
         workspace.mode = mode
         workspace.loadedOnAgent = true
+        workspace.itemDates = [:]
+        workspace.todos = []
+        workspace.tasks = []
         lastError = nil
         state = .ready
         syncFromCurrent()
@@ -254,6 +259,9 @@ public final class ACPClient: ObservableObject {
             workspace.planEntries = transcript.planEntries
             workspace.planMarkdown = transcript.planMarkdown
             workspace.hunks = transcript.hunks
+            workspace.itemDates = transcript.itemDates
+            workspace.todos = transcript.todos
+            workspace.tasks = transcript.tasks
         }
         workspace.assistantBufferID = nil
         workspace.thoughtBufferID = nil
@@ -312,7 +320,9 @@ public final class ACPClient: ObservableObject {
             if case .user(_, let existing) = item { return existing }
             return nil
         }) != trimmed {
-            workspace.items.append(.user(id: UUID().uuidString, text: trimmed))
+            let userID = UUID().uuidString
+            workspace.items.append(.user(id: userID, text: trimmed))
+            workspace.itemDates[userID] = Date()
         }
         workspace.isTurnRunning = true
         workspace.assistantBufferID = nil
@@ -350,6 +360,27 @@ public final class ACPClient: ObservableObject {
             workspace.promptQueue.removeFirst()
             try await send(text: next, sessionID: id)
         }
+    }
+
+    public func sendNow(text: String, sessionID target: String? = nil) async throws {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        try await connectIfNeeded()
+        if sessionID == nil, target == nil {
+            try await newSession()
+        }
+        let id = target ?? sessionID
+        guard let id, let workspace = workspaceByID[id] ?? currentWorkspace else {
+            throw ACPError.rpc("No session")
+        }
+        if workspace.isTurnRunning {
+            workspace.promptQueue.removeAll { $0 == trimmed }
+            workspace.promptQueue.insert(trimmed, at: 0)
+            fire(method: "session/cancel", params: ["sessionId": id])
+            syncFromCurrent()
+            return
+        }
+        try await send(text: trimmed, sessionID: id)
     }
 
     public func cancelTurn(sessionID target: String? = nil) {
@@ -455,6 +486,9 @@ public final class ACPClient: ObservableObject {
         promptQueue = []
         sessionAllowTitles = []
         sessionDirectory = nil
+        itemDates = [:]
+        todos = []
+        tasks = []
         if process?.isRunning == true {
             state = .initialized
         }
@@ -670,7 +704,7 @@ public final class ACPClient: ObservableObject {
         }
 
         if envelope.method == "session/update" {
-            apply(update: SessionUpdate.parse(params: envelope.params))
+            apply(update: SessionUpdate.parse(params: envelope.params, envelopeTimestamp: envelope.timestamp))
             return
         }
 
@@ -699,10 +733,16 @@ public final class ACPClient: ObservableObject {
             items: &workspace.items,
             planEntries: &workspace.planEntries,
             assistantID: &workspace.assistantBufferID,
-            thoughtID: &workspace.thoughtBufferID
+            thoughtID: &workspace.thoughtBufferID,
+            itemDates: &workspace.itemDates,
+            todos: &workspace.todos,
+            tasks: &workspace.tasks
         )
+        let stamp = update.timestamp ?? Date()
         for item in workspace.items where previousIDs.contains(item.id) == false {
-            workspace.itemDates[item.id] = Date()
+            if workspace.itemDates[item.id] == nil {
+                workspace.itemDates[item.id] = stamp
+            }
         }
         if update.kind == .plan {
             workspace.refreshArtifacts()
@@ -738,6 +778,8 @@ public final class ACPClient: ObservableObject {
             mode = workspace.mode
             allowEditsThisSession = workspace.allowEditsThisSession
             itemDates = workspace.itemDates
+            todos = workspace.todos
+            tasks = workspace.tasks
         }
         refreshLive()
     }
