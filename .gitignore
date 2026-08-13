@@ -8,3 +8,9 @@ xcuserdata/
 *.app
 .idea/
 .vscode/
+
+# Internal planning stays in the private insight repo — never publish
+docs/superpowers/
+**/superpowers/specs/
+*调研*.md
+*立项*.md
