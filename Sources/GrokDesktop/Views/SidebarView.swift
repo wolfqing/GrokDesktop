@@ -4,6 +4,7 @@ import SwiftUI
 struct SidebarView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.palette) private var palette
+    @Environment(\.l10n) private var l10n
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -41,7 +42,7 @@ struct SidebarView: View {
                         .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.plain)
-                .help("收起侧栏")
+                .help(l10n.collapseSidebar)
             }
         }
     }
@@ -49,15 +50,10 @@ struct SidebarView: View {
     private var collapsedRail: some View {
         VStack(spacing: 8) {
             iconButton("magnifyingglass") { model.sidebarCollapsed = false; model.showSearchField = true }
-            iconButton("square.and.pencil") { model.startNewSession() }
-            iconButton("photo") { model.draft = "/imagine " }
-            iconButton("bolt") {
-                model.showInspector = true
-            }
-            iconButton("square.grid.2x2") {
-                model.settingsSection = .extensions
-                model.showSettings = true
-            }
+            iconButton("square.and.pencil") { model.openChat() }
+            iconButton("photo") { model.destination = .chat; model.draft = "/imagine " }
+            iconButton("bolt") { model.destination = .automations }
+            iconButton("square.grid.2x2") { model.destination = .skills }
             Spacer()
             iconButton("gearshape") { model.showSettings = true }
         }
@@ -68,21 +64,21 @@ struct SidebarView: View {
 
     private var expandedContent: some View {
         VStack(alignment: .leading, spacing: 2) {
-            navRow("Search", systemImage: "magnifyingglass", selected: model.showSearchField) {
+            navRow(l10n.search, systemImage: "magnifyingglass", selected: model.showSearchField) {
                 model.showSearchField.toggle()
             }
-            navRow("New Chat", systemImage: "square.and.pencil", selected: model.isEmptyChat) {
-                model.startNewSession()
+            navRow(l10n.newChat, systemImage: "square.and.pencil", selected: model.destination == .chat) {
+                model.openChat()
             }
-            navRow("Imagine", systemImage: "photo") {
+            navRow(l10n.imagine, systemImage: "photo") {
+                model.destination = .chat
                 model.draft = "/imagine "
             }
-            navRow("Automations", systemImage: "bolt") {
-                model.showInspector = true
+            navRow(l10n.automations, systemImage: "bolt", selected: model.destination == .automations) {
+                model.destination = .automations
             }
-            navRow("Skills and Connectors", systemImage: "square.grid.2x2") {
-                model.settingsSection = .extensions
-                model.showSettings = true
+            navRow(l10n.skillsAndConnectors, systemImage: "square.grid.2x2", selected: model.destination == .skills) {
+                model.destination = .skills
             }
 
             if model.showSearchField {
@@ -93,21 +89,20 @@ struct SidebarView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    disclosure(title: "Projects", expanded: $model.projectsExpanded) {
-                        if model.projectPaths.isEmpty {
-                            Text("No projects yet")
+                    disclosure(title: l10n.projects, expanded: $model.projectsExpanded) {
+                        if model.visibleProjects.isEmpty {
+                            Text(l10n.noProjects)
                                 .font(.system(size: 13))
                                 .foregroundStyle(palette.secondary)
                                 .padding(.horizontal, 16)
                                 .padding(.vertical, 4)
                         } else {
-                            ForEach(model.projectPaths, id: \.path) { project in
+                            ForEach(model.visibleProjects) { project in
                                 Button {
                                     model.client.workingDirectory = URL(fileURLWithPath: project.path)
                                     model.startNewSession()
                                 } label: {
-                                    Label(project.name, systemImage: "folder")
-                                        .labelStyle(.titleAndIcon)
+                                    Text(project.name)
                                         .font(.system(size: 13.5))
                                         .foregroundStyle(palette.text)
                                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -118,9 +113,9 @@ struct SidebarView: View {
                             }
                         }
                         Button {
-                            model.chooseWorkingDirectory()
+                            model.showCreateProject = true
                         } label: {
-                            Label("Add project", systemImage: "plus")
+                            Text(l10n.addProject)
                                 .font(.system(size: 13.5))
                                 .foregroundStyle(palette.secondary)
                                 .padding(.horizontal, 16)
@@ -129,16 +124,9 @@ struct SidebarView: View {
                         .buttonStyle(.plain)
                     }
 
-                    disclosure(title: "History", expanded: $model.historyExpanded) {
-                        if model.client.isTurnRunning {
-                            historyRow(title: model.client.workingDirectory.lastPathComponent, subtitle: "Running", selected: true) {}
-                        }
+                    disclosure(title: l10n.history, expanded: $model.historyExpanded) {
                         ForEach(model.filteredSessions) { session in
-                            historyRow(
-                                title: session.title,
-                                subtitle: nil,
-                                selected: model.client.sessionID == session.id
-                            ) {
+                            historyRow(title: session.title, selected: model.client.sessionID == session.id) {
                                 model.open(session)
                             }
                         }
@@ -154,7 +142,7 @@ struct SidebarView: View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(palette.secondary)
-            TextField("Search", text: $model.search)
+            TextField(l10n.search, text: $model.search)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
         }
@@ -207,21 +195,16 @@ struct SidebarView: View {
         }
     }
 
-    private func historyRow(title: String, subtitle: String?, selected: Bool, action: @escaping () -> Void) -> some View {
+    private func historyRow(title: String, selected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: 8) {
-                if subtitle == "Running" {
-                    Circle().fill(Color.green).frame(width: 6, height: 6)
-                }
-                Text(title)
-                    .font(.system(size: 13.5))
-                    .lineLimit(1)
-                    .foregroundStyle(palette.text)
-                Spacer()
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 6)
-            .background(selected ? palette.selected : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            Text(title)
+                .font(.system(size: 13.5))
+                .lineLimit(1)
+                .foregroundStyle(palette.text)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 6)
+                .background(selected ? palette.selected : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .buttonStyle(.plain)
     }

@@ -14,8 +14,17 @@ struct RootView: View {
             HStack(spacing: 0) {
                 SidebarView()
                     .frame(width: model.sidebarCollapsed ? GrokTheme.collapsedSidebarWidth : GrokTheme.sidebarWidth)
-                ChatView()
-                    .frame(maxWidth: .infinity)
+                Group {
+                    switch model.destination {
+                    case .chat:
+                        ChatView()
+                    case .automations:
+                        AutomationsView()
+                    case .skills:
+                        SkillsView()
+                    }
+                }
+                .frame(maxWidth: .infinity)
                 if model.showInspector {
                     Rectangle()
                         .fill(palette.hairline)
@@ -30,18 +39,23 @@ struct RootView: View {
                     .transition(.opacity)
                     .zIndex(2)
             }
-
+            if model.showCreateProject {
+                CreateProjectSheet()
+                    .zIndex(3)
+            }
             if model.showPalette {
                 CommandPalette()
-                    .zIndex(3)
+                    .zIndex(4)
             }
         }
         .environment(\.palette, palette)
+        .environment(\.l10n, model.copy)
         .foregroundStyle(palette.text)
         .background(palette.canvas)
         .animation(.easeInOut(duration: 0.18), value: model.showSettings)
-        .animation(.easeInOut(duration: 0.18), value: model.showInspector)
+        .animation(.easeInOut(duration: 0.18), value: model.destination)
         .animation(.easeInOut(duration: 0.18), value: model.sidebarCollapsed)
         .animation(.easeInOut(duration: 0.18), value: model.appearanceRaw)
+        .animation(.easeInOut(duration: 0.18), value: model.languageRaw)
     }
 }

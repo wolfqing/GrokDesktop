@@ -5,6 +5,7 @@ import SwiftUI
 struct ComposerView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.palette) private var palette
+    @Environment(\.l10n) private var l10n
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -19,14 +20,14 @@ struct ComposerView: View {
                             .frame(width: 28, height: 28)
                     }
                     .buttonStyle(.plain)
-                    .help("附件")
+                    .help(l10n.uploadFile)
 
-                    TextField("What's on your mind?", text: $model.draft, axis: .vertical)
+                    TextField(l10n.whatsOnYourMind, text: $model.draft, axis: .vertical)
                         .textFieldStyle(.plain)
                         .font(.system(size: 16))
                         .lineLimit(1...6)
                         .onSubmit {
-                            if NSEvent.modifierFlags.contains(.shift) {
+                            if model.requireCmdEnter || NSEvent.modifierFlags.contains(.shift) {
                                 model.draft += "\n"
                             } else {
                                 submit()
@@ -93,18 +94,17 @@ struct ComposerView: View {
 
     private var attachMenu: some View {
         VStack(alignment: .leading, spacing: 0) {
-            attachItem("Upload a file", systemImage: "square.and.arrow.up") { attachFiles() }
-            attachItem("Recent", systemImage: "clock", trailing: true) { }
-            attachItem("Project", systemImage: "folder", trailing: true) { model.chooseWorkingDirectory() }
+            attachItem(l10n.uploadFile, systemImage: "square.and.arrow.up") { attachFiles() }
+            attachItem(l10n.recent, systemImage: "clock", trailing: true) { }
+            attachItem(l10n.project, systemImage: "folder", trailing: true) { model.chooseWorkingDirectory() }
             Divider().overlay(palette.hairline).padding(.vertical, 4)
-            attachItem("Skills", systemImage: "puzzlepiece.extension", trailing: true) {
-                model.settingsSection = .extensions
-                model.showSettings = true
+            attachItem(l10n.skills, systemImage: "puzzlepiece.extension", trailing: true) {
+                model.destination = .skills
                 model.showAttachMenu = false
             }
-            attachItem("Add connector", systemImage: "plus.square.on.square") {
-                model.settingsSection = .extensions
-                model.showSettings = true
+            attachItem(l10n.addConnector, systemImage: "plus.square.on.square") {
+                model.destination = .skills
+                model.skillsTab = 1
                 model.showAttachMenu = false
             }
         }

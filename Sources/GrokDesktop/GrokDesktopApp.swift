@@ -20,13 +20,13 @@ struct GrokDesktopApp: App {
         .defaultSize(width: 1280, height: 840)
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button("新会话") { model.startNewSession() }
+                Button(model.copy.newChat) { model.startNewSession() }
                     .keyboardShortcut("n", modifiers: .command)
             }
             CommandMenu("Grok") {
-                Button("设置…") { model.showSettings = true }
+                Button(model.copy.settings) { model.showSettings = true }
                     .keyboardShortcut(",", modifiers: .command)
-                Button("选择工作目录…") { model.chooseWorkingDirectory() }
+                Button(model.copy.chooseFolder) { model.chooseWorkingDirectory() }
                     .keyboardShortcut("o", modifiers: [.command, .shift])
                 Button("命令面板") {
                     model.draft = "/"

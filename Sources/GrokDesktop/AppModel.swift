@@ -3,6 +3,50 @@ import Foundation
 import GrokDesktopCore
 import SwiftUI
 
+enum MainDestination: String {
+    case chat
+    case automations
+    case skills
+}
+
+enum ResponseStyle: String, CaseIterable, Identifiable {
+    case custom, concise, formal, tutor, comprehensive
+    var id: String { rawValue }
+}
+
+enum SettingsSection: String, CaseIterable, Identifiable {
+    case account
+    case appearance
+    case behavior
+    case customize
+    case billing
+    case usage
+    case dataControls
+
+    var id: String { rawValue }
+
+    var group: SettingsGroup {
+        switch self {
+        case .account, .appearance, .behavior: return .general
+        case .customize: return .grok
+        case .billing, .usage: return .payments
+        case .dataControls: return .data
+        }
+    }
+}
+
+enum SettingsGroup: String, CaseIterable {
+    case general
+    case grok
+    case payments
+    case data
+}
+
+enum FirstRunReason: Equatable {
+    case missingCLI
+    case agent(String)
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     @Published var client: ACPClient
@@ -14,12 +58,32 @@ final class AppModel: ObservableObject {
     @Published var showInspector = false
     @Published var showSearchField = false
     @Published var showAttachMenu = false
+    @Published var showCreateProject = false
+    @Published var showLanguagePicker = false
     @Published var sidebarCollapsed = false
     @Published var projectsExpanded = true
     @Published var historyExpanded = true
-    @Published var settingsSection: SettingsSection = .appearance
+    @Published var destination: MainDestination = .chat
+    @Published var isPrivateChat = false
+    @Published var settingsSection: SettingsSection = .account
     @Published var firstRunReason: FirstRunReason?
+    @Published var account = AccountProfile()
+    @Published var skills: [SkillRecord] = []
+    @Published var automations: [AutomationRecord] = []
+    @Published var namedProjects: [NamedProject] = []
+    @Published var skillsQuery = ""
+    @Published var skillsTab = 0
+    @Published var newProjectName = ""
+    @Published var newProjectFolder: URL?
+
     @AppStorage("appearancePreference") var appearanceRaw = AppearancePreference.system.rawValue
+    @AppStorage("languagePreference") var languageRaw = AppLanguage.system.rawValue
+    @AppStorage("wrapCodeLines") var wrapCodeLines = false
+    @AppStorage("autoScroll") var autoScroll = false
+    @AppStorage("notifyThinking") var notifyThinking = true
+    @AppStorage("requireCmdEnter") var requireCmdEnter = false
+    @AppStorage("richTextEditor") var richTextEditor = true
+    @AppStorage("responseStyle") var responseStyleRaw = ResponseStyle.custom.rawValue
 
     var appearance: AppearancePreference {
         get { AppearancePreference(rawValue: appearanceRaw) ?? .system }
@@ -29,8 +93,31 @@ final class AppModel: ObservableObject {
         }
     }
 
+    var language: AppLanguage {
+        get { AppLanguage(rawValue: languageRaw) ?? .system }
+        set {
+            languageRaw = newValue.rawValue
+            objectWillChange.send()
+        }
+    }
+
+    var responseStyle: ResponseStyle {
+        get { ResponseStyle(rawValue: responseStyleRaw) ?? .custom }
+        set {
+            responseStyleRaw = newValue.rawValue
+            objectWillChange.send()
+        }
+    }
+
+    var copy: L10n {
+        L10n(language: language.resolved())
+    }
+
     let sessionIndex: SessionIndex
     let locator: GrokBinaryLocator
+    let automationStore = AutomationStore()
+    let projectStore = ProjectStore()
+    let skillCatalog = SkillCatalog()
 
     init(
         locator: GrokBinaryLocator = GrokBinaryLocator(),
@@ -39,10 +126,18 @@ final class AppModel: ObservableObject {
         self.locator = locator
         self.sessionIndex = sessionIndex
         self.client = ACPClient(locator: locator)
-        refreshSessions()
+        refreshAll()
         if locator.locate() == nil {
             firstRunReason = .missingCLI
         }
+    }
+
+    func refreshAll() {
+        refreshSessions()
+        account = AccountProfile.load()
+        skills = skillCatalog.load()
+        automations = automationStore.load()
+        namedProjects = projectStore.load()
     }
 
     var filteredSessions: [SessionRecord] {
@@ -54,11 +149,9 @@ final class AppModel: ObservableObject {
         }
     }
 
-    var groupedSessions: [(key: String, values: [SessionRecord])] {
-        let groups = Dictionary(grouping: filteredSessions, by: \.cwdName)
-        return groups.keys.sorted().map { key in
-            (key, groups[key]!.sorted { $0.updatedAt > $1.updatedAt })
-        }
+    var visibleProjects: [NamedProject] {
+        if !namedProjects.isEmpty { return namedProjects }
+        return projectPaths.map { NamedProject(id: $0.path, name: $0.name, path: $0.path) }
     }
 
     var projectPaths: [(path: String, name: String)] {
@@ -72,14 +165,29 @@ final class AppModel: ObservableObject {
     }
 
     var isEmptyChat: Bool {
-        client.items.isEmpty && firstRunReason == nil
+        destination == .chat && client.items.isEmpty && firstRunReason == nil
+    }
+
+    var filteredSkills: [SkillRecord] {
+        let query = skillsQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return skills }
+        return skills.filter {
+            $0.title.localizedCaseInsensitiveContains(query) || $0.detail.localizedCaseInsensitiveContains(query)
+        }
     }
 
     func refreshSessions() {
         sessions = sessionIndex.load()
     }
 
+    func openChat() {
+        destination = .chat
+        client.resetConversation()
+        firstRunReason = locator.locate() == nil ? .missingCLI : nil
+    }
+
     func startNewSession() {
+        destination = .chat
         Task {
             do {
                 try await client.newSession()
@@ -96,14 +204,31 @@ final class AppModel: ObservableObject {
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
         panel.canCreateDirectories = true
-        panel.prompt = "选择项目"
+        panel.prompt = copy.chooseFolder
         panel.directoryURL = client.workingDirectory
         guard panel.runModal() == .OK, let url = panel.url else { return }
         client.workingDirectory = url
         startNewSession()
     }
 
+    func createProject() {
+        let name = newProjectName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        let folder = newProjectFolder ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Projects/\(name)")
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let project = NamedProject(name: name, path: folder.path)
+        namedProjects.insert(project, at: 0)
+        projectStore.save(namedProjects)
+        client.workingDirectory = folder
+        showCreateProject = false
+        newProjectName = ""
+        newProjectFolder = nil
+        startNewSession()
+    }
+
     func open(_ record: SessionRecord) {
+        destination = .chat
+        isPrivateChat = false
         Task {
             do {
                 try await client.loadSession(id: record.id, cwd: URL(fileURLWithPath: record.cwd))
@@ -117,14 +242,47 @@ final class AppModel: ObservableObject {
     func sendDraft() {
         let text = draft
         draft = ""
+        destination = .chat
         Task {
             do {
                 try await client.send(text: text)
-                refreshSessions()
+                if !isPrivateChat {
+                    refreshSessions()
+                }
             } catch {
                 present(error)
             }
         }
+    }
+
+    func runSkill(_ skill: SkillRecord) {
+        destination = .chat
+        draft = "/\(skill.slug) "
+    }
+
+    func addAutomation(_ record: AutomationRecord) {
+        var next = record
+        next.suggested = false
+        next.id = UUID().uuidString
+        automations.insert(next, at: 0)
+        automationStore.save(automations)
+    }
+
+    func runAutomation(_ record: AutomationRecord) {
+        destination = .chat
+        draft = record.prompt
+        sendDraft()
+    }
+
+    func createAutomation() {
+        let item = AutomationRecord(
+            title: copy.newAutomation,
+            detail: copy.automations,
+            prompt: "/loop 1d "
+        )
+        addAutomation(item)
+        draft = item.prompt
+        destination = .chat
     }
 
     func handleCommand(_ raw: String) {
@@ -139,7 +297,7 @@ final class AppModel: ObservableObject {
             search = ""
             sidebarCollapsed = false
         case "/home", "/welcome":
-            client.resetConversation()
+            openChat()
         case "/quit", "/exit":
             NSApp.terminate(nil)
         default:
@@ -167,47 +325,27 @@ final class AppModel: ObservableObject {
         process.executableURL = grok
         process.arguments = ["login"]
         try? process.run()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+            self.account = AccountProfile.load()
+        }
+    }
+
+    func openUsage() {
+        if let grok = locator.locate() {
+            let process = Process()
+            process.executableURL = grok
+            process.arguments = ["-p", "/usage"]
+            try? process.run()
+        }
+        settingsSection = .usage
+        showSettings = true
     }
 
     private func present(_ error: Error) {
         if let acp = error as? ACPError, acp == .grokNotFound {
             firstRunReason = .missingCLI
         } else {
-            client.lastError.map { _ in }
             firstRunReason = .agent(error.localizedDescription)
-        }
-    }
-}
-
-enum FirstRunReason: Equatable {
-    case missingCLI
-    case agent(String)
-}
-
-enum SettingsSection: String, CaseIterable, Identifiable {
-    case appearance
-    case language
-    case feedback
-    case account
-    case behavior
-    case session
-    case agent
-    case extensions
-    case advanced
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .appearance: return "外观"
-        case .language: return "语言"
-        case .feedback: return "反馈"
-        case .account: return "账号"
-        case .behavior: return "行为"
-        case .session: return "会话"
-        case .agent: return "Agent"
-        case .extensions: return "扩展"
-        case .advanced: return "高级"
         }
     }
 }

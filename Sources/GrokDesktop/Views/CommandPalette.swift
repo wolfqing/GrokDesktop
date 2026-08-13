@@ -3,20 +3,19 @@ import SwiftUI
 struct CommandPalette: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.palette) private var palette
+    @Environment(\.l10n) private var l10n
 
-    private let commands: [(String, String)] = [
-        ("/new", "新会话"),
-        ("/resume", "恢复会话"),
-        ("/dashboard", "Dashboard"),
-        ("/plan", "进入 Plan 模式"),
-        ("/settings", "设置"),
-        ("/model", "切换模型"),
-        ("/compact", "压缩上下文"),
-        ("/imagine", "生成图片"),
-        ("/usage", "用量"),
-        ("/home", "回到首页"),
-        ("/quit", "退出")
-    ]
+    private var commands: [(String, String)] {
+        [
+            ("/new", l10n.newChat),
+            ("/settings", l10n.settings),
+            ("/plan", l10n.t("Enter Plan mode", "进入 Plan 模式")),
+            ("/imagine", l10n.imagine),
+            ("/usage", l10n.usage),
+            ("/home", l10n.t("Home", "回到首页")),
+            ("/quit", l10n.t("Quit", "退出"))
+        ]
+    }
 
     var body: some View {
         ZStack {
@@ -25,7 +24,7 @@ struct CommandPalette: View {
                 .onTapGesture { model.showPalette = false }
 
             VStack(alignment: .leading, spacing: 0) {
-                Text("命令")
+                Text(l10n.t("Commands", "命令"))
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(palette.secondary)
                     .padding(12)

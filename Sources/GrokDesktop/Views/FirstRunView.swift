@@ -3,6 +3,7 @@ import SwiftUI
 struct FirstRunView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.palette) private var palette
+    @Environment(\.l10n) private var l10n
     let reason: FirstRunReason
 
     var body: some View {
@@ -24,9 +25,9 @@ struct FirstRunView: View {
             }
 
             HStack(spacing: 10) {
-                Button("重新检测") { model.retryLocate() }
+                Button(l10n.t("Recheck", "重新检测")) { model.retryLocate() }
                     .buttonStyle(GrokPrimaryButtonStyle())
-                Button("登录 grok") { model.login() }
+                Button(l10n.loginGrok) { model.login() }
                     .buttonStyle(GrokSecondaryButtonStyle())
             }
             Spacer()
@@ -37,7 +38,10 @@ struct FirstRunView: View {
     private var message: String {
         switch reason {
         case .missingCLI:
-            return "本机没有找到 grok CLI。先安装官方 Grok Build，登录后再打开这个应用。"
+            return l10n.t(
+                "The grok CLI was not found. Install official Grok Build, sign in, then reopen this app.",
+                "本机没有找到 grok CLI。先安装官方 Grok Build，登录后再打开这个应用。"
+            )
         case .agent(let detail):
             return detail
         }

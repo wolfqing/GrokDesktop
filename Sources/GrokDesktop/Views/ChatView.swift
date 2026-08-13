@@ -4,19 +4,15 @@ import SwiftUI
 struct ChatView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.palette) private var palette
+    @Environment(\.l10n) private var l10n
 
     var body: some View {
         VStack(spacing: 0) {
-            if !model.isEmptyChat || model.firstRunReason != nil {
-                header
-            }
+            header
 
             if let reason = model.firstRunReason, model.client.items.isEmpty {
                 FirstRunView(reason: reason)
-                ComposerView()
-                    .frame(maxWidth: GrokTheme.contentWidth)
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 28)
+                composerBlock
             } else if model.client.items.isEmpty {
                 emptyState
             } else {
@@ -33,7 +29,7 @@ struct ChatView: View {
                         .frame(maxWidth: .infinity)
                     }
                     .onChange(of: model.client.items.count) { _, _ in
-                        if let last = model.client.items.last {
+                        if model.autoScroll, let last = model.client.items.last {
                             proxy.scrollTo(last.id, anchor: .bottom)
                         }
                     }
@@ -45,14 +41,28 @@ struct ChatView: View {
                         .padding(.bottom, 8)
                 }
 
-                ComposerView()
-                    .frame(maxWidth: GrokTheme.contentWidth)
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 22)
+                composerBlock
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(palette.canvas)
+    }
+
+    private var composerBlock: some View {
+        VStack(spacing: 10) {
+            ComposerView()
+                .frame(maxWidth: 680)
+            if model.isPrivateChat {
+                HStack(spacing: 6) {
+                    Image(systemName: "eyeglasses")
+                    Text(l10n.privateBanner)
+                }
+                .font(.system(size: 12))
+                .foregroundStyle(palette.secondary)
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.bottom, 22)
     }
 
     private var header: some View {
@@ -63,25 +73,27 @@ struct ChatView: View {
                 }
                 .buttonStyle(.plain)
             }
-            Button(model.client.workingDirectory.path) {
-                model.chooseWorkingDirectory()
+            if !model.client.items.isEmpty {
+                Button(model.client.workingDirectory.path) {
+                    model.chooseWorkingDirectory()
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 12))
+                .foregroundStyle(palette.secondary)
+                .lineLimit(1)
             }
-            .buttonStyle(.plain)
-            .font(.system(size: 12))
-            .foregroundStyle(palette.secondary)
-            .lineLimit(1)
-
             Spacer()
-
-            Button(model.client.mode.title) {
-                model.client.mode = model.client.mode.next
+            Button {
+                model.isPrivateChat.toggle()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "eyeglasses")
+                    Text(l10n.privateChat)
+                }
+                .font(.system(size: 13))
+                .foregroundStyle(model.isPrivateChat ? Color.blue : palette.secondary)
             }
             .buttonStyle(.plain)
-            .font(.system(size: 12, weight: .medium))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(palette.chip, in: Capsule())
-
             Button {
                 model.showSettings = true
             } label: {
@@ -89,30 +101,19 @@ struct ChatView: View {
                     .foregroundStyle(palette.secondary)
             }
             .buttonStyle(.plain)
-            .help("设置")
-
-            Button {
-                model.showInspector.toggle()
-            } label: {
-                Image(systemName: "sidebar.right")
-                    .foregroundStyle(palette.secondary)
-            }
-            .buttonStyle(.plain)
-            .help("检查器")
+            .help(l10n.settings)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
     }
 
     private var emptyState: some View {
-        VStack(spacing: 28) {
+        VStack(spacing: 22) {
             Spacer()
             SuperGrokWordmark(markSize: 48)
-            ComposerView()
-                .frame(maxWidth: 680)
-                .padding(.horizontal, 24)
+            composerBlock
             Spacer()
-            Spacer(minLength: 40)
+            Spacer(minLength: 24)
         }
     }
 
@@ -135,7 +136,7 @@ struct ChatView: View {
                 .textSelection(.enabled)
                 .padding(.horizontal, 28)
         case .thought(_, let text):
-            DisclosureGroup("思考") {
+            DisclosureGroup(l10n.think) {
                 Text(text)
                     .font(.system(size: 13))
                     .foregroundStyle(palette.secondary)
@@ -156,7 +157,7 @@ struct ChatView: View {
                     Text(detail)
                         .font(.system(size: 12, design: .monospaced))
                         .foregroundStyle(palette.secondary)
-                        .lineLimit(8)
+                        .lineLimit(model.wrapCodeLines ? 20 : 8)
                 }
             }
             .padding(12)
