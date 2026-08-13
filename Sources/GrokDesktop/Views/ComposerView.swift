@@ -76,48 +76,7 @@ struct ComposerView: View {
 
                         usageChip
 
-                        Menu {
-                            Section(l10n.t("Model", "模型")) {
-                                ForEach(BuildModel.allCases) { item in
-                                    Button {
-                                        model.client.buildModel = item
-                                    } label: {
-                                        menuLabel(item.menuTitle, selected: model.client.buildModel == item)
-                                    }
-                                }
-                            }
-                            Section(l10n.t("Reasoning", "推理强度")) {
-                                ForEach(EffortLevel.allCases) { level in
-                                    Button {
-                                        model.client.effort = level
-                                    } label: {
-                                        menuLabel(level.title(chinese: isChinese), selected: model.client.effort == level)
-                                    }
-                                }
-                            }
-                            Section(l10n.t("Preset", "预设")) {
-                                ForEach(ModelTier.allCases) { tier in
-                                    Button(tier.menuTitle) { model.client.apply(tier: tier) }
-                                }
-                            }
-                        } label: {
-                            HStack(spacing: 5) {
-                                Text(model.client.buildModel.shortTitle)
-                                Text(model.client.effort.title(chinese: isChinese))
-                                    .foregroundStyle(Color.purple)
-                                Image(systemName: "chevron.down")
-                                    .font(.system(size: 8, weight: .semibold))
-                                    .foregroundStyle(palette.secondary)
-                            }
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(palette.text)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .background(palette.chip, in: Capsule())
-                        }
-                        .menuStyle(.borderlessButton)
-                        .fixedSize()
-                        .help("\(model.client.buildModel.menuTitle) · \(model.client.effort.title(chinese: isChinese))")
+                        modelEffortChip
 
                         if model.client.hasActiveWork {
                             Button {
@@ -221,6 +180,59 @@ struct ComposerView: View {
 
     private var usagePercent: Int {
         model.accountUsage.displayPercent
+    }
+
+    private var modelEffortChip: some View {
+        HStack(spacing: 5) {
+            Text(model.client.buildModel.shortTitle)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(palette.text)
+            Text(model.client.effort.title(chinese: isChinese))
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Color.purple)
+            Image(systemName: "chevron.down")
+                .font(.system(size: 8, weight: .semibold))
+                .foregroundStyle(palette.secondary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(palette.chip, in: Capsule())
+        .overlay {
+            Menu {
+                Section(l10n.t("Model", "模型")) {
+                    ForEach(BuildModel.allCases) { item in
+                        Button {
+                            model.client.buildModel = item
+                        } label: {
+                            menuLabel(item.menuTitle, selected: model.client.buildModel == item)
+                        }
+                    }
+                }
+                Section(l10n.t("Reasoning", "推理强度")) {
+                    ForEach(EffortLevel.allCases) { level in
+                        Button {
+                            model.client.effort = level
+                        } label: {
+                            menuLabel(level.title(chinese: isChinese), selected: model.client.effort == level)
+                        }
+                    }
+                }
+                Section(l10n.t("Preset", "预设")) {
+                    ForEach(ModelTier.allCases) { tier in
+                        Button(tier.menuTitle) { model.client.apply(tier: tier) }
+                    }
+                }
+            } label: {
+                Color.clear
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(Rectangle())
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .opacity(0.001)
+        }
+        .fixedSize()
+        .help("\(model.client.buildModel.menuTitle) · \(model.client.effort.title(chinese: isChinese))")
     }
 
     private func chip(_ title: String, accent: Color? = nil) -> some View {
