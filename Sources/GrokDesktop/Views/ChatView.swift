@@ -77,6 +77,13 @@ struct ChatView: View {
                                 .frame(maxWidth: .infinity)
                             }
                             .coordinateSpace(name: "chatScroll")
+                            .simultaneousGesture(
+                                TapGesture().onEnded {
+                                    if model.mentionQuery != nil || model.showPalette {
+                                        model.dismissComposerSuggestions()
+                                    }
+                                }
+                            )
                             .onPreferenceChange(LatestMinYKey.self) { minY in
                                 guard Date() >= ignoreScrollUntil else { return }
                                 let slack: CGFloat = 56
@@ -230,11 +237,16 @@ struct ChatView: View {
 
     private var emptyState: some View {
         VStack(spacing: 22) {
-            Spacer()
+            Color.clear
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .onTapGesture { model.dismissComposerSuggestions() }
             SuperGrokWordmark(markSize: 48, title: model.account.plan.wordmark)
             composerBlock
-            Spacer()
-            Spacer(minLength: 24)
+            Color.clear
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .onTapGesture { model.dismissComposerSuggestions() }
         }
     }
 

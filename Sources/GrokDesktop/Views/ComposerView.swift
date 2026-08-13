@@ -20,6 +20,10 @@ struct ComposerView: View {
             if let pending = model.pendingBusySend {
                 BusySendBar(text: pending)
             }
+            if showsSuggestPanel {
+                suggestPanel
+                    .zIndex(8)
+            }
             ZStack(alignment: .topLeading) {
                 VStack(alignment: .leading, spacing: 10) {
                     if !draftImages.isEmpty {
@@ -48,6 +52,10 @@ struct ComposerView: View {
                             }
                         }
                         .onChange(of: model.draft) { _, value in
+                            if model.suppressSuggest {
+                                model.suppressSuggest = false
+                                return
+                            }
                             model.showPalette = value.hasPrefix("/") && !value.contains("\n")
                             model.updateMentions(from: value)
                         }
@@ -123,14 +131,6 @@ struct ComposerView: View {
                     RoundedRectangle(cornerRadius: GrokTheme.inputRadius, style: .continuous)
                         .stroke(palette.hairline, lineWidth: 1)
                 )
-                .overlay(alignment: .top) {
-                    if showsSuggestPanel {
-                        suggestPanel
-                            .alignmentGuide(.top) { $0[.bottom] + 8 }
-                            .zIndex(8)
-                    }
-                }
-
             }
 
             if !model.client.promptQueue.isEmpty {
@@ -154,6 +154,11 @@ struct ComposerView: View {
             }
             .buttonStyle(.plain)
             .padding(.horizontal, 6)
+        }
+        .onExitCommand {
+            if showsSuggestPanel {
+                model.dismissComposerSuggestions()
+            }
         }
         .onPasteCommand(of: [.image, .fileURL]) { _ in
             model.pasteAttachments()
@@ -316,7 +321,7 @@ struct ComposerView: View {
     }
 
     private func submit(forceNow: Bool = false) {
-        model.showAttachMenu = false
+        model.dismissComposerSuggestions()
         showModelMenu = false
         let text = model.draft.trimmingCharacters(in: .whitespacesAndNewlines)
         if model.pendingBusySend != nil, text.isEmpty {

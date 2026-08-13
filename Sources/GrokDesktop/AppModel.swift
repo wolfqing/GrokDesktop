@@ -113,6 +113,7 @@ final class AppModel: ObservableObject {
     @Published var accountUsage = AccountUsage()
     @Published var isRefreshingUsage = false
     @Published var pendingBusySend: String?
+    @Published var suppressSuggest = false
 
     @AppStorage("appearancePreference") var appearanceRaw = AppearancePreference.system.rawValue
     @AppStorage("languagePreference") var languageRaw = AppLanguage.system.rawValue
@@ -463,6 +464,19 @@ final class AppModel: ObservableObject {
         destination = .chat
     }
 
+    func dismissComposerSuggestions() {
+        mentionQuery = nil
+        mentionMatches = []
+        showPalette = false
+        showAttachMenu = false
+        suppressSuggest = true
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed == "@" || trimmed == "/" {
+            draft = ""
+            suppressSuggest = false
+        }
+    }
+
     func updateMentions(from draft: String) {
         guard let at = draft.lastIndex(of: "@") else {
             mentionQuery = nil
@@ -490,24 +504,45 @@ final class AppModel: ObservableObject {
         mentionQuery = nil
         mentionMatches = []
         showAttachMenu = false
+        suppressSuggest = false
     }
 
-    private static func fileMatches(cwd: URL, query: String, limit: Int = 50) -> [URL] {
+    private static func fileMatches(cwd: URL, query: String, limit: Int = 40) -> [URL] {
+        let needle = query.lowercased()
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        if needle.isEmpty && cwd.path == home {
+            return []
+        }
+        if needle.isEmpty {
+            let urls = (try? FileManager.default.contentsOfDirectory(
+                at: cwd,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            )) ?? []
+            return urls.filter { !isSkippedPath($0) }.prefix(limit).map { $0 }
+        }
         guard let enumerator = FileManager.default.enumerator(
             at: cwd,
             includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
         ) else { return [] }
         var matches: [URL] = []
-        let needle = query.lowercased()
         for case let url as URL in enumerator {
-            if url.path.contains("/.git/") { continue }
-            if needle.isEmpty || url.lastPathComponent.lowercased().contains(needle) {
+            if isSkippedPath(url) { continue }
+            if url.lastPathComponent.lowercased().contains(needle) {
                 matches.append(url)
             }
             if matches.count >= limit { break }
         }
         return matches
+    }
+
+    private static func isSkippedPath(_ url: URL) -> Bool {
+        let path = url.path
+        let blocked = ["/Library/", "/Music/", "/Movies/", "/Pictures/", "/node_modules/", "/.git/", "/DerivedData/"]
+        if blocked.contains(where: { path.contains($0) }) { return true }
+        let blockedExt = ["musicdb", "itdb", "musiclibrary", "photoslibrary", "app", "framework"]
+        return blockedExt.contains(url.pathExtension.lowercased())
     }
 
     private func lastNotice(_ text: String) {

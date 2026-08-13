@@ -38,7 +38,9 @@ struct ComposerSuggestChrome<Content: View>: View {
         .scrollIndicators(.visible)
         .onPreferenceChange(SuggestHeightKey.self) { contentHeight = $0 }
         .frame(height: min(max(contentHeight, 1), 320))
-        .background(palette.popover, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(palette.popover)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .compositingGroup()
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(palette.hairline, lineWidth: 1)
