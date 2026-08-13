@@ -9,6 +9,8 @@ struct ComposerView: View {
 
     private var isChinese: Bool { model.language.resolved() == .chinese }
 
+    @State private var showModelMenu = false
+
     private var draftImages: [URL] {
         PromptMedia.imageURLs(in: model.draft)
     }
@@ -50,8 +52,9 @@ struct ComposerView: View {
                             model.updateMentions(from: value)
                         }
 
-                    HStack(spacing: 8) {
+                    HStack(alignment: .bottom, spacing: 8) {
                         Button {
+                            showModelMenu = false
                             model.showAttachMenu.toggle()
                         } label: {
                             Image(systemName: model.showAttachMenu ? "xmark" : "plus")
@@ -76,7 +79,13 @@ struct ComposerView: View {
 
                         usageChip
 
-                        modelEffortChip
+                        ModelEffortPicker(
+                            isOpen: $showModelMenu,
+                            buildModel: $model.client.buildModel,
+                            effort: $model.client.effort,
+                            chinese: isChinese,
+                            applyTier: { model.client.apply(tier: $0) }
+                        )
 
                         if model.client.hasActiveWork {
                             Button {
@@ -149,6 +158,9 @@ struct ComposerView: View {
         .onPasteCommand(of: [.image, .fileURL]) { _ in
             model.pasteAttachments()
         }
+        .onChange(of: model.showAttachMenu) { _, open in
+            if open { showModelMenu = false }
+        }
     }
 
     private var usageChip: some View {
@@ -182,59 +194,6 @@ struct ComposerView: View {
         model.accountUsage.displayPercent
     }
 
-    private var modelEffortChip: some View {
-        HStack(spacing: 5) {
-            Text(model.client.buildModel.shortTitle)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(palette.text)
-            Text(model.client.effort.title(chinese: isChinese))
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(Color.purple)
-            Image(systemName: "chevron.down")
-                .font(.system(size: 8, weight: .semibold))
-                .foregroundStyle(palette.secondary)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .background(palette.chip, in: Capsule())
-        .overlay {
-            Menu {
-                Section(l10n.t("Model", "模型")) {
-                    ForEach(BuildModel.allCases) { item in
-                        Button {
-                            model.client.buildModel = item
-                        } label: {
-                            menuLabel(item.menuTitle, selected: model.client.buildModel == item)
-                        }
-                    }
-                }
-                Section(l10n.t("Reasoning", "推理强度")) {
-                    ForEach(EffortLevel.allCases) { level in
-                        Button {
-                            model.client.effort = level
-                        } label: {
-                            menuLabel(level.title(chinese: isChinese), selected: model.client.effort == level)
-                        }
-                    }
-                }
-                Section(l10n.t("Preset", "预设")) {
-                    ForEach(ModelTier.allCases) { tier in
-                        Button(tier.menuTitle) { model.client.apply(tier: tier) }
-                    }
-                }
-            } label: {
-                Color.clear
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .contentShape(Rectangle())
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .opacity(0.001)
-        }
-        .fixedSize()
-        .help("\(model.client.buildModel.menuTitle) · \(model.client.effort.title(chinese: isChinese))")
-    }
-
     private func chip(_ title: String, accent: Color? = nil) -> some View {
         Text(title)
             .font(.system(size: 12, weight: .medium))
@@ -242,16 +201,6 @@ struct ComposerView: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
             .background(palette.chip, in: Capsule())
-    }
-
-    private func menuLabel(_ title: String, selected: Bool) -> some View {
-        HStack {
-            Text(title)
-            if selected {
-                Spacer()
-                Image(systemName: "checkmark")
-            }
-        }
     }
 
     private var attachMenu: some View {
@@ -302,6 +251,7 @@ struct ComposerView: View {
 
     private func submit(forceNow: Bool = false) {
         model.showAttachMenu = false
+        showModelMenu = false
         let text = model.draft.trimmingCharacters(in: .whitespacesAndNewlines)
         if model.pendingBusySend != nil, text.isEmpty {
             model.confirmBusySendNow()
