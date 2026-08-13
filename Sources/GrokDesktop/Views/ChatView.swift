@@ -94,14 +94,6 @@ struct ChatView: View {
                 .foregroundStyle(model.isPrivateChat ? Color.blue : palette.secondary)
             }
             .buttonStyle(.plain)
-            Button {
-                model.showSettings = true
-            } label: {
-                Image(systemName: "gearshape")
-                    .foregroundStyle(palette.secondary)
-            }
-            .buttonStyle(.plain)
-            .help(l10n.settings)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 12)

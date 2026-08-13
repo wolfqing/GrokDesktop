@@ -18,6 +18,8 @@ struct SidebarView: View {
             } else {
                 expandedContent
             }
+
+            accountFooter
         }
         .background(palette.sidebar)
     }
@@ -55,7 +57,6 @@ struct SidebarView: View {
             iconButton("bolt") { model.destination = .automations }
             iconButton("square.grid.2x2") { model.destination = .skills }
             Spacer()
-            iconButton("gearshape") { model.showSettings = true }
         }
         .padding(.top, 8)
         .padding(.bottom, 12)
@@ -136,6 +137,88 @@ struct SidebarView: View {
                 .padding(.bottom, 16)
             }
         }
+    }
+
+    private var accountFooter: some View {
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(palette.hairline)
+                .frame(height: 1)
+            if model.sidebarCollapsed {
+                Button(action: openAccount) {
+                    avatar
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+                .help(accountTitle)
+                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity)
+            } else {
+                HStack(spacing: 10) {
+                    Button(action: openAccount) {
+                        HStack(spacing: 10) {
+                            avatar
+                                .frame(width: 28, height: 28)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(accountTitle)
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundStyle(palette.text)
+                                    .lineLimit(1)
+                                if let email = model.account.email, !email.isEmpty {
+                                    Text(email)
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(palette.secondary)
+                                        .lineLimit(1)
+                                }
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(l10n.account)
+
+                    Button {
+                        openSettings()
+                    } label: {
+                        Image(systemName: "gearshape")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(palette.secondary)
+                            .frame(width: 28, height: 28)
+                    }
+                    .buttonStyle(.plain)
+                    .help(l10n.settings)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 12)
+            }
+        }
+    }
+
+    private var avatar: some View {
+        ZStack {
+            Circle().fill(Color.purple)
+            Text(accountInitial)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.white)
+        }
+    }
+
+    private var accountTitle: String {
+        model.account.displayName.isEmpty ? l10n.account : model.account.displayName
+    }
+
+    private var accountInitial: String {
+        model.account.initial.isEmpty ? "G" : model.account.initial
+    }
+
+    private func openAccount() {
+        model.settingsSection = .account
+        model.showSettings = true
+    }
+
+    private func openSettings() {
+        model.showSettings = true
     }
 
     private var searchField: some View {
