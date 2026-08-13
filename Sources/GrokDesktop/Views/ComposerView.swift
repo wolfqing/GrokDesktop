@@ -38,7 +38,7 @@ struct ComposerView: View {
                                 .frame(width: 26, height: 26)
                         }
                         .buttonStyle(.plain)
-                        .help(l10n.uploadFile)
+                        .help("@")
 
                         Menu {
                             ForEach(AgentMode.allCases) { mode in
@@ -48,13 +48,6 @@ struct ComposerView: View {
                             chip(model.client.mode.title)
                         }
                         .menuStyle(.borderlessButton)
-
-                        Button {
-                            model.draft += model.draft.isEmpty ? "@" : " @"
-                        } label: {
-                            chip(l10n.helpApprove, icon: "person.crop.circle.badge.checkmark")
-                        }
-                        .buttonStyle(.plain)
 
                         Spacer()
 
@@ -80,13 +73,6 @@ struct ComposerView: View {
                                 .foregroundStyle(Color.purple)
                         }
                         .menuStyle(.borderlessButton)
-
-                        Button {} label: {
-                            Image(systemName: "mic")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(palette.secondary)
-                        }
-                        .buttonStyle(.plain)
 
                         Button(action: submit) {
                             Image(systemName: sendSymbol)
@@ -115,35 +101,19 @@ struct ComposerView: View {
                 }
             }
 
-            HStack {
-                Menu {
-                    ForEach(model.visibleProjects) { project in
-                        Button(project.name) {
-                            model.client.workingDirectory = URL(fileURLWithPath: project.path)
-                            model.refreshWorkspace()
-                        }
-                    }
-                    Button(l10n.addProject) { model.showCreateProject = true }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "folder")
-                        Text(model.workspace.name.isEmpty ? model.client.workingDirectory.lastPathComponent : model.workspace.name)
-                        Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
-                    }
-                    .font(.system(size: 12))
-                    .foregroundStyle(palette.secondary)
+            Button {
+                model.chooseWorkingDirectory()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "folder")
+                    Text(model.client.workingDirectory.path)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
-                .menuStyle(.borderlessButton)
-
-                Spacer()
-
-                Text(l10n.local)
-                    .font(.system(size: 12))
-                    .foregroundStyle(palette.secondary)
-                Text(l10n.mainAgent)
-                    .font(.system(size: 12))
-                    .foregroundStyle(palette.secondary)
+                .font(.system(size: 12))
+                .foregroundStyle(palette.secondary)
             }
+            .buttonStyle(.plain)
             .padding(.horizontal, 6)
         }
     }
@@ -159,37 +129,24 @@ struct ComposerView: View {
                 .font(.system(size: 11, weight: .medium, design: .monospaced))
                 .foregroundStyle(palette.secondary)
         }
-        .help(l10n.usage)
+        .help("/context")
     }
 
-    private func chip(_ title: String, icon: String? = nil) -> some View {
-        HStack(spacing: 4) {
-            if let icon {
-                Image(systemName: icon)
-            }
-            Text(title)
-        }
-        .font(.system(size: 12, weight: .medium))
-        .foregroundStyle(palette.secondary)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .background(palette.chip, in: Capsule())
+    private func chip(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(palette.secondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(palette.chip, in: Capsule())
     }
 
     private var attachMenu: some View {
         VStack(alignment: .leading, spacing: 0) {
-            attachItem(l10n.uploadFile, systemImage: "square.and.arrow.up") { attachFiles() }
-            attachItem(l10n.recent, systemImage: "clock", trailing: true) { }
-            attachItem(l10n.project, systemImage: "folder", trailing: true) { model.chooseWorkingDirectory() }
-            Divider().overlay(palette.hairline).padding(.vertical, 4)
-            attachItem(l10n.skills, systemImage: "puzzlepiece.extension", trailing: true) {
-                model.destination = .skills
+            attachItem(l10n.t("Attach file (@)", "附加文件 (@)"), systemImage: "doc") { attachFiles() }
+            attachItem(l10n.t("Working directory", "工作目录"), systemImage: "folder") {
                 model.showAttachMenu = false
-            }
-            attachItem(l10n.addConnector, systemImage: "plus.square.on.square") {
-                model.destination = .skills
-                model.skillsTab = 1
-                model.showAttachMenu = false
+                model.chooseWorkingDirectory()
             }
         }
         .padding(.vertical, 6)
@@ -202,17 +159,12 @@ struct ComposerView: View {
         .shadow(color: Color.black.opacity(0.12), radius: 16, y: 8)
     }
 
-    private func attachItem(_ title: String, systemImage: String, trailing: Bool = false, action: @escaping () -> Void) -> some View {
+    private func attachItem(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 10) {
                 Image(systemName: systemImage).frame(width: 16)
                 Text(title)
                 Spacer()
-                if trailing {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(palette.secondary)
-                }
             }
             .font(.system(size: 14))
             .foregroundStyle(palette.text)
@@ -252,7 +204,7 @@ struct ComposerView: View {
         panel.canChooseFiles = true
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = true
-        panel.prompt = "Upload"
+        panel.prompt = "@"
         guard panel.runModal() == .OK else { return }
         let refs = panel.urls.map { "@\($0.path)" }.joined(separator: " ")
         if model.draft.isEmpty {
