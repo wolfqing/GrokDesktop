@@ -5,11 +5,12 @@ struct InspectorView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.palette) private var palette
     @Environment(\.l10n) private var l10n
+    @State private var planNote = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text(l10n.t("Session", "会话"))
+                Text(l10n.inspector)
                     .font(.system(size: 13, weight: .semibold))
                 Spacer()
                 Button {
@@ -29,17 +30,23 @@ struct InspectorView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     contextSection
-                    if model.client.mode == .plan {
-                        planSection
-                    }
-                    toolsSection
+                    planSection
+                    changesSection
+                    timelineSection
+                    workflowsSection
+                    personasSection
+                    docsSection
                     subagentSection
                 }
                 .padding(14)
             }
         }
         .background(palette.sidebar)
-        .onAppear { model.refreshWorkspace() }
+        .onAppear {
+            model.refreshWorkspace()
+            model.client.refreshPlanArtifacts()
+            Task { await model.client.refreshGit() }
+        }
     }
 
     private var contextSection: some View {
@@ -49,7 +56,7 @@ struct InspectorView: View {
                 Text("\(model.workspace.contextPercent)%")
                     .font(.system(size: 16, weight: .semibold, design: .monospaced))
                 Spacer()
-                Text(model.client.buildModel.title)
+                Text(model.client.modelTier.menuTitle)
                     .font(.system(size: 12))
                     .foregroundStyle(palette.secondary)
             }
@@ -66,48 +73,188 @@ struct InspectorView: View {
                 .font(.system(size: 11))
                 .foregroundStyle(palette.secondary)
                 .lineLimit(2)
+            connectionLine
+        }
+    }
+
+    private var connectionLine: some View {
+        Text(connectionLabel)
+            .font(.system(size: 11))
+            .foregroundStyle(palette.secondary)
+    }
+
+    private var connectionLabel: String {
+        switch model.client.state {
+        case .idle: return l10n.t("Idle", "空闲")
+        case .connecting: return l10n.t("Connecting…", "正在连接…")
+        case .initialized: return l10n.t("Agent initialized, no session", "已握手，尚未建会话")
+        case .ready: return l10n.t("Session ready", "会话就绪")
+        case .failed(let message): return message
         }
     }
 
     private var planSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             sectionTitle("Plan")
-            Text(l10n.t("Plan mode is on. The agent writes plan.md and waits for approval.", "Plan 模式已开。agent 只写 plan.md，等你批准后再改代码。"))
-                .font(.system(size: 12))
-                .foregroundStyle(palette.secondary)
-            Text(model.client.mode.title)
-                .font(.system(size: 12, weight: .medium))
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(palette.chip, in: Capsule())
-        }
-    }
-
-    private var toolsSection: some View {
-        let tools = model.client.items.compactMap { item -> (String, String, String)? in
-            if case .tool(let id, let title, let status, _) = item {
-                return (id, title, status)
-            }
-            return nil
-        }
-        return VStack(alignment: .leading, spacing: 8) {
-            sectionTitle(l10n.t("Tools", "工具"))
-            if tools.isEmpty {
-                Text(l10n.t("No tool calls in this turn.", "本轮还没有工具调用。"))
+            if model.client.planEntries.isEmpty && model.client.planMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(l10n.t("No plan.md yet. You can still approve, request changes, or quit plan mode.", "还没有 plan.md。仍可批准、打回或退出 Plan。"))
                     .font(.system(size: 12))
                     .foregroundStyle(palette.secondary)
             } else {
-                ForEach(tools, id: \.0) { tool in
-                    HStack {
-                        Text(tool.1)
-                            .lineLimit(1)
-                        Spacer()
-                        Text(tool.2)
-                            .foregroundStyle(palette.secondary)
+                ForEach(model.client.planEntries) { entry in
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: entry.status == "completed" ? "checkmark.circle" : (entry.status == "in_progress" ? "circle.dotted" : "circle"))
+                            .font(.system(size: 11))
+                        Text(entry.content)
+                            .font(.system(size: 12))
                     }
-                    .font(.system(size: 12))
+                }
+                if !model.client.planMarkdown.isEmpty {
+                    Text(model.client.planMarkdown)
+                        .font(.system(size: 11))
+                        .foregroundStyle(palette.secondary)
+                        .textSelection(.enabled)
+                        .lineLimit(16)
                 }
             }
+            TextField(l10n.t("Request changes…", "打回意见…"), text: $planNote)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12))
+                .padding(8)
+                .background(palette.chip, in: RoundedRectangle(cornerRadius: 8))
+            HStack(spacing: 6) {
+                Button(l10n.t("Approve", "批准")) {
+                    Task { await model.client.approvePlan() }
+                }
+                .buttonStyle(GrokPrimaryButtonStyle())
+                Button(l10n.t("Revise", "打回")) {
+                    Task { await model.client.requestPlanChanges(planNote) }
+                }
+                .buttonStyle(GrokSecondaryButtonStyle())
+                Button(l10n.t("Quit plan", "退出 Plan")) {
+                    model.client.quitPlan()
+                }
+                .buttonStyle(GrokSecondaryButtonStyle())
+            }
+        }
+    }
+
+    private var changesSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionTitle(l10n.changes)
+            if model.workspace.isRepo {
+                Text("\(model.workspace.branch ?? "HEAD")  +\(model.workspace.insertions) / -\(model.workspace.deletions)")
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(palette.secondary)
+            }
+            if !model.client.gitStatusText.isEmpty {
+                Text(model.client.gitStatusText)
+                    .font(.system(size: 11, design: .monospaced))
+                    .textSelection(.enabled)
+                    .lineLimit(8)
+            }
+            if !model.client.gitDiffText.isEmpty {
+                Text(model.client.gitDiffText)
+                    .font(.system(size: 11, design: .monospaced))
+                    .textSelection(.enabled)
+                    .lineLimit(16)
+            }
+            if model.client.hunks.isEmpty && model.client.gitDiffText.isEmpty {
+                Text(l10n.t("No session diffs yet.", "这一轮还没有 diff。"))
+                    .font(.system(size: 12))
+                    .foregroundStyle(palette.secondary)
+            } else if !model.client.hunks.isEmpty {
+                ForEach(model.client.hunks) { hunk in
+                    HStack {
+                        Text(hunk.name)
+                            .lineLimit(1)
+                        Spacer()
+                        Text("+\(hunk.added)")
+                            .foregroundStyle(.green)
+                        Text("-\(hunk.removed)")
+                            .foregroundStyle(.red)
+                    }
+                    .font(.system(size: 12))
+                    .help(hunk.path)
+                }
+            }
+        }
+    }
+
+    private var timelineSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionTitle(l10n.t("Timeline", "时间线"))
+            let users = model.client.items.compactMap { item -> String? in
+                if case .user(_, let text) = item { return text }
+                return nil
+            }
+            if users.isEmpty {
+                Text(l10n.t("No turns yet.", "还没有回合。"))
+                    .font(.system(size: 12))
+                    .foregroundStyle(palette.secondary)
+            } else {
+                ForEach(Array(users.enumerated()), id: \.offset) { index, text in
+                    Text("\(index + 1). \(text)")
+                        .font(.system(size: 12))
+                        .lineLimit(2)
+                }
+            }
+        }
+    }
+
+    private var workflowsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionTitle(l10n.t("Workflows", "工作流"))
+            let names = workflowNames()
+            if names.isEmpty {
+                Button("/workflows") {
+                    model.draft = "/workflows "
+                    model.destination = .chat
+                }
+                .buttonStyle(GrokSecondaryButtonStyle())
+            } else {
+                ForEach(names, id: \.self) { name in
+                    Button {
+                        model.destination = .chat
+                        model.draft = "/\(name) "
+                    } label: {
+                        Text(name)
+                            .font(.system(size: 12))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private var personasSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionTitle(l10n.t("Agents / personas", "Agent / 人设"))
+            if model.personas.isEmpty {
+                Text(l10n.t("None on disk.", "磁盘上没有人设。"))
+                    .font(.system(size: 12))
+                    .foregroundStyle(palette.secondary)
+            } else {
+                ForEach(model.personas.prefix(8), id: \.self) { name in
+                    Button {
+                        model.destination = .chat
+                        model.draft = "/agents \(name) "
+                    } label: {
+                        Text(name).font(.system(size: 12))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private var docsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionTitle(l10n.t("Docs", "文档"))
+            Button("docs.x.ai/build") { model.openDocs() }
+                .buttonStyle(GrokSecondaryButtonStyle())
+            Button("CHANGELOG") { model.openChangelog() }
+                .buttonStyle(GrokSecondaryButtonStyle())
         }
     }
 
@@ -122,6 +269,21 @@ struct InspectorView: View {
             }
             .font(.system(size: 13))
         }
+    }
+
+    private func workflowNames() -> [String] {
+        let roots = [
+            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".grok/workflows"),
+            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".grok/bundled/workflows")
+        ]
+        var names: [String] = []
+        for root in roots {
+            guard let urls = try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil) else {
+                continue
+            }
+            names.append(contentsOf: urls.map { $0.deletingPathExtension().lastPathComponent })
+        }
+        return names
     }
 
     private func sectionTitle(_ title: String) -> some View {

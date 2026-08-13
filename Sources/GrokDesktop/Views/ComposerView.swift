@@ -26,6 +26,7 @@ struct ComposerView: View {
                         }
                         .onChange(of: model.draft) { _, value in
                             model.showPalette = value.hasPrefix("/") && !value.contains("\n")
+                            model.updateMentions(from: value)
                         }
 
                     HStack(spacing: 8) {
@@ -42,7 +43,7 @@ struct ComposerView: View {
 
                         Menu {
                             ForEach(AgentMode.allCases) { mode in
-                                Button(mode.title) { model.client.mode = mode }
+                                Button(mode.title) { model.client.setMode(mode) }
                             }
                         } label: {
                             chip(model.client.mode.title)
@@ -54,14 +55,15 @@ struct ComposerView: View {
                         usageChip
 
                         Menu {
-                            ForEach(BuildModel.allCases) { item in
-                                Button(item.title) { model.client.buildModel = item }
+                            ForEach(ModelTier.allCases) { tier in
+                                Button(tier.menuTitle) { model.client.apply(tier: tier) }
                             }
                         } label: {
-                            Text(model.client.buildModel.title)
+                            Text(model.client.modelTier.menuTitle)
                                 .font(.system(size: 13, weight: .medium))
                         }
                         .menuStyle(.borderlessButton)
+                        .help(model.client.modelTier.menuSubtitle)
 
                         Menu {
                             ForEach(EffortLevel.allCases) { level in
@@ -88,9 +90,9 @@ struct ComposerView: View {
                     }
                 }
                 .padding(14)
-                .background(palette.input, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .background(palette.input, in: RoundedRectangle(cornerRadius: GrokTheme.inputRadius, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    RoundedRectangle(cornerRadius: GrokTheme.inputRadius, style: .continuous)
                         .stroke(palette.hairline, lineWidth: 1)
                 )
 
@@ -99,6 +101,18 @@ struct ComposerView: View {
                         .offset(x: 12, y: 88)
                         .zIndex(4)
                 }
+                if let query = model.mentionQuery {
+                    mentionMenu(query)
+                        .offset(x: 12, y: 88)
+                        .zIndex(5)
+                }
+            }
+
+            if !model.client.promptQueue.isEmpty {
+                Text(l10n.t("Queued \(model.client.promptQueue.count)", "已排队 \(model.client.promptQueue.count) 条"))
+                    .font(.system(size: 11))
+                    .foregroundStyle(palette.secondary)
+                    .padding(.horizontal, 6)
             }
 
             Button {
@@ -115,6 +129,9 @@ struct ComposerView: View {
             }
             .buttonStyle(.plain)
             .padding(.horizontal, 6)
+        }
+        .onPasteCommand(of: [.image, .fileURL]) { _ in
+            model.pasteAttachments()
         }
     }
 
@@ -144,6 +161,10 @@ struct ComposerView: View {
     private var attachMenu: some View {
         VStack(alignment: .leading, spacing: 0) {
             attachItem(l10n.t("Attach file (@)", "附加文件 (@)"), systemImage: "doc") { attachFiles() }
+            attachItem(l10n.t("Paste image", "粘贴图片"), systemImage: "photo") {
+                model.showAttachMenu = false
+                model.pasteAttachments()
+            }
             attachItem(l10n.t("Working directory", "工作目录"), systemImage: "folder") {
                 model.showAttachMenu = false
                 model.chooseWorkingDirectory()
@@ -196,6 +217,43 @@ struct ComposerView: View {
             return
         }
         model.sendDraft()
+    }
+
+    private func mentionMenu(_ query: String) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("@\(query.isEmpty ? l10n.t("files", "文件") : query)")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(palette.secondary)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+            if model.mentionMatches.isEmpty {
+                Text(l10n.t("No matching files", "没有匹配的文件"))
+                    .font(.system(size: 13))
+                    .foregroundStyle(palette.secondary)
+                    .padding(12)
+            } else {
+                ForEach(model.mentionMatches, id: \.path) { url in
+                    Button {
+                        model.insertMention(url)
+                    } label: {
+                        HStack {
+                            Text(url.lastPathComponent)
+                            Spacer()
+                            Text(url.deletingLastPathComponent().lastPathComponent)
+                                .foregroundStyle(palette.secondary)
+                        }
+                        .font(.system(size: 13))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .frame(width: 280)
+        .background(palette.popover, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(palette.hairline))
+        .shadow(color: Color.black.opacity(0.12), radius: 16, y: 8)
     }
 
     private func attachFiles() {

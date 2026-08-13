@@ -53,7 +53,8 @@ struct SidebarView: View {
         VStack(spacing: 8) {
             iconButton("magnifyingglass") { model.sidebarCollapsed = false; model.showSearchField = true }
             iconButton("square.and.pencil") { model.openChat() }
-            iconButton("photo") { model.destination = .chat; model.draft = "/imagine " }
+            iconButton("circle.hexagongrid") { model.destination = .dashboard }
+            iconButton("photo") { model.destination = .imagine }
             iconButton("bolt") { model.destination = .automations }
             iconButton("square.grid.2x2") { model.destination = .skills }
             Spacer()
@@ -71,9 +72,11 @@ struct SidebarView: View {
             navRow(l10n.newChat, systemImage: "square.and.pencil", selected: model.destination == .chat) {
                 model.openChat()
             }
-            navRow(l10n.imagine, systemImage: "photo") {
-                model.destination = .chat
-                model.draft = "/imagine "
+            navRow(l10n.liveAgents, systemImage: "circle.hexagongrid", selected: model.destination == .dashboard || model.client.isLive) {
+                model.destination = .dashboard
+            }
+            navRow(l10n.imagine, systemImage: "photo", selected: model.destination == .imagine) {
+                model.destination = .imagine
             }
             navRow(l10n.automations, systemImage: "bolt", selected: model.destination == .automations) {
                 model.destination = .automations
@@ -125,10 +128,36 @@ struct SidebarView: View {
                         .buttonStyle(.plain)
                     }
 
+                    if !model.liveSessions.isEmpty {
+                        disclosure(title: l10n.liveAgents, expanded: .constant(true)) {
+                            ForEach(model.liveSessions) { session in
+                                historyRow(title: session.title, selected: true) {
+                                    model.open(session)
+                                }
+                            }
+                        }
+                    }
+
+                    if let notice = model.sidebarNotice {
+                        Text(notice)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.orange)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 4)
+                    }
+
                     disclosure(title: l10n.history, expanded: $model.historyExpanded) {
                         ForEach(model.filteredSessions) { session in
                             historyRow(title: session.title, selected: model.client.sessionID == session.id) {
                                 model.open(session)
+                            }
+                            .contextMenu {
+                                Button(l10n.t("Rename", "重命名")) {
+                                    model.renamingSession = session
+                                    model.renameDraft = session.title
+                                }
+                                Button(l10n.t("Export", "导出")) { model.export(session) }
+                                Button(l10n.t("Delete", "删除"), role: .destructive) { model.delete(session) }
                             }
                         }
                     }

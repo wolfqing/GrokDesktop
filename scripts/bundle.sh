@@ -4,6 +4,8 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 
+version="${VERSION:-0.1.0}"
+
 swift build -c release --product GrokDesktop
 
 bin="$root/.build/release/GrokDesktop"
@@ -15,7 +17,7 @@ rm -rf "$app"
 mkdir -p "$macos" "$res"
 cp "$bin" "$macos/GrokDesktop"
 
-cat > "$app/Contents/Info.plist" <<'PLIST'
+cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -35,7 +37,7 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>0.1.0</string>
+  <string>${version}</string>
   <key>CFBundleVersion</key>
   <string>1</string>
   <key>LSMinimumSystemVersion</key>
@@ -50,4 +52,8 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
+zip="$root/dist/Grok-Desktop-${version}.zip"
+rm -f "$zip"
+ditto -c -k --keepParent "$app" "$zip"
 echo "Built $app"
+echo "Zipped $zip"

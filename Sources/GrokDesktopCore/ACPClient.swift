@@ -3,6 +3,7 @@ import Foundation
 public enum ACPConnectionState: Equatable, Sendable {
     case idle
     case connecting
+    case initialized
     case ready
     case failed(String)
 }
@@ -17,28 +18,47 @@ public final class ACPClient: ObservableObject {
     @Published public private(set) var isTurnRunning = false
     @Published public private(set) var permission: PermissionRequest?
     @Published public private(set) var lastError: String?
+    @Published public private(set) var stderrLines: [String] = []
+    @Published public private(set) var decodeFailures = 0
+    @Published public private(set) var grokVersion: String?
     @Published public var workingDirectory: URL
-    @Published public var modelTier: ModelTier = .expert
-    @Published public var buildModel: BuildModel = .grokBuild
-    @Published public var effort: EffortLevel = .xhigh
+    @Published public var modelTier: ModelTier = .auto
+    @Published public var buildModel: BuildModel = .grok45
+    @Published public var effort: EffortLevel = .medium
     @Published public var mode: AgentMode = .normal
+    @Published public var planEntries: [PlanEntry] = []
+    @Published public var planMarkdown = ""
+    @Published public var hunks: [FileHunk] = []
+    @Published public var promptQueue: [String] = []
+    @Published public var sessionDirectory: URL?
+    @Published public private(set) var liveWorkspaces: [SessionWorkspace] = []
+    @Published public private(set) var authPresence: AuthPresence = .signedOut
+    @Published public private(set) var authChallenge: AuthChallenge?
+    @Published public private(set) var itemDates: [String: Date] = [:]
+    @Published public var allowEditsThisSession = false
+    @Published public private(set) var capabilities = AgentCapabilities()
+    @Published public var gitStatusText = ""
+    @Published public var gitDiffText = ""
 
-    public var runningTools: Int {
-        items.reduce(0) { count, item in
-            if case .tool(_, _, let status, _) = item, status == "running" || status == "pending" {
-                return count + 1
-            }
-            return count
-        }
+    public var runningTools: Int { currentWorkspace?.runningTools ?? 0 }
+
+    public var finishedTools: Int { currentWorkspace?.finishedTools ?? 0 }
+
+    public var isLive: Bool {
+        liveWorkspaces.contains { $0.isLive }
     }
 
-    public var finishedTools: Int {
-        items.reduce(0) { count, item in
-            if case .tool = item { return count + 1 }
-            return count
-        }
+    public var currentWorkspace: SessionWorkspace? {
+        sessionID.flatMap { workspaceByID[$0] }
     }
 
+    public var backgroundPermissions: [SessionWorkspace] {
+        liveWorkspaces.filter { $0.id != sessionID && $0.permission != nil }
+    }
+
+    public var config: GrokConfig { configStore.load() }
+
+    private let configStore: ConfigStore
     private var process: Process?
     private var stdinHandle: FileHandle?
     private var nextID = 1
@@ -46,30 +66,49 @@ public final class ACPClient: ObservableObject {
     private var stdoutBuffer = Data()
     private var assistantBufferID: String?
     private var thoughtBufferID: String?
+    private var sessionAllowTitles: Set<String> = []
+    private var lastSessionID: String?
+    private var shouldReconnect = true
+    private var reconnectTask: Task<Void, Never>?
+    private var workspaceByID: [String: SessionWorkspace] = [:]
 
     public init(
         locator: GrokBinaryLocator = GrokBinaryLocator(),
-        workingDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+        workingDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
+        configStore: ConfigStore = ConfigStore()
     ) {
         self.locator = locator
         self.workingDirectory = workingDirectory
+        self.configStore = configStore
+        apply(tier: .auto)
+        grokVersion = Self.readVersion(locator: locator)
+        authPresence = AuthPresence.probe()
     }
 
     public var grokURL: URL? { locator.locate() }
 
+    public func apply(tier: ModelTier) {
+        modelTier = tier
+        let applied = tier.applied(config: configStore.load())
+        buildModel = applied.model
+        effort = applied.effort
+    }
+
     public func connectIfNeeded() async throws {
-        if state == .ready, process?.isRunning == true { return }
+        if (state == .initialized || state == .ready), process?.isRunning == true { return }
         try await start()
     }
 
     public func start() async throws {
-        stop()
+        stop(reconnect: false)
+        shouldReconnect = true
         guard let grok = locator.locate() else {
             state = .failed(ACPError.grokNotFound.localizedDescription)
             throw ACPError.grokNotFound
         }
 
         state = .connecting
+        grokVersion = Self.readVersion(locator: locator)
         let process = Process()
         process.executableURL = grok
         process.arguments = ["agent", "--no-leader", "stdio"]
@@ -100,8 +139,12 @@ public final class ACPClient: ObservableObject {
                 self?.consume(stdout: chunk)
             }
         }
-        stderr.fileHandleForReading.readabilityHandler = { handle in
-            _ = handle.availableData
+        stderr.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let chunk = handle.availableData
+            guard !chunk.isEmpty, let text = String(data: chunk, encoding: .utf8) else { return }
+            Task { @MainActor in
+                self?.appendStderr(text)
+            }
         }
         process.terminationHandler = { [weak self] proc in
             Task { @MainActor in
@@ -112,7 +155,7 @@ public final class ACPClient: ObservableObject {
         try process.run()
         self.process = process
 
-        _ = try await request(
+        let handshake = try await request(
             method: "initialize",
             params: [
                 "protocolVersion": 1,
@@ -129,7 +172,12 @@ public final class ACPClient: ObservableObject {
                 ]
             ]
         )
-        state = .ready
+        capabilities = AgentCapabilities.parse(handshake.result)
+        state = .initialized
+        refreshAuth()
+        if authPresence == .signedOut, capabilities.authMethods.isEmpty == false {
+            // Agent advertised auth; session/new will fail until the user signs in.
+        }
     }
 
     public func newSession(cwd: URL? = nil) async throws {
@@ -153,73 +201,173 @@ public final class ACPClient: ObservableObject {
             ]
         )
         sessionID = firstString(result.result, keys: ["sessionId", "session_id"])
-        items = []
-        assistantBufferID = nil
-        thoughtBufferID = nil
-        permission = nil
-    }
-
-    public func loadSession(id: String, cwd: URL) async throws {
-        try await connectIfNeeded()
-        workingDirectory = cwd
-        _ = try await request(
-            method: "session/load",
-            params: [
-                "sessionId": id,
-                "cwd": cwd.path
-            ]
-        )
-        sessionID = id
-        items = [
-            .notice(id: UUID().uuidString, text: "Resumed session. New messages continue from here.")
-        ]
-        assistantBufferID = nil
-        thoughtBufferID = nil
-    }
-
-    public func send(text: String) async throws {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        try await connectIfNeeded()
-        if sessionID == nil {
-            try await newSession()
-        }
+        lastSessionID = sessionID
         guard let sessionID else {
             throw ACPError.rpc("No session")
         }
+        let directory = SessionIndex().directory(cwd: workingDirectory.path, id: sessionID)
+        sessionDirectory = directory
+        let workspace = ensureWorkspace(id: sessionID, cwd: workingDirectory, directory: directory)
+        workspace.items = []
+        workspace.planEntries = []
+        workspace.planMarkdown = ""
+        workspace.hunks = []
+        workspace.promptQueue = []
+        workspace.sessionAllowTitles = []
+        workspace.assistantBufferID = nil
+        workspace.thoughtBufferID = nil
+        workspace.permission = nil
+        workspace.lastError = nil
+        workspace.mode = mode
+        workspace.loadedOnAgent = true
+        lastError = nil
+        state = .ready
+        syncFromCurrent()
+        refreshPlanArtifacts()
+    }
 
-        items.append(.user(id: UUID().uuidString, text: trimmed))
-        isTurnRunning = true
-        assistantBufferID = nil
-        thoughtBufferID = nil
+    @discardableResult
+    public func focusIfLoaded(_ id: String) -> Bool {
+        guard let workspace = workspaceByID[id], workspace.loadedOnAgent || workspace.isLive else {
+            return false
+        }
+        sessionID = workspace.id
+        lastSessionID = workspace.id
+        workingDirectory = workspace.cwd
+        sessionDirectory = workspace.directory
+        mode = workspace.mode
+        state = .ready
+        syncFromCurrent()
+        return true
+    }
 
+    public func loadSession(id: String, cwd: URL, directory: URL? = nil) async throws {
+        if focusIfLoaded(id) { return }
+        try await connectIfNeeded()
+        workingDirectory = cwd
+        sessionDirectory = directory ?? SessionIndex().directory(cwd: cwd.path, id: id)
+        let workspace = ensureWorkspace(id: id, cwd: cwd, directory: sessionDirectory)
+        workspace.refreshArtifacts()
+        let transcript = sessionDirectory.map { TranscriptLoader.load(sessionDirectory: $0) }
+        if let transcript {
+            workspace.items = transcript.items
+            workspace.planEntries = transcript.planEntries
+            workspace.planMarkdown = transcript.planMarkdown
+            workspace.hunks = transcript.hunks
+        }
+        workspace.assistantBufferID = nil
+        workspace.thoughtBufferID = nil
+        if !workspace.isLive {
+            workspace.permission = nil
+        }
+        sessionID = id
+        lastSessionID = id
+        syncFromCurrent()
+        do {
+            _ = try await request(
+                method: "session/load",
+                params: [
+                    "sessionId": id,
+                    "cwd": cwd.path,
+                    "mcpServers": []
+                ]
+            )
+            workspace.loadedOnAgent = true
+            workspace.lastError = nil
+            lastError = nil
+            state = .ready
+        } catch {
+            workspace.lastError = error.localizedDescription
+            lastError = error.localizedDescription
+            if workspace.items.isEmpty {
+                workspace.items = [.notice(id: UUID().uuidString, text: error.localizedDescription)]
+            } else {
+                workspace.items.append(.notice(id: UUID().uuidString, text: error.localizedDescription))
+            }
+            syncFromCurrent()
+            throw error
+        }
+        workspace.refreshArtifacts()
+        syncFromCurrent()
+    }
+
+    public func send(text: String, sessionID target: String? = nil) async throws {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        try await connectIfNeeded()
+        if sessionID == nil, target == nil {
+            try await newSession()
+        }
+        let id = target ?? sessionID
+        guard let id, let workspace = workspaceByID[id] ?? currentWorkspace else {
+            throw ACPError.rpc("No session")
+        }
+        if workspace.isTurnRunning {
+            workspace.promptQueue.append(trimmed)
+            syncFromCurrent()
+            return
+        }
+
+        if workspace.items.last.flatMap({ item -> String? in
+            if case .user(_, let existing) = item { return existing }
+            return nil
+        }) != trimmed {
+            workspace.items.append(.user(id: UUID().uuidString, text: trimmed))
+        }
+        workspace.isTurnRunning = true
+        workspace.assistantBufferID = nil
+        workspace.thoughtBufferID = nil
+        workspace.lastError = nil
+        lastError = nil
+        syncFromCurrent()
+
+        apply(tier: modelTier)
         var params: [String: Any] = [
-            "sessionId": sessionID,
+            "sessionId": id,
             "prompt": [["type": "text", "text": trimmed]],
             "model": buildModel.rawValue
         ]
-        params["_meta"] = [
+        var meta: [String: Any] = [
             "effort": effort.rawValue,
-            "yoloMode": mode == .alwaysApprove,
-            "autoMode": mode == .auto
+            "yoloMode": workspace.mode == .alwaysApprove,
+            "autoMode": workspace.mode == .auto
         ]
+        if modelTier == .heavy {
+            meta["allowSubagents"] = true
+        }
+        params["_meta"] = meta
         do {
             _ = try await request(method: "session/prompt", params: params)
         } catch {
+            workspace.lastError = error.localizedDescription
+            workspace.items.append(.notice(id: UUID().uuidString, text: error.localizedDescription))
             lastError = error.localizedDescription
-            items.append(.notice(id: UUID().uuidString, text: error.localizedDescription))
         }
-        isTurnRunning = false
+        workspace.isTurnRunning = false
+        workspace.refreshArtifacts()
+        syncFromCurrent()
+        if let next = workspace.promptQueue.first {
+            workspace.promptQueue.removeFirst()
+            try await send(text: next, sessionID: id)
+        }
     }
 
-    public func cancelTurn() {
-        guard let sessionID else { return }
-        fire(method: "session/cancel", params: ["sessionId": sessionID])
-        isTurnRunning = false
+    public func cancelTurn(sessionID target: String? = nil) {
+        let id = target ?? sessionID
+        guard let id else { return }
+        fire(method: "session/cancel", params: ["sessionId": id])
+        if let workspace = workspaceByID[id] {
+            workspace.isTurnRunning = false
+        }
+        syncFromCurrent()
     }
 
-    public func answerPermission(optionID: String) {
-        guard let permission else { return }
+    public func answerPermission(optionID: String, rememberSession: Bool = false, sessionID target: String? = nil) {
+        let workspace = (target ?? sessionID).flatMap { workspaceByID[$0] } ?? currentWorkspace
+        guard let workspace, let permission = workspace.permission else { return }
+        if rememberSession {
+            workspace.sessionAllowTitles.insert(permission.title)
+        }
         respond(
             id: permission.id,
             result: [
@@ -229,29 +377,191 @@ public final class ACPClient: ObservableObject {
                 ]
             ]
         )
-        self.permission = nil
+        workspace.permission = nil
+        syncFromCurrent()
     }
 
-    public func rejectPermission() {
-        guard let permission else { return }
+    public func rejectPermission(sessionID target: String? = nil) {
+        let workspace = (target ?? sessionID).flatMap { workspaceByID[$0] } ?? currentWorkspace
+        guard let workspace, let permission = workspace.permission else { return }
         if let cancel = permission.options.first(where: { $0.kind.contains("reject") || $0.id.contains("cancel") }) {
-            answerPermission(optionID: cancel.id)
+            answerPermission(optionID: cancel.id, sessionID: workspace.id)
             return
         }
         respond(id: permission.id, result: ["outcome": ["outcome": "cancelled"]])
-        self.permission = nil
+        workspace.permission = nil
+        syncFromCurrent()
+    }
+
+    public func approvePlan() async {
+        if let permission, isPlanPermission(permission) {
+            if let allow = permission.options.first(where: { !$0.kind.contains("reject") }) {
+                answerPermission(optionID: allow.id)
+            }
+        }
+        mode = .normal
+        try? await send(text: "Approve the plan in plan.md and start implementing.")
+    }
+
+    public func requestPlanChanges(_ note: String) async {
+        mode = .plan
+        let body = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        try? await send(text: body.isEmpty ? "Request changes to the plan. Revise plan.md." : body)
+    }
+
+    public func quitPlan() {
+        mode = .normal
+        if let permission, isPlanPermission(permission) {
+            rejectPermission()
+        }
+    }
+
+    public func forkSession() async throws {
+        guard let sessionID else { throw ACPError.rpc("No session") }
+        do {
+            let result = try await request(
+                method: "x.ai/session/fork",
+                params: ["sessionId": sessionID]
+            )
+            if let forked = firstString(result.result, keys: ["sessionId", "session_id"]) {
+                try await loadSession(id: forked, cwd: workingDirectory)
+                return
+            }
+        } catch {
+            lastError = error.localizedDescription
+        }
+        try await send(text: "/fork")
+    }
+
+    public func dropWorkspace(_ id: String) {
+        workspaceByID[id] = nil
+        if sessionID == id {
+            resetConversation()
+        } else {
+            refreshLive()
+        }
     }
 
     public func resetConversation() {
-        items = []
         sessionID = nil
+        items = []
         permission = nil
         assistantBufferID = nil
         thoughtBufferID = nil
         isTurnRunning = false
+        planEntries = []
+        planMarkdown = ""
+        hunks = []
+        promptQueue = []
+        sessionAllowTitles = []
+        sessionDirectory = nil
+        if process?.isRunning == true {
+            state = .initialized
+        }
+        refreshLive()
+    }
+
+    public func refreshAuth() {
+        authPresence = AuthPresence.probe()
+    }
+
+    @discardableResult
+    public func beginLogin() async throws -> AuthChallenge {
+        try await connectIfNeeded()
+        do {
+            let result = try await request(method: "x.ai/auth/get_url", params: [:])
+            let challenge = AuthChallenge.parse(result.result)
+            authChallenge = challenge
+            return challenge
+        } catch {
+            authChallenge = AuthChallenge(message: error.localizedDescription)
+            throw error
+        }
+    }
+
+    public func submitLoginCode(_ code: String) async throws {
+        _ = try await request(method: "x.ai/auth/submit_code", params: ["code": code])
+        refreshAuth()
+        authChallenge = nil
     }
 
     public func stop() {
+        stop(reconnect: false)
+    }
+
+    public func dismissError() {
+        lastError = nil
+        currentWorkspace?.lastError = nil
+    }
+
+    public func setMode(_ newMode: AgentMode) {
+        mode = newMode
+        currentWorkspace?.mode = newMode
+    }
+
+    public func setAllowEditsThisSession(_ enabled: Bool) {
+        allowEditsThisSession = enabled
+        currentWorkspace?.allowEditsThisSession = enabled
+    }
+
+    public func rewind() async {
+        guard let sessionID else { return }
+        do {
+            _ = try await request(method: "x.ai/rewind", params: ["sessionId": sessionID])
+        } catch {
+            try? await send(text: "/rewind")
+        }
+    }
+
+    public func refreshGit() async {
+        gitStatusText = ""
+        gitDiffText = ""
+        if let status = try? await request(method: "x.ai/git/status", params: ["cwd": workingDirectory.path]) {
+            gitStatusText = Self.pretty(status.result)
+        }
+        if let diffs = try? await request(method: "x.ai/git/diffs", params: ["cwd": workingDirectory.path]) {
+            gitDiffText = Self.pretty(diffs.result)
+        }
+        if gitStatusText.isEmpty, gitDiffText.isEmpty {
+            // keep WorkspaceSnapshot as the fallback
+        }
+    }
+
+    public func listRemoteFiles(query: String) async -> [URL] {
+        guard let result = try? await request(
+            method: "x.ai/fs/list",
+            params: [
+                "path": workingDirectory.path,
+                "query": query
+            ]
+        ) else { return [] }
+        return Self.urls(from: result.result)
+    }
+
+    public func compact(note: String = "") async {
+        guard let sessionID else { return }
+        do {
+            var params: [String: Any] = ["sessionId": sessionID]
+            if !note.isEmpty { params["context"] = note }
+            _ = try await request(method: "x.ai/compact_conversation", params: params)
+        } catch {
+            try? await send(text: note.isEmpty ? "/compact" : "/compact \(note)")
+        }
+    }
+
+    private func isEditPermission(_ request: PermissionRequest) -> Bool {
+        let blob = (request.title + " " + request.options.map(\.id).joined()).lowercased()
+        return blob.contains("edit") || blob.contains("write") || blob.contains("search_replace") || blob.contains("apply")
+    }
+
+    public func refreshPlanArtifacts() {
+        currentWorkspace?.refreshArtifacts()
+        syncFromCurrent()
+    }
+
+    private func stop(reconnect: Bool) {
+        shouldReconnect = reconnect
+        reconnectTask?.cancel()
         stdinHandle = nil
         process?.terminationHandler = nil
         process?.terminate()
@@ -260,8 +570,9 @@ public final class ACPClient: ObservableObject {
             continuation.resume(throwing: ACPError.processExited(1))
         }
         pending.removeAll()
-        state = .idle
-        sessionID = nil
+        if !reconnect {
+            state = .idle
+        }
         isTurnRunning = false
     }
 
@@ -270,10 +581,31 @@ public final class ACPClient: ObservableObject {
             continuation.resume(throwing: ACPError.processExited(code))
         }
         pending.removeAll()
-        if state == .ready || state == .connecting {
-            state = .failed(ACPError.processExited(code).localizedDescription)
+        let message = ACPError.processExited(code).localizedDescription
+        if state == .ready || state == .connecting || state == .initialized {
+            state = .failed(message)
+            lastError = message
+        }
+        for workspace in workspaceByID.values {
+            workspace.isTurnRunning = false
+            workspace.loadedOnAgent = false
         }
         isTurnRunning = false
+        refreshLive()
+        guard shouldReconnect, lastSessionID != nil else { return }
+        reconnectTask?.cancel()
+        reconnectTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            guard let self, !Task.isCancelled else { return }
+            do {
+                try await self.start()
+                if let id = self.lastSessionID {
+                    try await self.loadSession(id: id, cwd: self.workingDirectory, directory: self.sessionDirectory)
+                }
+            } catch {
+                self.lastError = error.localizedDescription
+            }
+        }
     }
 
     private func consume(stdout chunk: Data) {
@@ -287,11 +619,52 @@ public final class ACPClient: ObservableObject {
     }
 
     private func handle(line: Data) {
-        guard let envelope = try? JSONRPCEnvelope.decode(line) else { return }
+        guard let envelope = try? JSONRPCEnvelope.decode(line) else {
+            decodeFailures += 1
+            appendStderr("Invalid ACP JSON: \(String(data: line, encoding: .utf8) ?? "<binary>")")
+            if decodeFailures >= 8 {
+                lastError = "Repeated invalid ACP JSON. Reconnecting."
+                process?.terminate()
+            }
+            return
+        }
 
         if let method = envelope.method, envelope.id != nil, method == "session/request_permission" {
             if let id = envelope.id {
-                permission = PermissionRequest.parse(id: id, params: envelope.params)
+                let request = PermissionRequest.parse(id: id, params: envelope.params)
+                let workspace = ensureWorkspace(
+                    id: request.sessionId ?? sessionID ?? UUID().uuidString,
+                    cwd: workingDirectory,
+                    directory: sessionDirectory
+                )
+                if workspace.allowEditsThisSession, isEditPermission(request),
+                   let allow = request.options.first(where: { !$0.kind.contains("reject") }) {
+                    respond(
+                        id: id,
+                        result: [
+                            "outcome": [
+                                "outcome": "selected",
+                                "optionId": allow.id
+                            ]
+                        ]
+                    )
+                    return
+                }
+                if workspace.sessionAllowTitles.contains(request.title),
+                   let allow = request.options.first(where: { !$0.kind.contains("reject") }) {
+                    respond(
+                        id: id,
+                        result: [
+                            "outcome": [
+                                "outcome": "selected",
+                                "optionId": allow.id
+                            ]
+                        ]
+                    )
+                    return
+                }
+                workspace.permission = request
+                syncFromCurrent()
             }
             return
         }
@@ -312,62 +685,77 @@ public final class ACPClient: ObservableObject {
     }
 
     private func apply(update: SessionUpdate) {
-        switch update.kind {
-        case .agentMessageChunk:
-            appendStreaming(kind: .assistant, text: update.text)
-        case .agentThoughtChunk:
-            appendStreaming(kind: .thought, text: update.text)
-        case .toolCall, .toolCallUpdate:
-            let id = update.toolCallId ?? UUID().uuidString
-            if let index = items.firstIndex(where: { $0.id == id }) {
-                items[index] = .tool(
-                    id: id,
-                    title: update.title.isEmpty ? toolTitle(items[index]) : update.title,
-                    status: update.status ?? "running",
-                    detail: update.text
-                )
-            } else {
-                items.append(.tool(
-                    id: id,
-                    title: update.title.isEmpty ? "Tool" : update.title,
-                    status: update.status ?? "running",
-                    detail: update.text
-                ))
-            }
-        case .plan:
-            items.append(.notice(id: UUID().uuidString, text: "Plan updated."))
-        case .unknown:
-            break
+        let id = update.sessionId ?? sessionID
+        guard let id else { return }
+        let workspace = ensureWorkspace(id: id, cwd: workingDirectory, directory: sessionDirectory)
+        if update.kind == .userMessageChunk,
+           case .user(_, let existing)? = workspace.items.last,
+           existing.hasSuffix(update.text) || existing == update.text {
+            return
         }
+        let previousIDs = Set(workspace.items.map(\.id))
+        TranscriptLoader.apply(
+            update: update,
+            items: &workspace.items,
+            planEntries: &workspace.planEntries,
+            assistantID: &workspace.assistantBufferID,
+            thoughtID: &workspace.thoughtBufferID
+        )
+        for item in workspace.items where previousIDs.contains(item.id) == false {
+            workspace.itemDates[item.id] = Date()
+        }
+        if update.kind == .plan {
+            workspace.refreshArtifacts()
+        }
+        syncFromCurrent()
     }
 
-    private func toolTitle(_ item: ConversationItem) -> String {
-        if case .tool(_, let title, _, _) = item { return title }
-        return "Tool"
+    @discardableResult
+    private func ensureWorkspace(id: String, cwd: URL, directory: URL?) -> SessionWorkspace {
+        if let existing = workspaceByID[id] {
+            existing.cwd = cwd
+            if let directory { existing.directory = directory }
+            return existing
+        }
+        let workspace = SessionWorkspace(id: id, cwd: cwd, directory: directory)
+        workspace.mode = mode
+        workspaceByID[id] = workspace
+        return workspace
     }
 
-    private enum StreamKind { case assistant, thought }
+    private func syncFromCurrent() {
+        if let workspace = currentWorkspace {
+            items = workspace.items
+            isTurnRunning = workspace.isTurnRunning
+            permission = workspace.permission
+            lastError = workspace.lastError ?? lastError
+            planEntries = workspace.planEntries
+            planMarkdown = workspace.planMarkdown
+            hunks = workspace.hunks
+            promptQueue = workspace.promptQueue
+            sessionDirectory = workspace.directory
+            workingDirectory = workspace.cwd
+            mode = workspace.mode
+            allowEditsThisSession = workspace.allowEditsThisSession
+            itemDates = workspace.itemDates
+        }
+        refreshLive()
+    }
 
-    private func appendStreaming(kind: StreamKind, text: String) {
-        switch kind {
-        case .assistant:
-            if let id = assistantBufferID, let index = items.firstIndex(where: { $0.id == id }),
-               case .assistant(_, let existing, _) = items[index] {
-                items[index] = .assistant(id: id, text: existing + text, done: false)
-            } else {
-                let id = UUID().uuidString
-                assistantBufferID = id
-                items.append(.assistant(id: id, text: text, done: false))
-            }
-        case .thought:
-            if let id = thoughtBufferID, let index = items.firstIndex(where: { $0.id == id }),
-               case .thought(_, let existing) = items[index] {
-                items[index] = .thought(id: id, text: existing + text)
-            } else {
-                let id = UUID().uuidString
-                thoughtBufferID = id
-                items.append(.thought(id: id, text: text))
-            }
+    private func refreshLive() {
+        liveWorkspaces = workspaceByID.values.filter(\.isLive).sorted { $0.id < $1.id }
+    }
+
+    private func isPlanPermission(_ request: PermissionRequest) -> Bool {
+        let blob = (request.title + request.options.map(\.id).joined()).lowercased()
+        return blob.contains("plan") || blob.contains("exit_plan")
+    }
+
+    private func appendStderr(_ text: String) {
+        let parts = text.split(whereSeparator: \.isNewline).map(String.init).filter { !$0.isEmpty }
+        stderrLines.append(contentsOf: parts)
+        if stderrLines.count > 200 {
+            stderrLines.removeFirst(stderrLines.count - 200)
         }
     }
 
@@ -409,5 +797,56 @@ public final class ACPClient: ObservableObject {
             if let string = dict[key] as? String { return string }
         }
         return nil
+    }
+
+    static func pretty(_ value: Any?) -> String {
+        guard let value else { return "" }
+        if let text = value as? String { return text }
+        if JSONSerialization.isValidJSONObject(value),
+           let data = try? JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys]),
+           let text = String(data: data, encoding: .utf8) {
+            return String(text.prefix(4000))
+        }
+        return String(describing: value)
+    }
+
+    static func urls(from value: Any?) -> [URL] {
+        var paths: [String] = []
+        if let list = value as? [String] {
+            paths = list
+        } else if let dict = value as? [String: Any] {
+            if let list = dict["entries"] as? [String] { paths = list }
+            if let list = dict["files"] as? [String] { paths = list }
+            if let list = dict["paths"] as? [String] { paths = list }
+            if let entries = dict["entries"] as? [[String: Any]] {
+                paths.append(contentsOf: entries.compactMap { $0["path"] as? String ?? $0["name"] as? String })
+            }
+        }
+        return paths.compactMap { path in
+            if path.hasPrefix("/") { return URL(fileURLWithPath: path) }
+            return nil
+        }
+    }
+
+    public static func readVersion(locator: GrokBinaryLocator) -> String? {
+        guard let grok = locator.locate() else { return nil }
+        let process = Process()
+        process.executableURL = grok
+        process.arguments = ["--version"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return nil
+        }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        return String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(whereSeparator: \.isNewline)
+            .first
+            .map(String.init)
     }
 }

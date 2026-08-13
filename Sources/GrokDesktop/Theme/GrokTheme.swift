@@ -27,10 +27,10 @@ enum AppearancePreference: String, CaseIterable, Identifiable {
 struct Palette: Equatable {
     var isDark: Bool
 
-    var canvas: Color { isDark ? Color(white: 0.02) : Color.white }
-    var sidebar: Color { isDark ? Color(white: 0.06) : Color(red: 0.973, green: 0.973, blue: 0.973) }
+    var canvas: Color { isDark ? Color(hex: 0x000000) : Color.white }
+    var sidebar: Color { isDark ? Color(hex: 0x0B0B0B) : Color(red: 0.973, green: 0.973, blue: 0.973) }
     var elevated: Color { isDark ? Color(white: 0.11) : Color.white }
-    var input: Color { isDark ? Color(white: 0.10) : Color(white: 0.965) }
+    var input: Color { isDark ? Color(hex: 0x161616) : Color(white: 0.965) }
     var hairline: Color { Color.primary.opacity(isDark ? 0.12 : 0.08) }
     var text: Color { isDark ? Color(white: 0.96) : Color(white: 0.08) }
     var secondary: Color { isDark ? Color(white: 0.58) : Color(white: 0.40) }
@@ -62,8 +62,19 @@ extension EnvironmentValues {
 }
 
 enum GrokTheme {
-    static let contentWidth: CGFloat = 720
-    static let sidebarWidth: CGFloat = 268
+    static let contentWidth: CGFloat = 760
+    static let sidebarWidth: CGFloat = 260
     static let collapsedSidebarWidth: CGFloat = 64
     static let inspectorWidth: CGFloat = 320
+    static let inputRadius: CGFloat = 28
+}
+
+private extension Color {
+    init(hex: UInt32) {
+        self.init(
+            red: Double((hex >> 16) & 0xFF) / 255,
+            green: Double((hex >> 8) & 0xFF) / 255,
+            blue: Double(hex & 0xFF) / 255
+        )
+    }
 }

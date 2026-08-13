@@ -16,21 +16,47 @@ struct ChatView: View {
             } else if model.client.items.isEmpty {
                 emptyState
             } else {
+                if let other = model.client.backgroundPermissions.first {
+                    Button {
+                        _ = model.client.focusIfLoaded(other.id)
+                    } label: {
+                        HStack {
+                            Image(systemName: "exclamationmark.circle")
+                            Text(l10n.t("Another session is waiting for approval", "另一个会话在等你批准"))
+                            Spacer()
+                            Text(other.title.isEmpty ? String(other.id.prefix(8)) : other.title)
+                                .foregroundStyle(palette.secondary)
+                        }
+                        .font(.system(size: 12))
+                        .padding(10)
+                        .background(palette.chip, in: RoundedRectangle(cornerRadius: 10))
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 8)
+                }
+
                 ScrollViewReader { proxy in
                     ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 22) {
-                            ForEach(model.client.items) { item in
+                        LazyVStack(alignment: .leading, spacing: model.compactChat ? 10 : 22) {
+                            ForEach(displayedItems) { item in
                                 messageRow(item)
                                     .id(item.id)
                             }
                         }
                         .frame(maxWidth: GrokTheme.contentWidth)
-                        .padding(.vertical, 28)
+                        .padding(.vertical, model.compactChat ? 14 : 28)
                         .frame(maxWidth: .infinity)
                     }
                     .onChange(of: model.client.items.count) { _, _ in
                         if model.autoScroll, let last = model.client.items.last {
                             proxy.scrollTo(last.id, anchor: .bottom)
+                        }
+                    }
+                    .onChange(of: model.jumpTarget) { _, target in
+                        if let target {
+                            proxy.scrollTo(target, anchor: .center)
+                            model.jumpTarget = nil
                         }
                     }
                 }
@@ -42,6 +68,22 @@ struct ChatView: View {
                 }
 
                 composerBlock
+            }
+
+            if let error = model.client.lastError, model.firstRunReason == nil {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                    Text(error)
+                        .textSelection(.enabled)
+                    Spacer()
+                    Button(l10n.t("Dismiss", "关闭")) { model.client.dismissError() }
+                        .buttonStyle(.plain)
+                }
+                .font(.system(size: 12))
+                .padding(10)
+                .background(Color.orange.opacity(0.15), in: RoundedRectangle(cornerRadius: 10))
+                .padding(.horizontal, 24)
+                .padding(.bottom, 8)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -81,6 +123,17 @@ struct ChatView: View {
                 .font(.system(size: 12))
                 .foregroundStyle(palette.secondary)
                 .lineLimit(1)
+                Button(model.client.mode.title) { model.cycleMode() }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(palette.secondary)
+                    .help("Shift+Tab")
+                Text(model.client.modelTier.menuTitle)
+                    .font(.system(size: 11))
+                    .foregroundStyle(palette.secondary)
+                Text("\(model.workspace.contextPercent)%")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(palette.secondary)
             }
             Spacer()
             Button {
@@ -117,24 +170,54 @@ struct ChatView: View {
         }
     }
 
+    private var displayedItems: [ConversationItem] {
+        var result: [ConversationItem] = []
+        for item in model.client.items {
+            if case .thought = item, !model.showThinkingBlocks { continue }
+            if model.mergeToolRows,
+               case .tool(_, let title, _, _) = item,
+               case .tool(_, let previous, _, _) = result.last,
+               previous == title {
+                continue
+            }
+            result.append(item)
+        }
+        return result
+    }
+
+    @ViewBuilder
+    private func timestamp(_ id: String) -> some View {
+        if model.showTimestamps, let date = model.client.itemDates[id] {
+            Text(date, style: .time)
+                .font(.system(size: 11))
+                .foregroundStyle(palette.secondary)
+        }
+    }
+
     @ViewBuilder
     private func messageRow(_ item: ConversationItem) -> some View {
         switch item {
-        case .user(_, let text):
+        case .user(let id, let text):
             HStack {
                 Spacer(minLength: 80)
-                Text(text)
-                    .font(.system(size: 16))
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                    .background(palette.selected, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                VStack(alignment: .trailing, spacing: 4) {
+                    timestamp(id)
+                    Text(text)
+                        .font(.system(size: model.compactChat ? 14 : 16))
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, model.compactChat ? 8 : 12)
+                        .background(palette.selected, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                }
             }
-            .padding(.horizontal, 28)
-        case .assistant(_, let text, _):
-            Text(text.isEmpty ? "…" : text)
-                .font(.system(size: 16))
-                .textSelection(.enabled)
-                .padding(.horizontal, 28)
+            .padding(.horizontal, model.compactChat ? 16 : 28)
+        case .assistant(let id, let text, _):
+            VStack(alignment: .leading, spacing: 4) {
+                timestamp(id)
+                Text(text.isEmpty ? "…" : text)
+                    .font(.system(size: model.compactChat ? 14 : 16))
+                    .textSelection(.enabled)
+            }
+            .padding(.horizontal, model.compactChat ? 16 : 28)
         case .thought(_, let text):
             DisclosureGroup(l10n.think) {
                 Text(text)
@@ -142,9 +225,17 @@ struct ChatView: View {
                     .foregroundStyle(palette.secondary)
                     .textSelection(.enabled)
             }
-            .padding(.horizontal, 28)
-        case .tool(_, let title, let status, let detail):
-            VStack(alignment: .leading, spacing: 6) {
+            .padding(.horizontal, model.compactChat ? 16 : 28)
+        case .tool(let id, let title, let status, let detail):
+            DisclosureGroup {
+                if !detail.isEmpty {
+                    Text(detail)
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(palette.secondary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } label: {
                 HStack {
                     Image(systemName: "wrench.and.screwdriver")
                     Text(title)
@@ -153,16 +244,11 @@ struct ChatView: View {
                         .foregroundStyle(palette.secondary)
                 }
                 .font(.system(size: 13, weight: .medium))
-                if !detail.isEmpty {
-                    Text(detail)
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(palette.secondary)
-                        .lineLimit(model.wrapCodeLines ? 20 : 8)
-                }
             }
             .padding(12)
             .background(palette.chip, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .padding(.horizontal, 28)
+            .help(id)
         case .notice(_, let text):
             Text(text)
                 .font(.system(size: 13))

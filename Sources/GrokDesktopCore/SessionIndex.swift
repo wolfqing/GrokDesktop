@@ -68,6 +68,29 @@ public struct SessionIndex {
             .map { $0 }
     }
 
+    public func directory(cwd: String, id: String) -> URL {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
+        let encoded = cwd.addingPercentEncoding(withAllowedCharacters: allowed) ?? cwd
+        return sessionsRoot.appendingPathComponent(encoded, isDirectory: true)
+            .appendingPathComponent(id, isDirectory: true)
+    }
+
+    public func rename(_ record: SessionRecord, title: String) {
+        let url = record.directory.appendingPathComponent("summary.json")
+        guard let data = try? Data(contentsOf: url),
+              var object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return }
+        object["generated_title"] = title
+        object["session_summary"] = title
+        if let encoded = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]) {
+            try? encoded.write(to: url, options: .atomic)
+        }
+    }
+
+    public func delete(_ record: SessionRecord) throws {
+        try fileManager.removeItem(at: record.directory)
+    }
+
     public func decode(summaryURL: URL) -> SessionRecord? {
         guard let data = try? Data(contentsOf: summaryURL),
               let object = try? JSONSerialization.jsonObject(with: data),

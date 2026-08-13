@@ -33,6 +33,10 @@ struct GrokDesktopApp: App {
                     model.showPalette = true
                 }
                 .keyboardShortcut("k", modifiers: .command)
+                Button("Cycle Mode") { model.cycleMode() }
+                    .keyboardShortcut(.tab, modifiers: .shift)
+                Button("Dashboard") { model.destination = .dashboard }
+                    .keyboardShortcut("\\", modifiers: .control)
             }
         }
     }

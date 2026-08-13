@@ -55,13 +55,19 @@ struct SettingsView: View {
             item(.account, l10n.account, "person")
             item(.appearance, l10n.appearance, "pencil")
             item(.behavior, l10n.behavior, "slider.horizontal.3")
+            item(.session, l10n.t("Session", "会话"), "clock")
             groupLabel(l10n.grok).padding(.top, 14)
             item(.customize, l10n.customize, "slider.horizontal.2.square")
+            item(.models, l10n.t("Models", "模型"), "cpu")
+            item(.feedback, l10n.t("Feedback", "反馈"), "bubble.left")
+            item(.extensions, l10n.t("Extensions", "扩展"), "puzzlepiece.extension")
+            item(.agent, l10n.t("Agent", "Agent"), "cpu")
             groupLabel(l10n.payments).padding(.top, 14)
             item(.billing, l10n.billing, "creditcard")
             item(.usage, l10n.usage, "bolt")
             groupLabel(l10n.dataAndInformation).padding(.top, 14)
             item(.dataControls, l10n.dataControls, "doc.text")
+            item(.advanced, l10n.t("Advanced", "高级"), "wrench.and.screwdriver")
             Spacer()
         }
         .padding(16)
@@ -100,10 +106,16 @@ struct SettingsView: View {
         case .account: accountPage
         case .appearance: appearancePage
         case .behavior: behaviorPage
+        case .session: sessionPage
         case .customize: customizePage
+        case .models: modelsPage
+        case .feedback: feedbackPage
         case .billing: billingPage
         case .usage: usagePage
         case .dataControls: dataPage
+        case .extensions: extensionsPage
+        case .agent: agentPage
+        case .advanced: advancedPage
         }
     }
 
@@ -159,6 +171,8 @@ struct SettingsView: View {
             }
             Button(l10n.loginGrok) { model.login() }
                 .buttonStyle(GrokPrimaryButtonStyle())
+            Button(l10n.t("Sign out", "退出登录")) { model.logout() }
+                .buttonStyle(GrokSecondaryButtonStyle())
         }
         .padding(.top, 8)
     }
@@ -210,6 +224,20 @@ struct SettingsView: View {
                 }
             }
             toggle(l10n.wrapCode, isOn: $model.wrapCodeLines)
+            toggle(l10n.t("Compact conversation", "紧凑对话"), isOn: $model.compactChat)
+            toggle(l10n.t("Show timestamps", "显示时间戳"), isOn: $model.showTimestamps)
+            toggle(
+                l10n.t("Show thinking blocks", "显示思考块"),
+                isOn: Binding(
+                    get: { model.showThinkingBlocks },
+                    set: { value in
+                        model.showThinkingBlocks = value
+                        try? model.configStore.set(section: "ui", key: "show_thinking_blocks", bool: value)
+                        model.grokConfig = model.configStore.load()
+                    }
+                )
+            )
+            toggle(l10n.t("Merge tool rows", "合并工具行"), isOn: $model.mergeToolRows)
         }
         .padding(.top, 8)
     }
@@ -243,12 +271,106 @@ struct SettingsView: View {
     }
 
     private var behaviorPage: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 12) {
             toggle(l10n.enableAutoScroll, isOn: $model.autoScroll)
             toggle(l10n.notifyThinking, isOn: $model.notifyThinking)
-            Divider().padding(.vertical, 10).overlay(palette.hairline)
             toggle(l10n.requireCmdEnter, subtitle: l10n.requireCmdEnterHelp, isOn: $model.requireCmdEnter)
             toggle(l10n.richTextEditor, subtitle: l10n.richTextHelp, isOn: $model.richTextEditor)
+            HStack {
+                Text(l10n.t("Default model", "默认模型"))
+                Spacer()
+                Menu(model.grokConfig.defaultModel) {
+                    ForEach(BuildModel.allCases) { item in
+                        Button(item.title) {
+                            try? model.configStore.set(section: "models", key: "default", value: item.rawValue)
+                            model.grokConfig = model.configStore.load()
+                            model.client.apply(tier: .auto)
+                        }
+                    }
+                }
+                .menuStyle(.borderlessButton)
+            }
+            HStack {
+                Text(l10n.t("Permission mode", "权限模式"))
+                Spacer()
+                Menu(model.grokConfig.permissionMode) {
+                    ForEach(["ask", "auto", "always-approve"], id: \.self) { mode in
+                        Button(mode) {
+                            try? model.configStore.set(section: "ui", key: "permission_mode", value: mode)
+                            model.grokConfig = model.configStore.load()
+                        }
+                    }
+                }
+                .menuStyle(.borderlessButton)
+            }
+            toggle(
+                l10n.t("Remember tool approvals", "记住工具批准"),
+                isOn: Binding(
+                    get: { model.grokConfig.rememberApprovals },
+                    set: { value in
+                        try? model.configStore.set(section: "ui", key: "remember_tool_approvals", bool: value)
+                        model.grokConfig = model.configStore.load()
+                    }
+                )
+            )
+        }
+        .padding(.top, 8)
+    }
+
+    private var modelsPage: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(l10n.t("Fast / Auto / Expert / Heavy map onto local models and effort.", "Fast / Auto / Expert / Heavy 映射到本机模型和 effort。"))
+                .foregroundStyle(palette.secondary)
+            tierRow("Fast", modelKey: "fast_model", effortKey: "fast_effort", model: model.grokConfig.fastModel, effort: model.grokConfig.fastEffort)
+            HStack {
+                Text("Auto")
+                Spacer()
+                Text("\(model.grokConfig.defaultModel) · \(model.grokConfig.defaultEffort)")
+                    .foregroundStyle(palette.secondary)
+            }
+            tierRow("Expert", modelKey: "expert_model", effortKey: "expert_effort", model: model.grokConfig.expertModel, effort: model.grokConfig.expertEffort)
+            tierRow("Heavy", modelKey: "heavy_model", effortKey: "heavy_effort", model: model.grokConfig.heavyModel, effort: model.grokConfig.heavyEffort)
+        }
+        .padding(.top, 8)
+    }
+
+    private func tierRow(_ title: String, modelKey: String, effortKey: String, model current: String, effort: String) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Menu(current) {
+                ForEach(BuildModel.allCases) { item in
+                    Button(item.title) {
+                        try? self.model.configStore.set(section: "grok_desktop", key: modelKey, value: item.rawValue)
+                        self.model.grokConfig = self.model.configStore.load()
+                        self.model.client.apply(tier: self.model.client.modelTier)
+                    }
+                }
+            }
+            .menuStyle(.borderlessButton)
+            Menu(effort) {
+                ForEach(EffortLevel.allCases) { level in
+                    Button(level.rawValue) {
+                        try? self.model.configStore.set(section: "grok_desktop", key: effortKey, value: level.rawValue)
+                        self.model.grokConfig = self.model.configStore.load()
+                        self.model.client.apply(tier: self.model.client.modelTier)
+                    }
+                }
+            }
+            .menuStyle(.borderlessButton)
+        }
+    }
+
+    private var feedbackPage: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(l10n.t("Send feedback through the local grok CLI.", "通过本机 grok CLI 发送反馈。"))
+                .foregroundStyle(palette.secondary)
+            Button("/feedback") {
+                model.destination = .chat
+                model.draft = "/feedback "
+                model.showSettings = false
+            }
+            .buttonStyle(GrokPrimaryButtonStyle())
         }
         .padding(.top, 8)
     }
@@ -396,6 +518,13 @@ struct SettingsView: View {
                 "训练与留存遵循 grok.com / `/privacy` 的选择。本应用只连接本机 grok CLI。"
             ))
             .foregroundStyle(palette.secondary)
+            HStack {
+                Text("Grok Desktop 0.1.0")
+                Spacer()
+                Text(model.client.grokVersion ?? "grok ?")
+                    .foregroundStyle(palette.secondary)
+            }
+            .font(.system(size: 13))
             Button("/privacy") {
                 model.destination = .chat
                 model.draft = "/privacy"
@@ -404,6 +533,160 @@ struct SettingsView: View {
             }
             .buttonStyle(GrokSecondaryButtonStyle())
         }
+        .padding(.top, 8)
+    }
+
+    private var sessionPage: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text(l10n.t("Auto-compact threshold", "自动压缩阈值"))
+                Spacer()
+                Text("\(model.grokConfig.autoCompactPercent)%")
+                    .foregroundStyle(palette.secondary)
+            }
+            Button(l10n.t("Remember this folder for new chats", "新会话记住当前目录")) {
+                UserDefaults.standard.set(model.client.workingDirectory.path, forKey: "lastWorkingDirectory")
+            }
+            .buttonStyle(GrokSecondaryButtonStyle())
+            toggle(l10n.enableAutoScroll, isOn: $model.autoScroll)
+            Button(l10n.t("Write auto_compact_threshold_percent = 85", "写入自动压缩 85%")) {
+                try? model.configStore.set(section: "session", key: "auto_compact_threshold_percent", int: 85)
+                model.grokConfig = model.configStore.load()
+            }
+            .buttonStyle(GrokSecondaryButtonStyle())
+        }
+        .padding(.top, 8)
+    }
+
+    private var extensionsPage: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(l10n.t("MCP, skills, plugins and hooks live in ~/.grok.", "MCP、skills、plugins、hooks 都在 ~/.grok。"))
+                .foregroundStyle(palette.secondary)
+            labeledList(l10n.t("MCP", "MCP"), model.extensions.mcp.isEmpty ? [l10n.noConnectors] : model.extensions.mcp)
+            labeledList("Skills", model.skills.prefix(8).map(\.title))
+            labeledList("Plugins", model.extensions.plugins.isEmpty ? [l10n.t("None installed", "未安装")] : model.extensions.plugins)
+            labeledList("Hooks", model.extensions.hooks.isEmpty ? [l10n.t("None", "无")] : model.extensions.hooks)
+            Button(l10n.t("Open config.toml", "打开 config.toml")) {
+                model.configStore.openInEditor()
+            }
+            .buttonStyle(GrokPrimaryButtonStyle())
+        }
+        .padding(.top, 8)
+    }
+
+    private func labeledList(_ title: String, _ rows: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.system(size: 13, weight: .semibold))
+            ForEach(rows, id: \.self) { row in
+                Text(row)
+                    .font(.system(size: 13))
+                    .foregroundStyle(palette.secondary)
+            }
+        }
+    }
+
+    private var agentPage: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(l10n.t("Sandbox", "沙箱"))
+                Spacer()
+                Menu(model.grokConfig.sandboxProfile) {
+                    ForEach(["off", "workspace", "read-only", "strict"], id: \.self) { profile in
+                        Button(profile) {
+                            try? model.configStore.set(section: "sandbox", key: "profile", value: profile)
+                            model.grokConfig = model.configStore.load()
+                        }
+                    }
+                }
+                .menuStyle(.borderlessButton)
+            }
+            toggle(
+                l10n.t("Memory", "记忆"),
+                isOn: Binding(
+                    get: { model.grokConfig.memoryEnabled },
+                    set: { value in
+                        try? model.configStore.set(section: "memory", key: "enabled", bool: value)
+                        model.grokConfig = model.configStore.load()
+                    }
+                )
+            )
+            toggle(
+                l10n.t("Codebase indexing", "代码索引"),
+                isOn: Binding(
+                    get: { model.grokConfig.codebaseIndexing },
+                    set: { value in
+                        try? model.configStore.set(section: "features", key: "codebase_indexing", bool: value)
+                        model.grokConfig = model.configStore.load()
+                    }
+                )
+            )
+            toggle(
+                l10n.t("Respect gitignore", "遵守 gitignore"),
+                isOn: Binding(
+                    get: { model.grokConfig.respectGitignore },
+                    set: { value in
+                        try? model.configStore.set(section: "tools", key: "respect_gitignore", bool: value)
+                        model.grokConfig = model.configStore.load()
+                    }
+                )
+            )
+        }
+        .padding(.top, 8)
+    }
+
+    private var advancedPage: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("App")
+                Spacer()
+                Text("0.1.0")
+            }
+            HStack {
+                Text("grok")
+                Spacer()
+                Text(model.client.grokVersion ?? l10n.t("not found", "未找到"))
+            }
+            if let error = model.client.lastError {
+                Text(error).foregroundStyle(.red)
+            }
+            if !model.client.stderrLines.isEmpty {
+                Text(model.client.stderrLines.suffix(12).joined(separator: "\n"))
+                    .font(.system(size: 11, design: .monospaced))
+                    .textSelection(.enabled)
+                    .padding(10)
+                    .background(palette.chip, in: RoundedRectangle(cornerRadius: 8))
+            }
+            Button(l10n.t("Open config.toml", "打开 config.toml")) {
+                model.configStore.openInEditor()
+            }
+            .buttonStyle(GrokSecondaryButtonStyle())
+            Button("/doctor") {
+                model.draft = "/doctor"
+                model.showSettings = false
+                model.sendDraft()
+            }
+            .buttonStyle(GrokSecondaryButtonStyle())
+            Button("/import-claude") {
+                model.draft = "/import-claude"
+                model.showSettings = false
+                model.sendDraft()
+            }
+            .buttonStyle(GrokSecondaryButtonStyle())
+            Button(l10n.t("Export diagnostic", "导出诊断包")) {
+                model.exportDiagnostics()
+            }
+            .buttonStyle(GrokSecondaryButtonStyle())
+            Button("Docs") { model.openDocs() }
+                .buttonStyle(GrokSecondaryButtonStyle())
+            Button("CHANGELOG") { model.openChangelog() }
+                .buttonStyle(GrokSecondaryButtonStyle())
+            if !model.client.capabilities.methods.isEmpty {
+                Text(model.client.capabilities.methods.joined(separator: ", "))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(palette.secondary)
+            }
+        }
+        .font(.system(size: 13))
         .padding(.top, 8)
     }
 
@@ -430,10 +713,16 @@ struct SettingsView: View {
         case .account: return l10n.account
         case .appearance: return l10n.appearance
         case .behavior: return l10n.behavior
+        case .session: return l10n.t("Session", "会话")
         case .customize: return l10n.customize
+        case .models: return l10n.t("Models", "模型")
+        case .feedback: return l10n.t("Feedback", "反馈")
         case .billing: return l10n.billing
         case .usage: return l10n.usage
         case .dataControls: return l10n.dataControls
+        case .extensions: return l10n.t("Extensions", "扩展")
+        case .agent: return l10n.t("Agent", "Agent")
+        case .advanced: return l10n.t("Advanced", "高级")
         }
     }
 }

@@ -1,0 +1,4 @@
+{"method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"Hello"}}}}
+{"method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Hi there"}}}}
+{"method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"plan","entries":[{"content":"Step one","priority":"medium","status":"pending"}]}}}
+{"method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"tool_call","toolCallId":"t1","title":"read_file","status":"completed","content":[{"type":"content","content":{"type":"text","text":"diff --git a/a.txt"}}]}}}

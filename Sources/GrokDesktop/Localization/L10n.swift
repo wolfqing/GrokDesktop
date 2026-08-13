@@ -35,6 +35,7 @@ struct L10n {
     var search: String { t("Search", "搜索") }
     var newChat: String { t("New Chat", "新对话") }
     var imagine: String { t("Imagine", "Imagine") }
+    var liveAgents: String { t("Live agents", "进行中") }
     var automations: String { t("Automations", "自动化") }
     var skillsAndConnectors: String { t("Skills and Connectors", "技能与连接器") }
     var projects: String { t("Projects", "项目") }

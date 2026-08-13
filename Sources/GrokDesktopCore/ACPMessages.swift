@@ -93,11 +93,13 @@ public enum ACPError: Error, Equatable, LocalizedError {
 }
 
 public enum SessionUpdateKind: String, Sendable {
+    case userMessageChunk = "user_message_chunk"
     case agentMessageChunk = "agent_message_chunk"
     case agentThoughtChunk = "agent_thought_chunk"
     case toolCall = "tool_call"
     case toolCallUpdate = "tool_call_update"
     case plan = "plan"
+    case turnCompleted = "turn_completed"
     case unknown
 }
 
@@ -108,6 +110,7 @@ public struct SessionUpdate: Equatable {
     public var title: String
     public var toolCallId: String?
     public var status: String?
+    public var planEntries: [PlanEntry]
     public var raw: [String: Any]
 
     public static func == (lhs: SessionUpdate, rhs: SessionUpdate) -> Bool {
@@ -117,6 +120,7 @@ public struct SessionUpdate: Equatable {
             && lhs.title == rhs.title
             && lhs.toolCallId == rhs.toolCallId
             && lhs.status == rhs.status
+            && lhs.planEntries == rhs.planEntries
     }
 
     public init(
@@ -126,6 +130,7 @@ public struct SessionUpdate: Equatable {
         title: String = "",
         toolCallId: String? = nil,
         status: String? = nil,
+        planEntries: [PlanEntry] = [],
         raw: [String: Any] = [:]
     ) {
         self.kind = kind
@@ -134,6 +139,7 @@ public struct SessionUpdate: Equatable {
         self.title = title
         self.toolCallId = toolCallId
         self.status = status
+        self.planEntries = planEntries
         self.raw = raw
     }
 
@@ -143,19 +149,51 @@ public struct SessionUpdate: Equatable {
             ?? (update["session_update"] as? String)
             ?? ""
         let kind = SessionUpdateKind(rawValue: kindRaw) ?? .unknown
-        let content = update["content"] as? [String: Any]
-        let text = (content?["text"] as? String)
-            ?? (update["text"] as? String)
-            ?? ""
         return SessionUpdate(
             kind: kind,
             sessionId: params["sessionId"] as? String ?? params["session_id"] as? String,
-            text: text,
+            text: extractText(update),
             title: update["title"] as? String ?? "",
             toolCallId: update["toolCallId"] as? String ?? update["tool_call_id"] as? String,
             status: update["status"] as? String,
+            planEntries: parsePlanEntries(update["entries"]),
             raw: update
         )
+    }
+
+    public static func extractText(_ update: [String: Any]) -> String {
+        if let content = update["content"] as? [String: Any], let text = content["text"] as? String {
+            return text
+        }
+        if let text = update["text"] as? String { return text }
+        if let rawOutput = update["rawOutput"] as? String { return rawOutput }
+        if let items = update["content"] as? [Any] {
+            return items.compactMap(extractContentText).joined(separator: "\n")
+        }
+        return ""
+    }
+
+    private static func extractContentText(_ value: Any) -> String? {
+        guard let dict = value as? [String: Any] else { return value as? String }
+        if let text = dict["text"] as? String { return text }
+        if let content = dict["content"] as? [String: Any], let text = content["text"] as? String {
+            return text
+        }
+        if let content = dict["content"] as? String { return content }
+        return nil
+    }
+
+    private static func parsePlanEntries(_ value: Any?) -> [PlanEntry] {
+        guard let rows = value as? [[String: Any]] else { return [] }
+        return rows.compactMap { row in
+            let content = row["content"] as? String ?? row["title"] as? String ?? ""
+            guard !content.isEmpty else { return nil }
+            return PlanEntry(
+                content: content,
+                status: row["status"] as? String ?? "pending",
+                priority: row["priority"] as? String ?? "medium"
+            )
+        }
     }
 }
 
@@ -299,9 +337,67 @@ public enum AgentMode: String, CaseIterable, Identifiable, Sendable {
     public var next: AgentMode {
         switch self {
         case .normal: return .plan
-        case .plan: return .auto
+        case .plan: return .alwaysApprove
         case .auto: return .alwaysApprove
         case .alwaysApprove: return .normal
         }
+    }
+}
+
+public extension ModelTier {
+    func applied(config: GrokConfig) -> (model: BuildModel, effort: EffortLevel) {
+        switch self {
+        case .fast:
+            return (
+                BuildModel(rawValue: config.fastModel) ?? .grok46,
+                EffortLevel(rawValue: config.fastEffort) ?? .low
+            )
+        case .auto:
+            return (config.defaultBuildModel, config.defaultEffortLevel)
+        case .expert:
+            return (
+                BuildModel(rawValue: config.expertModel) ?? .grokBuild,
+                EffortLevel(rawValue: config.expertEffort) ?? .high
+            )
+        case .heavy:
+            return (
+                BuildModel(rawValue: config.heavyModel) ?? .grokBuild,
+                EffortLevel(rawValue: config.heavyEffort) ?? .xhigh
+            )
+        }
+    }
+}
+
+public struct AgentCapabilities: Equatable, Sendable {
+    public var methods: [String]
+    public var authMethods: [String]
+    public var loadSession: Bool
+
+    public init(methods: [String] = [], authMethods: [String] = [], loadSession: Bool = true) {
+        self.methods = methods
+        self.authMethods = authMethods
+        self.loadSession = loadSession
+    }
+
+    public func supports(_ method: String) -> Bool {
+        methods.contains(method) || methods.contains(where: { method.hasPrefix($0) })
+    }
+
+    public static func parse(_ value: Any?) -> AgentCapabilities {
+        guard let dict = value as? [String: Any] else { return AgentCapabilities() }
+        var methods: [String] = []
+        var auth: [String] = []
+        if let caps = dict["agentCapabilities"] as? [String: Any] {
+            methods.append(contentsOf: caps.keys)
+        }
+        if let meta = dict["_meta"] as? [String: Any] {
+            if let list = meta["methods"] as? [String] { methods.append(contentsOf: list) }
+            if let list = meta["extensionMethods"] as? [String] { methods.append(contentsOf: list) }
+        }
+        if let rows = dict["authMethods"] as? [[String: Any]] {
+            auth = rows.compactMap { $0["id"] as? String ?? $0["name"] as? String }
+        }
+        let load = ((dict["agentCapabilities"] as? [String: Any])?["loadSession"] as? Bool) ?? true
+        return AgentCapabilities(methods: methods, authMethods: auth, loadSession: load)
     }
 }

@@ -17,7 +17,7 @@ curl -fsSL https://x.ai/cli/install.sh | bash
 grok login
 ```
 
-Grok Desktop does **not** ship the `grok` binary. It looks on `PATH`, `~/.local/bin/grok`, and `~/.grok/bin/grok`.
+Grok Desktop does **not** ship the `grok` binary. It looks on `PATH`, `~/.local/bin/grok`, `~/.grok/bin/grok`, `/opt/homebrew/bin/grok`, and `/usr/local/bin/grok`.
 
 ## Build
 
@@ -29,6 +29,26 @@ swift build -c release
 ./scripts/bundle.sh
 open "dist/Grok Desktop.app"
 ```
+
+Unsigned builds may need a right-click → Open the first time.
+
+Release zip (unsigned unless you have a Developer ID):
+
+```bash
+./scripts/release.sh
+# ./scripts/release.sh --publish   # also creates GitHub release v0.1.0
+```
+
+Notarization needs a Developer ID Application certificate and a stored notary profile:
+
+```bash
+export SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)"
+xcrun notarytool store-credentials "notarytool-profile" --apple-id "you@apple.com" --team-id TEAMID --password "app-specific-password"
+export NOTARY_PROFILE="notarytool-profile"
+./scripts/release.sh --publish
+```
+
+This machine currently has no Developer ID identity, so local zips stay unsigned.
 
 Dev loop:
 
