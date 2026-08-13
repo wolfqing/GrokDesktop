@@ -57,8 +57,9 @@ struct ComposerView: View {
                             chip(model.client.mode.title)
                         }
                         .menuStyle(.borderlessButton)
+                        .fixedSize()
 
-                        Spacer()
+                        Spacer(minLength: 8)
 
                         usageChip
 
@@ -67,10 +68,10 @@ struct ComposerView: View {
                                 Button(tier.menuTitle) { model.client.apply(tier: tier) }
                             }
                         } label: {
-                            Text(model.client.modelTier.menuTitle)
-                                .font(.system(size: 13, weight: .medium))
+                            chip(model.client.modelTier.menuTitle)
                         }
                         .menuStyle(.borderlessButton)
+                        .fixedSize()
                         .help(model.client.modelTier.menuSubtitle)
 
                         Menu {
@@ -78,11 +79,10 @@ struct ComposerView: View {
                                 Button(level.title(chinese: isChinese)) { model.client.effort = level }
                             }
                         } label: {
-                            Text(model.client.effort.title(chinese: isChinese))
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(Color.purple)
+                            chip(model.client.effort.title(chinese: isChinese), accent: Color.purple)
                         }
                         .menuStyle(.borderlessButton)
+                        .fixedSize()
 
                         Button(action: { submit() }) {
                             Image(systemName: sendSymbol)
@@ -147,29 +147,37 @@ struct ComposerView: View {
         Button {
             model.openUsage()
         } label: {
-            HStack(spacing: 5) {
-                Circle()
-                    .trim(from: 0, to: CGFloat(min(max(usagePercent, 1), 100)) / 100)
-                    .stroke(Color.orange, lineWidth: 2)
-                    .rotationEffect(.degrees(-90))
-                    .frame(width: 12, height: 12)
+            HStack(spacing: 6) {
+                ZStack {
+                    Circle()
+                        .stroke(palette.secondary.opacity(0.28), lineWidth: 2)
+                    Circle()
+                        .trim(from: 0, to: CGFloat(min(max(usagePercent, 0), 100)) / 100)
+                        .stroke(Color.orange, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                }
+                .frame(width: 14, height: 14)
                 Text(model.accountUsage.isLoaded ? "\(usagePercent)%" : "—")
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .foregroundStyle(palette.secondary)
             }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(palette.chip, in: Capsule())
         }
         .buttonStyle(.plain)
-        .help("/usage")
+        .fixedSize()
+        .help(l10n.t("Account usage", "账号用量"))
     }
 
     private var usagePercent: Int {
         model.accountUsage.displayPercent
     }
 
-    private func chip(_ title: String) -> some View {
+    private func chip(_ title: String, accent: Color? = nil) -> some View {
         Text(title)
             .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(palette.secondary)
+            .foregroundStyle(accent ?? palette.secondary)
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
             .background(palette.chip, in: Capsule())
