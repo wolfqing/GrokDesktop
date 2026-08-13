@@ -1,0 +1,66 @@
+import SwiftUI
+
+struct CommandPalette: View {
+    @EnvironmentObject private var model: AppModel
+
+    private let commands: [(String, String)] = [
+        ("/new", "新会话"),
+        ("/resume", "恢复会话"),
+        ("/dashboard", "Dashboard"),
+        ("/plan", "进入 Plan 模式"),
+        ("/settings", "设置"),
+        ("/model", "切换模型"),
+        ("/compact", "压缩上下文"),
+        ("/imagine", "生成图片"),
+        ("/usage", "用量"),
+        ("/home", "回到首页"),
+        ("/quit", "退出")
+    ]
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.35)
+                .ignoresSafeArea()
+                .onTapGesture { model.showPalette = false }
+
+            VStack(alignment: .leading, spacing: 0) {
+                Text("命令")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(GrokTheme.secondary)
+                    .padding(12)
+                ForEach(filtered, id: \.0) { command in
+                    Button {
+                        model.handleCommand(command.0)
+                        model.draft = ""
+                    } label: {
+                        HStack {
+                            Text(command.0)
+                                .font(.system(size: 14, weight: .medium, design: .monospaced))
+                            Spacer()
+                            Text(command.1)
+                                .font(.system(size: 13))
+                                .foregroundStyle(GrokTheme.secondary)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 9)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .frame(width: 420)
+            .background(GrokTheme.elevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(GrokTheme.hairline, lineWidth: 1)
+            )
+            .offset(y: 120)
+        }
+    }
+
+    private var filtered: [(String, String)] {
+        let query = model.draft.lowercased()
+        if query.count <= 1 { return commands }
+        return commands.filter { $0.0.contains(query) || $0.1.localizedCaseInsensitiveContains(query) }
+    }
+}
