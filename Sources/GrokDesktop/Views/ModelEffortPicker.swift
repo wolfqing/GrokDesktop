@@ -22,23 +22,19 @@ struct ModelEffortPicker: View {
     }
 
     var body: some View {
-        VStack(alignment: .trailing, spacing: 8) {
-            if isOpen {
+        chip
+            .popover(isPresented: $isOpen, arrowEdge: .bottom) {
                 panel
-                    .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottomTrailing)))
+                    .padding(.vertical, 4)
+                    .frame(width: 260)
             }
-            chip
-        }
-        .animation(.easeInOut(duration: 0.16), value: isOpen)
-        .animation(.easeInOut(duration: 0.16), value: page)
-        .animation(.easeInOut(duration: 0.16), value: showAdvanced)
-        .onChange(of: isOpen) { _, open in
-            if open {
-                page = .home
-            } else {
-                showAdvanced = false
+            .onChange(of: isOpen) { _, open in
+                if open {
+                    page = .home
+                } else {
+                    showAdvanced = false
+                }
             }
-        }
     }
 
     private var chip: some View {
@@ -47,23 +43,20 @@ struct ModelEffortPicker: View {
         } label: {
             HStack(spacing: 6) {
                 Text(buildModel.shortTitle)
-                    .font(.system(size: 13, weight: .medium))
                 Text(effort.title(chinese: chinese))
-                    .font(.system(size: 13, weight: .medium))
-                Spacer(minLength: 18)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(palette.secondary)
             }
+            .font(.system(size: 13, weight: .medium))
             .foregroundStyle(palette.text)
-            .padding(.leading, 14)
-            .padding(.trailing, 12)
+            .padding(.horizontal, 12)
             .padding(.vertical, 7)
-            .frame(minWidth: 168)
             .background(palette.chip, in: Capsule())
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .fixedSize()
         .help("\(buildModel.menuTitle) · \(effort.title(chinese: chinese))")
     }
 
@@ -100,14 +93,6 @@ struct ModelEffortPicker: View {
                 }
             }
         }
-        .padding(.vertical, 8)
-        .frame(width: 268)
-        .background(palette.popover, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(palette.hairline, lineWidth: 1)
-        )
-        .shadow(color: Color.black.opacity(0.12), radius: 16, y: 8)
     }
 
     @ViewBuilder

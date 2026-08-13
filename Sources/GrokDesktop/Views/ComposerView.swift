@@ -52,7 +52,7 @@ struct ComposerView: View {
                             model.updateMentions(from: value)
                         }
 
-                    HStack(alignment: .bottom, spacing: 8) {
+                    HStack(spacing: 8) {
                         Button {
                             showModelMenu = false
                             model.showAttachMenu.toggle()
