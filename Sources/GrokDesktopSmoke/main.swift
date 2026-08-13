@@ -81,6 +81,80 @@ let planUpdate = SessionUpdate.parse(params: [
 expect(planUpdate.kind == .plan, "plan kind")
 expect(planUpdate.planEntries.count == 1, "plan parse")
 
+var toolItems: [ConversationItem] = []
+var toolPlan: [PlanEntry] = []
+var toolDates: [String: Date] = [:]
+var toolTodos: [AgentTodo] = []
+var toolTasks: [AgentTask] = []
+var toolAssistant: String?
+var toolThought: String?
+TranscriptLoader.apply(
+    update: SessionUpdate.parse(params: [
+        "update": [
+            "sessionUpdate": "tool_call",
+            "toolCallId": "t-todo",
+            "title": "todo_write",
+            "rawInput": ["todos": [["id": "1", "content": "One", "status": "in_progress"]]]
+        ]
+    ] as [String: Any]),
+    items: &toolItems,
+    planEntries: &toolPlan,
+    assistantID: &toolAssistant,
+    thoughtID: &toolThought,
+    itemDates: &toolDates,
+    todos: &toolTodos,
+    tasks: &toolTasks
+)
+TranscriptLoader.apply(
+    update: SessionUpdate.parse(params: [
+        "update": [
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "t-todo",
+            "title": "Updating plan",
+            "rawInput": ["merge": true, "todos": [["id": "1", "status": "completed"]]]
+        ]
+    ] as [String: Any]),
+    items: &toolItems,
+    planEntries: &toolPlan,
+    assistantID: &toolAssistant,
+    thoughtID: &toolThought,
+    itemDates: &toolDates,
+    todos: &toolTodos,
+    tasks: &toolTasks
+)
+if case .tool(_, let liveTitle, let liveStatus, _) = toolItems[0] {
+    expect(liveTitle == "Updating plan", "todo title updates")
+    expect(liveStatus == "running", "nil status does not reset tool")
+} else {
+    fail("expected tool item")
+}
+expect(toolTodos.first?.status == "completed", "todo status follows merge")
+TranscriptLoader.apply(
+    update: SessionUpdate.parse(params: [
+        "update": [
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "t-todo",
+            "status": "completed",
+            "rawOutput": ["type": "Todo", "TodosUpdated": [
+                "todos": [["content": "One", "status": "completed"]],
+                "state": ["todos": ["1": ["content": "One", "status": "completed"]]]
+            ]]
+        ]
+    ] as [String: Any]),
+    items: &toolItems,
+    planEntries: &toolPlan,
+    assistantID: &toolAssistant,
+    thoughtID: &toolThought,
+    itemDates: &toolDates,
+    todos: &toolTodos,
+    tasks: &toolTasks
+)
+if case .tool(_, _, let doneStatus, _) = toolItems[0] {
+    expect(doneStatus == "completed", "tool completed status kept")
+} else {
+    fail("expected completed tool")
+}
+
 let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("grok-config-test.toml")
 try? "[models]\ndefault = \"grok-4.6\"\n".write(to: tmp, atomically: true, encoding: .utf8)
 let loaded = ConfigStore(fileURL: tmp).load()

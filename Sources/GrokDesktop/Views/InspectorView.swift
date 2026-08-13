@@ -123,9 +123,13 @@ struct InspectorView: View {
             }
             ForEach(model.client.todos) { todo in
                 HStack(alignment: .top, spacing: 6) {
-                    Image(systemName: todoIcon(todo.status))
-                        .font(.system(size: 11))
-                        .foregroundStyle(todoColor(todo.status))
+                    RunningStatusIcon(
+                        active: todo.isActive,
+                        idleSystemImage: todoIcon(todo.status),
+                        color: todoColor(todo.status),
+                        size: 12
+                    )
+                    .padding(.top, 2)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(todo.content)
                             .font(.system(size: 12))
@@ -143,9 +147,13 @@ struct InspectorView: View {
                     .padding(.top, 4)
                 ForEach(Array(model.client.tasks.suffix(12))) { task in
                     HStack(alignment: .top, spacing: 6) {
-                        Image(systemName: task.isRunning ? "circle.dotted" : "checkmark.circle")
-                            .font(.system(size: 11))
-                            .foregroundStyle(task.isRunning ? Color.orange : palette.secondary)
+                        RunningStatusIcon(
+                            active: task.isRunning,
+                            idleSystemImage: "checkmark.circle",
+                            color: task.isRunning ? Color.orange : palette.secondary,
+                            size: 12
+                        )
+                        .padding(.top, 2)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(task.title)
                                 .font(.system(size: 12))

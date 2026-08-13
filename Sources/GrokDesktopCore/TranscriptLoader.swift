@@ -162,11 +162,11 @@ public enum TranscriptLoader {
         case .toolCall, .toolCallUpdate:
             let id = update.toolCallId ?? UUID().uuidString
             if let index = items.firstIndex(where: { $0.id == id }) {
-                if case .tool(_, let title, _, let detail) = items[index] {
+                if case .tool(_, let title, let status, let detail) = items[index] {
                     items[index] = .tool(
                         id: id,
                         title: update.title.isEmpty ? title : update.title,
-                        status: update.status ?? "running",
+                        status: update.status ?? status,
                         detail: update.text.isEmpty ? detail : update.text
                     )
                 }

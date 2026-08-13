@@ -143,6 +143,9 @@ struct L10n {
     var backgroundTasks: String { t("Background tasks", "后台任务") }
     var tasks: String { t("Tasks", "任务") }
     var noTasks: String { t("No tasks yet.", "还没有任务。") }
+    var copyPrompt: String { t("Copy prompt", "复制提示") }
+    var copied: String { t("Copied", "已复制") }
+    var jumpToLatest: String { t("Jump to latest", "跳到最新") }
     var inspector: String { t("Inspector", "右边栏") }
     var weeklyPlanLimit: String { t("Weekly limit", "每周额度") }
     var monthlyPlanLimit: String { t("Monthly limit", "每月额度") }

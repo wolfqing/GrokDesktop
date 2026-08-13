@@ -1,10 +1,20 @@
 import GrokDesktopCore
 import SwiftUI
 
+private struct LatestMinYKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 struct ChatView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.palette) private var palette
     @Environment(\.l10n) private var l10n
+    @State private var stickToLatest = true
+    @State private var copiedPromptID: String?
+    @State private var ignoreScrollUntil = Date.distantPast
 
     var body: some View {
         VStack(spacing: 0) {
@@ -36,27 +46,84 @@ struct ChatView: View {
                     .padding(.top, 8)
                 }
 
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: model.compactChat ? 10 : 22) {
-                            ForEach(displayedItems) { item in
-                                messageRow(item)
-                                    .id(item.id)
+                GeometryReader { viewport in
+                    ScrollViewReader { proxy in
+                        ZStack(alignment: .bottomTrailing) {
+                            ScrollView {
+                                LazyVStack(alignment: .leading, spacing: model.compactChat ? 10 : 22) {
+                                    ForEach(displayedItems) { item in
+                                        messageRow(item)
+                                            .id(item.id)
+                                    }
+                                    if !model.client.todos.isEmpty {
+                                        liveTodosCard
+                                            .id("live-todos-\(todoFingerprint)")
+                                    }
+                                    Color.clear
+                                        .frame(height: 1)
+                                        .id("latest-anchor")
+                                        .background(
+                                            GeometryReader { geo in
+                                                Color.clear.preference(
+                                                    key: LatestMinYKey.self,
+                                                    value: geo.frame(in: .named("chatScroll")).minY
+                                                )
+                                            }
+                                        )
+                                }
+                                .frame(maxWidth: GrokTheme.contentWidth)
+                                .padding(.vertical, model.compactChat ? 14 : 28)
+                                .frame(maxWidth: .infinity)
+                            }
+                            .coordinateSpace(name: "chatScroll")
+                            .onPreferenceChange(LatestMinYKey.self) { minY in
+                                guard Date() >= ignoreScrollUntil else { return }
+                                let slack: CGFloat = 56
+                                if minY > viewport.size.height + slack {
+                                    stickToLatest = false
+                                } else if minY <= viewport.size.height + 12 {
+                                    stickToLatest = true
+                                }
+                            }
+
+                            if !stickToLatest {
+                                Button {
+                                    jumpToLatest(proxy)
+                                } label: {
+                                    Image(systemName: "arrow.down")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(palette.text)
+                                        .frame(width: 34, height: 34)
+                                        .background(palette.elevated, in: Circle())
+                                        .overlay(Circle().stroke(palette.hairline))
+                                        .shadow(color: Color.black.opacity(0.12), radius: 8, y: 3)
+                                }
+                                .buttonStyle(.plain)
+                                .help(l10n.jumpToLatest)
+                                .padding(.trailing, 28)
+                                .padding(.bottom, 16)
                             }
                         }
-                        .frame(maxWidth: GrokTheme.contentWidth)
-                        .padding(.vertical, model.compactChat ? 14 : 28)
-                        .frame(maxWidth: .infinity)
-                    }
-                    .onChange(of: model.client.items.count) { _, _ in
-                        if model.autoScroll, let last = model.client.items.last {
-                            proxy.scrollTo(last.id, anchor: .bottom)
+                        .id(model.client.sessionID ?? "none")
+                        .onAppear { pinToBottom(proxy) }
+                        .onChange(of: model.client.sessionID) { _, _ in
+                            pinToBottom(proxy)
                         }
-                    }
-                    .onChange(of: model.jumpTarget) { _, target in
-                        if let target {
-                            proxy.scrollTo(target, anchor: .center)
-                            model.jumpTarget = nil
+                        .onChange(of: followToken) { _, _ in
+                            if stickToLatest {
+                                jumpToLatest(proxy)
+                            }
+                        }
+                        .onChange(of: model.jumpTarget) { _, target in
+                            if let target {
+                                if target == displayedItems.last?.id {
+                                    jumpToLatest(proxy)
+                                } else {
+                                    stickToLatest = false
+                                    proxy.scrollTo(target, anchor: .center)
+                                }
+                                model.jumpTarget = nil
+                            }
                         }
                     }
                 }
@@ -174,15 +241,150 @@ struct ChatView: View {
         var result: [ConversationItem] = []
         for item in model.client.items {
             if case .thought = item, !model.showThinkingBlocks { continue }
+            if isTodoTool(item) { continue }
             if model.mergeToolRows,
                case .tool(_, let title, _, _) = item,
                case .tool(_, let previous, _, _) = result.last,
                previous == title {
-                continue
+                result.removeLast()
             }
             result.append(item)
         }
         return result
+    }
+
+    private var todoFingerprint: String {
+        model.client.todos.map { "\($0.id):\($0.status)" }.joined(separator: "|")
+    }
+
+    private var followToken: String {
+        let last = model.client.items.last
+        let tail: String
+        switch last {
+        case .assistant(_, let text, _):
+            tail = "a\(text.count)"
+        case .tool(_, _, let status, let detail):
+            tail = "t\(status)\(detail.count)"
+        case .thought(_, let text):
+            tail = "h\(text.count)"
+        case .user(_, let text):
+            tail = "u\(text.count)"
+        case .notice(_, let text):
+            tail = "n\(text.count)"
+        case .none:
+            tail = "empty"
+        }
+        return "\(model.client.sessionID ?? "")-\(model.client.items.count)-\(tail)-\(todoFingerprint)-\(model.client.isTurnRunning)"
+    }
+
+    private func pinToBottom(_ proxy: ScrollViewProxy) {
+        stickToLatest = true
+        jumpToLatest(proxy)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { jumpToLatest(proxy) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { jumpToLatest(proxy) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { jumpToLatest(proxy) }
+    }
+
+    private func jumpToLatest(_ proxy: ScrollViewProxy) {
+        stickToLatest = true
+        ignoreScrollUntil = Date().addingTimeInterval(0.8)
+        let lastID = displayedItems.last?.id
+        DispatchQueue.main.async {
+            if let lastID {
+                proxy.scrollTo(lastID, anchor: .bottom)
+            }
+            proxy.scrollTo("latest-anchor", anchor: .bottom)
+        }
+    }
+
+    private func copyPrompt(_ id: String, _ text: String) {
+        model.copyText(text)
+        copiedPromptID = id
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+            if copiedPromptID == id {
+                copiedPromptID = nil
+            }
+        }
+    }
+
+    private func isTodoTool(_ item: ConversationItem) -> Bool {
+        guard case .tool(_, let title, _, _) = item else { return false }
+        let name = title.lowercased()
+        return name == "todo_write" || name == "updating plan" || name.contains("todo")
+    }
+
+    private var liveTodosCard: some View {
+        let progress = PromptTimestamp.progress(for: model.client.todos)
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(l10n.tasks)
+                    .font(.system(size: 13, weight: .semibold))
+                Spacer()
+                Text("\(progress.done)/\(progress.total)")
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundStyle(palette.secondary)
+            }
+            if progress.total > 0 {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(palette.chip)
+                        Capsule()
+                            .fill(Color.orange)
+                            .frame(width: geo.size.width * CGFloat(progress.done) / CGFloat(max(progress.total, 1)))
+                    }
+                }
+                .frame(height: 6)
+            }
+            ForEach(model.client.todos) { todo in
+                HStack(alignment: .top, spacing: 8) {
+                    RunningStatusIcon(
+                        active: todo.isActive,
+                        idleSystemImage: todoIcon(todo.status),
+                        color: todoColor(todo.status),
+                        size: 13
+                    )
+                    .padding(.top, 2)
+                    Text(todo.content)
+                        .font(.system(size: 13))
+                        .strikethrough(todo.isDone || todo.isCancelled)
+                    Spacer(minLength: 0)
+                    Text(todoStatusLabel(todo.status))
+                        .font(.system(size: 11))
+                        .foregroundStyle(palette.secondary)
+                }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(palette.chip, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .padding(.horizontal, model.compactChat ? 16 : 28)
+    }
+
+    private func todoIcon(_ status: String) -> String {
+        switch status {
+        case "completed": return "checkmark.circle.fill"
+        case "in_progress": return "circle.dotted"
+        case "cancelled": return "xmark.circle"
+        default: return "circle"
+        }
+    }
+
+    private func todoColor(_ status: String) -> Color {
+        switch status {
+        case "completed": return .green
+        case "in_progress": return .orange
+        case "cancelled": return palette.secondary
+        default: return palette.secondary
+        }
+    }
+
+    private func todoStatusLabel(_ status: String) -> String {
+        switch status {
+        case "completed": return l10n.completed
+        case "in_progress": return l10n.running
+        case "cancelled": return l10n.t("Cancelled", "已取消")
+        default: return l10n.t("Pending", "待办")
+        }
     }
 
     @ViewBuilder
@@ -204,9 +406,20 @@ struct ChatView: View {
                     timestamp(id, always: true)
                     Text(text)
                         .font(.system(size: model.compactChat ? 14 : 16))
+                        .textSelection(.enabled)
                         .padding(.horizontal, 16)
                         .padding(.vertical, model.compactChat ? 8 : 12)
                         .background(palette.selected, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    Button {
+                        copyPrompt(id, text)
+                    } label: {
+                        Image(systemName: copiedPromptID == id ? "checkmark" : "square.on.square")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(palette.secondary)
+                            .frame(width: 22, height: 22)
+                    }
+                    .buttonStyle(.plain)
+                    .help(copiedPromptID == id ? l10n.copied : l10n.copyPrompt)
                 }
             }
             .padding(.horizontal, model.compactChat ? 16 : 28)
@@ -237,7 +450,12 @@ struct ChatView: View {
                 }
             } label: {
                 HStack {
-                    Image(systemName: "wrench.and.screwdriver")
+                    RunningStatusIcon(
+                        active: status == "running" || status == "in_progress",
+                        idleSystemImage: status == "completed" ? "checkmark.circle.fill" : "wrench.and.screwdriver",
+                        color: status == "completed" ? .green : (status == "failed" ? .orange : palette.secondary),
+                        size: 13
+                    )
                     Text(title)
                     Spacer()
                     Text(status)

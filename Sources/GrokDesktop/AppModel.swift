@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import Foundation
 import GrokDesktopCore
 import SwiftUI
@@ -161,6 +162,7 @@ final class AppModel: ObservableObject {
     let skillCatalog = SkillCatalog()
     let workflowCatalog = WorkflowCatalog()
     let mcpCatalog = MCPCatalog()
+    private var clientCancellables = Set<AnyCancellable>()
 
     init(
         locator: GrokBinaryLocator = GrokBinaryLocator(),
@@ -174,6 +176,17 @@ final class AppModel: ObservableObject {
         firstRunReason = bootstrapReason()
         refreshWorkspace()
         refreshAccountUsage()
+        bindClient()
+    }
+
+    private func bindClient() {
+        clientCancellables.removeAll()
+        client.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+            .store(in: &clientCancellables)
     }
 
     var liveSessions: [SessionRecord] {
@@ -421,6 +434,10 @@ final class AppModel: ObservableObject {
             return nil
         }.first
         guard let text, !text.isEmpty else { return }
+        copyText(text)
+    }
+
+    func copyText(_ text: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
     }
@@ -508,12 +525,6 @@ final class AppModel: ObservableObject {
                     refreshSessions()
                 }
                 refreshWorkspace()
-                if let lastUser = client.items.last(where: {
-                    if case .user = $0 { return true }
-                    return false
-                }) {
-                    jumpTarget = lastUser.id
-                }
             } catch {
                 present(error)
             }
