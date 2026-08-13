@@ -64,6 +64,9 @@ struct ComposerView: View {
                         }
                         .buttonStyle(.plain)
                         .help("@")
+                        .popover(isPresented: $model.showAttachMenu, arrowEdge: .bottom) {
+                            attachMenu
+                        }
 
                         Menu {
                             ForEach(AgentMode.allCases) { mode in
@@ -120,17 +123,14 @@ struct ComposerView: View {
                     RoundedRectangle(cornerRadius: GrokTheme.inputRadius, style: .continuous)
                         .stroke(palette.hairline, lineWidth: 1)
                 )
+                .overlay(alignment: .top) {
+                    if showsSuggestPanel {
+                        suggestPanel
+                            .alignmentGuide(.top) { $0[.bottom] + 8 }
+                            .zIndex(8)
+                    }
+                }
 
-                if model.showAttachMenu {
-                    attachMenu
-                        .offset(x: 12, y: 88)
-                        .zIndex(4)
-                }
-                if let query = model.mentionQuery {
-                    mentionMenu(query)
-                        .offset(x: 12, y: 88)
-                        .zIndex(5)
-                }
             }
 
             if !model.client.promptQueue.isEmpty {
@@ -160,6 +160,18 @@ struct ComposerView: View {
         }
         .onChange(of: model.showAttachMenu) { _, open in
             if open { showModelMenu = false }
+        }
+        .onChange(of: model.showPalette) { _, open in
+            if open {
+                showModelMenu = false
+                model.showAttachMenu = false
+            }
+        }
+        .onChange(of: model.mentionQuery) { _, query in
+            if query != nil {
+                showModelMenu = false
+                model.showAttachMenu = false
+            }
         }
     }
 
@@ -194,6 +206,66 @@ struct ComposerView: View {
         model.accountUsage.displayPercent
     }
 
+    private var showsSuggestPanel: Bool {
+        model.mentionQuery != nil || model.showPalette
+    }
+
+    @ViewBuilder
+    private var suggestPanel: some View {
+        if model.mentionQuery != nil {
+            mentionPanel
+        } else if model.showPalette {
+            CommandPalette(embedded: true)
+        }
+    }
+
+    private var mentionPanel: some View {
+        ComposerSuggestChrome {
+            SuggestSection(title: l10n.t("Add", "添加"))
+            SuggestRow(
+                icon: "paperclip",
+                title: l10n.t("Files and folders", "文件和文件夹"),
+                detail: l10n.t("Attach from disk", "从磁盘附加")
+            ) {
+                attachFiles()
+            }
+            SuggestRow(
+                icon: "photo",
+                title: l10n.t("Paste image", "粘贴图片"),
+                detail: l10n.t("Use the clipboard image", "使用剪贴板里的图")
+            ) {
+                model.mentionQuery = nil
+                model.pasteAttachments()
+            }
+            SuggestRow(
+                icon: "folder",
+                title: l10n.t("Working directory", "工作目录"),
+                detail: model.client.workingDirectory.path
+            ) {
+                model.mentionQuery = nil
+                model.chooseWorkingDirectory()
+            }
+            SuggestSection(title: l10n.t("Files", "文件"))
+            if model.mentionMatches.isEmpty {
+                Text(l10n.t("No matching files", "没有匹配的文件"))
+                    .font(.system(size: 13))
+                    .foregroundStyle(palette.secondary)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+            } else {
+                ForEach(model.mentionMatches, id: \.path) { url in
+                    SuggestRow(
+                        icon: "doc",
+                        title: url.lastPathComponent,
+                        detail: url.deletingLastPathComponent().lastPathComponent
+                    ) {
+                        model.insertMention(url)
+                    }
+                }
+            }
+        }
+    }
+
     private func chip(_ title: String, accent: Color? = nil) -> some View {
         Text(title)
             .font(.system(size: 12, weight: .medium))
@@ -215,14 +287,8 @@ struct ComposerView: View {
                 model.chooseWorkingDirectory()
             }
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 4)
         .frame(width: 220)
-        .background(palette.popover, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(palette.hairline, lineWidth: 1)
-        )
-        .shadow(color: Color.black.opacity(0.12), radius: 16, y: 8)
     }
 
     private func attachItem(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
@@ -277,43 +343,6 @@ struct ComposerView: View {
             return
         }
         model.sendDraft()
-    }
-
-    private func mentionMenu(_ query: String) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("@\(query.isEmpty ? l10n.t("files", "文件") : query)")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(palette.secondary)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-            if model.mentionMatches.isEmpty {
-                Text(l10n.t("No matching files", "没有匹配的文件"))
-                    .font(.system(size: 13))
-                    .foregroundStyle(palette.secondary)
-                    .padding(12)
-            } else {
-                ForEach(model.mentionMatches, id: \.path) { url in
-                    Button {
-                        model.insertMention(url)
-                    } label: {
-                        HStack {
-                            Text(url.lastPathComponent)
-                            Spacer()
-                            Text(url.deletingLastPathComponent().lastPathComponent)
-                                .foregroundStyle(palette.secondary)
-                        }
-                        .font(.system(size: 13))
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 7)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-        .frame(width: 280)
-        .background(palette.popover, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(palette.hairline))
-        .shadow(color: Color.black.opacity(0.12), radius: 16, y: 8)
     }
 
     private func attachFiles() {

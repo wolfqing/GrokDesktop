@@ -52,7 +52,7 @@ struct RootView: View {
                 CreateProjectSheet()
                     .zIndex(3)
             }
-            if model.showPalette {
+            if model.showPalette && model.destination != .chat {
                 CommandPalette()
                     .zIndex(4)
             }

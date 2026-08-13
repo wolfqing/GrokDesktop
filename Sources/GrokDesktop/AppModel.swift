@@ -492,7 +492,7 @@ final class AppModel: ObservableObject {
         showAttachMenu = false
     }
 
-    private static func fileMatches(cwd: URL, query: String, limit: Int = 12) -> [URL] {
+    private static func fileMatches(cwd: URL, query: String, limit: Int = 50) -> [URL] {
         guard let enumerator = FileManager.default.enumerator(
             at: cwd,
             includingPropertiesForKeys: [.isRegularFileKey],
