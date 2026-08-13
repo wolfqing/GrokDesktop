@@ -2,6 +2,7 @@ import SwiftUI
 
 struct CommandPalette: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.palette) private var palette
 
     private let commands: [(String, String)] = [
         ("/new", "新会话"),
@@ -19,14 +20,14 @@ struct CommandPalette: View {
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.35)
+            palette.overlay
                 .ignoresSafeArea()
                 .onTapGesture { model.showPalette = false }
 
             VStack(alignment: .leading, spacing: 0) {
                 Text("命令")
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(GrokTheme.secondary)
+                    .foregroundStyle(palette.secondary)
                     .padding(12)
                 ForEach(filtered, id: \.0) { command in
                     Button {
@@ -39,7 +40,7 @@ struct CommandPalette: View {
                             Spacer()
                             Text(command.1)
                                 .font(.system(size: 13))
-                                .foregroundStyle(GrokTheme.secondary)
+                                .foregroundStyle(palette.secondary)
                         }
                         .padding(.horizontal, 14)
                         .padding(.vertical, 9)
@@ -49,10 +50,10 @@ struct CommandPalette: View {
                 }
             }
             .frame(width: 420)
-            .background(GrokTheme.elevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .background(palette.elevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(GrokTheme.hairline, lineWidth: 1)
+                    .stroke(palette.hairline, lineWidth: 1)
             )
             .offset(y: 120)
         }

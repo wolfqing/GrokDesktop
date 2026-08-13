@@ -4,84 +4,146 @@ import SwiftUI
 
 struct ComposerView: View {
     @EnvironmentObject private var model: AppModel
-    @State private var showModelMenu = false
+    @Environment(\.palette) private var palette
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            TextField("向 Grok 提任何问题", text: $model.draft, axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(.system(size: 16))
-                .lineLimit(1...8)
-                .onSubmit {
-                    if NSEvent.modifierFlags.contains(.shift) {
-                        model.draft += "\n"
-                    } else {
-                        submit()
+        ZStack(alignment: .topLeading) {
+            VStack(spacing: 0) {
+                HStack(alignment: .center, spacing: 10) {
+                    Button {
+                        model.showAttachMenu.toggle()
+                    } label: {
+                        Image(systemName: model.showAttachMenu ? "xmark" : "plus")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(palette.secondary)
+                            .frame(width: 28, height: 28)
                     }
-                }
-                .onChange(of: model.draft) { _, value in
-                    model.showPalette = value.hasPrefix("/") && !value.contains("\n")
-                }
+                    .buttonStyle(.plain)
+                    .help("附件")
 
-            HStack {
-                Button {
-                    attach()
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 14, weight: .medium))
-                        .frame(width: 28, height: 28)
-                        .background(GrokTheme.chip, in: Circle())
-                }
-                .buttonStyle(.plain)
-                .help("附件")
-
-                Spacer()
-
-                Menu {
-                    ForEach(ModelTier.allCases) { tier in
-                        Button {
-                            model.client.modelTier = tier
-                        } label: {
-                            VStack(alignment: .leading) {
-                                Text(tier.menuTitle)
-                                Text(tier.menuSubtitle)
-                                    .font(.caption)
+                    TextField("What's on your mind?", text: $model.draft, axis: .vertical)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 16))
+                        .lineLimit(1...6)
+                        .onSubmit {
+                            if NSEvent.modifierFlags.contains(.shift) {
+                                model.draft += "\n"
+                            } else {
+                                submit()
                             }
                         }
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Text(model.client.modelTier.menuTitle)
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 9, weight: .semibold))
-                    }
-                    .font(.system(size: 13, weight: .medium))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
+                        .onChange(of: model.draft) { _, value in
+                            model.showPalette = value.hasPrefix("/") && !value.contains("\n")
+                        }
 
-                Button(action: submit) {
-                    Image(systemName: model.client.isTurnRunning ? "stop.fill" : "arrow.up")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(canSend || model.client.isTurnRunning ? GrokTheme.canvas : GrokTheme.secondary)
-                        .frame(width: 30, height: 30)
-                        .background(
-                            canSend || model.client.isTurnRunning ? GrokTheme.text : GrokTheme.chip,
-                            in: Circle()
-                        )
+                    Menu {
+                        ForEach(ModelTier.allCases) { tier in
+                            Button(tier.menuTitle) {
+                                model.client.modelTier = tier
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(model.client.modelTier.menuTitle)
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 8, weight: .semibold))
+                        }
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(palette.text)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+
+                    Button {
+                        // Voice is not in the Build CLI path yet.
+                    } label: {
+                        Image(systemName: "mic")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(palette.secondary)
+                            .frame(width: 28, height: 28)
+                    }
+                    .buttonStyle(.plain)
+                    .help("语音稍后接入")
+
+                    Button(action: submit) {
+                        Image(systemName: sendSymbol)
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(palette.sendGlyph)
+                            .frame(width: 34, height: 34)
+                            .background(palette.send, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canSend && !model.client.isTurnRunning)
                 }
-                .buttonStyle(.plain)
-                .disabled(!canSend && !model.client.isTurnRunning)
+                .padding(.leading, 12)
+                .padding(.trailing, 8)
+                .padding(.vertical, 8)
+            }
+            .background(palette.input, in: Capsule())
+            .overlay(Capsule().stroke(palette.hairline, lineWidth: 1))
+            .shadow(color: Color.black.opacity(palette.isDark ? 0.35 : 0.06), radius: 18, y: 6)
+
+            if model.showAttachMenu {
+                attachMenu
+                    .offset(x: 8, y: 56)
+                    .zIndex(4)
             }
         }
-        .padding(14)
-        .background(GrokTheme.input, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+    }
+
+    private var attachMenu: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            attachItem("Upload a file", systemImage: "square.and.arrow.up") { attachFiles() }
+            attachItem("Recent", systemImage: "clock", trailing: true) { }
+            attachItem("Project", systemImage: "folder", trailing: true) { model.chooseWorkingDirectory() }
+            Divider().overlay(palette.hairline).padding(.vertical, 4)
+            attachItem("Skills", systemImage: "puzzlepiece.extension", trailing: true) {
+                model.settingsSection = .extensions
+                model.showSettings = true
+                model.showAttachMenu = false
+            }
+            attachItem("Add connector", systemImage: "plus.square.on.square") {
+                model.settingsSection = .extensions
+                model.showSettings = true
+                model.showAttachMenu = false
+            }
+        }
+        .padding(.vertical, 6)
+        .frame(width: 220)
+        .background(palette.popover, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .stroke(GrokTheme.hairline, lineWidth: 1)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(palette.hairline, lineWidth: 1)
         )
+        .shadow(color: Color.black.opacity(0.12), radius: 16, y: 8)
+    }
+
+    private func attachItem(_ title: String, systemImage: String, trailing: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: systemImage)
+                    .frame(width: 16)
+                Text(title)
+                Spacer()
+                if trailing {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(palette.secondary)
+                }
+            }
+            .font(.system(size: 14))
+            .foregroundStyle(palette.text)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var sendSymbol: String {
+        if model.client.isTurnRunning { return "stop.fill" }
+        if canSend { return "arrow.up" }
+        return "waveform"
     }
 
     private var canSend: Bool {
@@ -89,6 +151,7 @@ struct ComposerView: View {
     }
 
     private func submit() {
+        model.showAttachMenu = false
         if model.client.isTurnRunning {
             model.client.cancelTurn()
             return
@@ -101,12 +164,13 @@ struct ComposerView: View {
         model.sendDraft()
     }
 
-    private func attach() {
+    private func attachFiles() {
+        model.showAttachMenu = false
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = true
-        panel.prompt = "附加"
+        panel.prompt = "Upload"
         guard panel.runModal() == .OK else { return }
         let refs = panel.urls.map { "@\($0.path)" }.joined(separator: " ")
         if model.draft.isEmpty {

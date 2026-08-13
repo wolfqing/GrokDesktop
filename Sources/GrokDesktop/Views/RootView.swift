@@ -2,21 +2,23 @@ import SwiftUI
 
 struct RootView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var palette: Palette {
+        Palette.resolve(preference: model.appearance, system: colorScheme)
+    }
 
     var body: some View {
         ZStack {
-            GrokTheme.canvas.ignoresSafeArea()
+            palette.canvas.ignoresSafeArea()
             HStack(spacing: 0) {
                 SidebarView()
-                    .frame(width: GrokTheme.sidebarWidth)
-                Rectangle()
-                    .fill(GrokTheme.hairline)
-                    .frame(width: 1)
+                    .frame(width: model.sidebarCollapsed ? GrokTheme.collapsedSidebarWidth : GrokTheme.sidebarWidth)
                 ChatView()
                     .frame(maxWidth: .infinity)
                 if model.showInspector {
                     Rectangle()
-                        .fill(GrokTheme.hairline)
+                        .fill(palette.hairline)
                         .frame(width: 1)
                     InspectorView()
                         .frame(width: GrokTheme.inspectorWidth)
@@ -34,8 +36,12 @@ struct RootView: View {
                     .zIndex(3)
             }
         }
-        .foregroundStyle(GrokTheme.text)
+        .environment(\.palette, palette)
+        .foregroundStyle(palette.text)
+        .background(palette.canvas)
         .animation(.easeInOut(duration: 0.18), value: model.showSettings)
         .animation(.easeInOut(duration: 0.18), value: model.showInspector)
+        .animation(.easeInOut(duration: 0.18), value: model.sidebarCollapsed)
+        .animation(.easeInOut(duration: 0.18), value: model.appearanceRaw)
     }
 }

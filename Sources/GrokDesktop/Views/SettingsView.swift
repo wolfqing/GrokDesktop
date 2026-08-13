@@ -2,30 +2,34 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.palette) private var palette
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.45)
+            palette.overlay
                 .ignoresSafeArea()
                 .onTapGesture { model.showSettings = false }
 
             HStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("设置")
-                        .font(.system(size: 16, weight: .semibold))
-                        .padding(.bottom, 8)
+                    HStack(spacing: 8) {
+                        GrokMark(size: 18)
+                        Text("设置")
+                            .font(.system(size: 16, weight: .semibold))
+                    }
+                    .padding(.bottom, 8)
                     ForEach(SettingsSection.allCases) { section in
                         Button(section.title) {
                             model.settingsSection = section
                         }
                         .buttonStyle(.plain)
                         .font(.system(size: 13))
-                        .foregroundStyle(model.settingsSection == section ? GrokTheme.text : GrokTheme.secondary)
+                        .foregroundStyle(model.settingsSection == section ? palette.text : palette.secondary)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 7)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(
-                            model.settingsSection == section ? GrokTheme.chip : Color.clear,
+                            model.settingsSection == section ? palette.selected : Color.clear,
                             in: RoundedRectangle(cornerRadius: 8, style: .continuous)
                         )
                     }
@@ -35,22 +39,22 @@ struct SettingsView: View {
                 }
                 .padding(16)
                 .frame(width: 180)
-                .background(GrokTheme.sidebar)
+                .background(palette.sidebar)
 
-                Rectangle().fill(GrokTheme.hairline).frame(width: 1)
+                Rectangle().fill(palette.hairline).frame(width: 1)
 
                 ScrollView {
                     settingsBody
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(28)
                 }
-                .background(GrokTheme.elevated)
+                .background(palette.elevated)
             }
             .frame(width: 760, height: 560)
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(GrokTheme.hairline, lineWidth: 1)
+                    .stroke(palette.hairline, lineWidth: 1)
             )
         }
     }
@@ -63,9 +67,31 @@ struct SettingsView: View {
 
             switch model.settingsSection {
             case .appearance:
-                labeled("主题", "跟随系统 / 浅色 / 深色（与 grok.com 设置菜单一致）")
-                labeled("紧凑显示", "对应 /compact-mode")
-                labeled("思考块", "config.toml [ui] show_thinking_blocks")
+                Text("外观")
+                    .font(.system(size: 13))
+                    .foregroundStyle(palette.secondary)
+                VStack(spacing: 6) {
+                    ForEach(AppearancePreference.allCases) { option in
+                        Button {
+                            model.appearance = option
+                        } label: {
+                            HStack {
+                                Image(systemName: model.appearance == option ? "checkmark.circle.fill" : "circle")
+                                    .foregroundStyle(model.appearance == option ? palette.text : palette.secondary)
+                                Text(option.title)
+                                Spacer()
+                            }
+                            .font(.system(size: 14))
+                            .foregroundStyle(palette.text)
+                            .padding(12)
+                            .background(
+                                model.appearance == option ? palette.selected : palette.chip,
+                                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
             case .language:
                 labeled("界面语言", "中文 / English")
             case .feedback:
@@ -94,7 +120,7 @@ struct SettingsView: View {
                 if let grok = model.locator.locate() {
                     Text(grok.path)
                         .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(GrokTheme.secondary)
+                        .foregroundStyle(palette.secondary)
                         .textSelection(.enabled)
                 }
             }
@@ -107,7 +133,7 @@ struct SettingsView: View {
             Text(title)
             Text(detail)
                 .font(.system(size: 13))
-                .foregroundStyle(GrokTheme.secondary)
+                .foregroundStyle(palette.secondary)
         }
         .padding(.vertical, 4)
     }

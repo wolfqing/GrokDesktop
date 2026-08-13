@@ -2,16 +2,16 @@ import SwiftUI
 
 struct FirstRunView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.palette) private var palette
     let reason: FirstRunReason
 
     var body: some View {
         VStack(spacing: 18) {
             Spacer()
-            Text("Grok Desktop")
-                .font(.system(size: 32, weight: .medium, design: .serif))
+            SuperGrokWordmark(markSize: 40)
             Text(message)
                 .font(.system(size: 15))
-                .foregroundStyle(GrokTheme.secondary)
+                .foregroundStyle(palette.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 460)
 
@@ -19,7 +19,7 @@ struct FirstRunView: View {
                 Text("curl -fsSL https://x.ai/cli/install.sh | bash")
                     .font(.system(size: 13, design: .monospaced))
                     .padding(12)
-                    .background(GrokTheme.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .background(palette.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                     .textSelection(.enabled)
             }
 
@@ -45,25 +45,29 @@ struct FirstRunView: View {
 }
 
 struct GrokPrimaryButtonStyle: ButtonStyle {
+    @Environment(\.palette) private var palette
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(GrokTheme.canvas)
+            .foregroundStyle(palette.sendGlyph)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
-            .background(GrokTheme.text, in: Capsule())
+            .background(palette.send, in: Capsule())
             .opacity(configuration.isPressed ? 0.8 : 1)
     }
 }
 
 struct GrokSecondaryButtonStyle: ButtonStyle {
+    @Environment(\.palette) private var palette
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 13, weight: .medium))
-            .foregroundStyle(GrokTheme.text)
+            .foregroundStyle(palette.text)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
-            .background(GrokTheme.chip, in: Capsule())
+            .background(palette.chip, in: Capsule())
             .opacity(configuration.isPressed ? 0.8 : 1)
     }
 }

@@ -12,8 +12,22 @@ final class AppModel: ObservableObject {
     @Published var showSettings = false
     @Published var showPalette = false
     @Published var showInspector = false
+    @Published var showSearchField = false
+    @Published var showAttachMenu = false
+    @Published var sidebarCollapsed = false
+    @Published var projectsExpanded = true
+    @Published var historyExpanded = true
     @Published var settingsSection: SettingsSection = .appearance
     @Published var firstRunReason: FirstRunReason?
+    @AppStorage("appearancePreference") var appearanceRaw = AppearancePreference.system.rawValue
+
+    var appearance: AppearancePreference {
+        get { AppearancePreference(rawValue: appearanceRaw) ?? .system }
+        set {
+            appearanceRaw = newValue.rawValue
+            objectWillChange.send()
+        }
+    }
 
     let sessionIndex: SessionIndex
     let locator: GrokBinaryLocator
@@ -45,6 +59,20 @@ final class AppModel: ObservableObject {
         return groups.keys.sorted().map { key in
             (key, groups[key]!.sorted { $0.updatedAt > $1.updatedAt })
         }
+    }
+
+    var projectPaths: [(path: String, name: String)] {
+        var seen = Set<String>()
+        var result: [(String, String)] = []
+        for session in sessions {
+            guard seen.insert(session.cwd).inserted, !session.cwd.isEmpty else { continue }
+            result.append((session.cwd, session.cwdName))
+        }
+        return result.sorted { $0.1.localizedCaseInsensitiveCompare($1.1) == .orderedAscending }
+    }
+
+    var isEmptyChat: Bool {
+        client.items.isEmpty && firstRunReason == nil
     }
 
     func refreshSessions() {
@@ -109,6 +137,7 @@ final class AppModel: ObservableObject {
             showSettings = true
         case "/dashboard", "/sessions":
             search = ""
+            sidebarCollapsed = false
         case "/home", "/welcome":
             client.resetConversation()
         case "/quit", "/exit":

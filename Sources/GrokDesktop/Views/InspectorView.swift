@@ -2,6 +2,7 @@ import SwiftUI
 
 struct InspectorView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.palette) private var palette
     @State private var tab = InspectorTab.plan
 
     var body: some View {
@@ -14,7 +15,7 @@ struct InspectorView: View {
             .pickerStyle(.segmented)
             .padding(12)
 
-            Divider().overlay(GrokTheme.hairline)
+            Divider().overlay(palette.hairline)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
@@ -23,28 +24,28 @@ struct InspectorView: View {
                         Text("Plan")
                             .font(.system(size: 16, weight: .semibold))
                         Text("进入 Plan 模式后，计划会出现在这里。批准、打回和行内评论会接到 ACP。")
-                            .foregroundStyle(GrokTheme.secondary)
+                            .foregroundStyle(palette.secondary)
                         if model.client.mode == .plan {
                             Text("当前是 Plan 模式。")
-                                .foregroundStyle(GrokTheme.text)
+                                .foregroundStyle(palette.text)
                         }
                     case .timeline:
                         Text("时间线")
                             .font(.system(size: 16, weight: .semibold))
                         Text("对应 /timeline 和 /jump，按轮次跳转。")
-                            .foregroundStyle(GrokTheme.secondary)
+                            .foregroundStyle(palette.secondary)
                     case .workflows:
                         Text("工作流")
                             .font(.system(size: 16, weight: .semibold))
                         Text("对应 /workflows、/goal、/loop。第一期先占位，入口留在检查器。")
-                            .foregroundStyle(GrokTheme.secondary)
+                            .foregroundStyle(palette.secondary)
                     }
                 }
                 .font(.system(size: 13))
                 .padding(16)
             }
         }
-        .background(GrokTheme.sidebar)
+        .background(palette.sidebar)
     }
 }
 

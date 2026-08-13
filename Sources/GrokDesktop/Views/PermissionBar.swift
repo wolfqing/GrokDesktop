@@ -3,13 +3,14 @@ import SwiftUI
 
 struct PermissionBar: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.palette) private var palette
     let request: PermissionRequest
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("需要批准")
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(GrokTheme.secondary)
+                .foregroundStyle(palette.secondary)
             Text(request.title)
                 .font(.system(size: 14))
                 .lineLimit(4)
@@ -29,19 +30,19 @@ struct PermissionBar: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(GrokTheme.elevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(palette.elevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(GrokTheme.hairline, lineWidth: 1)
+                .stroke(palette.hairline, lineWidth: 1)
         )
         .padding(.horizontal, 24)
     }
 
     private func background(for option: PermissionRequest.Option) -> Color {
-        option.kind.contains("reject") ? GrokTheme.chip : GrokTheme.text
+        option.kind.contains("reject") ? palette.chip : palette.send
     }
 
     private func foreground(for option: PermissionRequest.Option) -> Color {
-        option.kind.contains("reject") ? GrokTheme.text : GrokTheme.canvas
+        option.kind.contains("reject") ? palette.text : palette.sendGlyph
     }
 }

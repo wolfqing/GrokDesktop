@@ -3,12 +3,20 @@ import SwiftUI
 
 struct ChatView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.palette) private var palette
 
     var body: some View {
         VStack(spacing: 0) {
-            header
+            if !model.isEmptyChat || model.firstRunReason != nil {
+                header
+            }
+
             if let reason = model.firstRunReason, model.client.items.isEmpty {
                 FirstRunView(reason: reason)
+                ComposerView()
+                    .frame(maxWidth: GrokTheme.contentWidth)
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 28)
             } else if model.client.items.isEmpty {
                 emptyState
             } else {
@@ -30,31 +38,37 @@ struct ChatView: View {
                         }
                     }
                 }
-            }
 
-            if let permission = model.client.permission {
-                PermissionBar(request: permission)
+                if let permission = model.client.permission {
+                    PermissionBar(request: permission)
+                        .frame(maxWidth: GrokTheme.contentWidth)
+                        .padding(.bottom, 8)
+                }
+
+                ComposerView()
                     .frame(maxWidth: GrokTheme.contentWidth)
-                    .padding(.bottom, 8)
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 22)
             }
-
-            ComposerView()
-                .frame(maxWidth: GrokTheme.contentWidth)
-                .padding(.horizontal, 24)
-                .padding(.bottom, 18)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(GrokTheme.canvas)
+        .background(palette.canvas)
     }
 
     private var header: some View {
         HStack(spacing: 10) {
+            if model.sidebarCollapsed {
+                Button { model.sidebarCollapsed = false } label: {
+                    GrokMark(size: 18)
+                }
+                .buttonStyle(.plain)
+            }
             Button(model.client.workingDirectory.path) {
                 model.chooseWorkingDirectory()
             }
             .buttonStyle(.plain)
             .font(.system(size: 12))
-            .foregroundStyle(GrokTheme.secondary)
+            .foregroundStyle(palette.secondary)
             .lineLimit(1)
 
             Spacer()
@@ -66,13 +80,22 @@ struct ChatView: View {
             .font(.system(size: 12, weight: .medium))
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
-            .background(GrokTheme.chip, in: Capsule())
+            .background(palette.chip, in: Capsule())
+
+            Button {
+                model.showSettings = true
+            } label: {
+                Image(systemName: "gearshape")
+                    .foregroundStyle(palette.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("设置")
 
             Button {
                 model.showInspector.toggle()
             } label: {
                 Image(systemName: "sidebar.right")
-                    .foregroundStyle(GrokTheme.secondary)
+                    .foregroundStyle(palette.secondary)
             }
             .buttonStyle(.plain)
             .help("检查器")
@@ -84,29 +107,13 @@ struct ChatView: View {
     private var emptyState: some View {
         VStack(spacing: 28) {
             Spacer()
-            Text("Grok")
-                .font(.system(size: 44, weight: .medium, design: .serif))
-            Text("向 Grok 提任何问题")
-                .font(.system(size: 16))
-                .foregroundStyle(GrokTheme.secondary)
-            HStack(spacing: 10) {
-                suggestion("解释这个仓库")
-                suggestion("/plan 下一步怎么改")
-                suggestion("审查最近的提交")
-            }
+            SuperGrokWordmark(markSize: 48)
+            ComposerView()
+                .frame(maxWidth: 680)
+                .padding(.horizontal, 24)
             Spacer()
+            Spacer(minLength: 40)
         }
-    }
-
-    private func suggestion(_ text: String) -> some View {
-        Button(text) {
-            model.draft = text
-        }
-        .buttonStyle(.plain)
-        .font(.system(size: 13))
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(GrokTheme.chip, in: Capsule())
     }
 
     @ViewBuilder
@@ -119,7 +126,7 @@ struct ChatView: View {
                     .font(.system(size: 16))
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
-                    .background(GrokTheme.elevated, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .background(palette.selected, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
             .padding(.horizontal, 28)
         case .assistant(_, let text, _):
@@ -131,7 +138,7 @@ struct ChatView: View {
             DisclosureGroup("思考") {
                 Text(text)
                     .font(.system(size: 13))
-                    .foregroundStyle(GrokTheme.secondary)
+                    .foregroundStyle(palette.secondary)
                     .textSelection(.enabled)
             }
             .padding(.horizontal, 28)
@@ -142,23 +149,23 @@ struct ChatView: View {
                     Text(title)
                     Spacer()
                     Text(status)
-                        .foregroundStyle(GrokTheme.secondary)
+                        .foregroundStyle(palette.secondary)
                 }
                 .font(.system(size: 13, weight: .medium))
                 if !detail.isEmpty {
                     Text(detail)
                         .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(GrokTheme.secondary)
+                        .foregroundStyle(palette.secondary)
                         .lineLimit(8)
                 }
             }
             .padding(12)
-            .background(GrokTheme.chip, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(palette.chip, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .padding(.horizontal, 28)
         case .notice(_, let text):
             Text(text)
                 .font(.system(size: 13))
-                .foregroundStyle(GrokTheme.secondary)
+                .foregroundStyle(palette.secondary)
                 .padding(.horizontal, 28)
         }
     }

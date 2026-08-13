@@ -3,151 +3,236 @@ import SwiftUI
 
 struct SidebarView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.palette) private var palette
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 10) {
-                Circle()
-                    .fill(GrokTheme.text)
-                    .frame(width: 18, height: 18)
-                Text("Grok")
-                    .font(.system(size: 17, weight: .semibold))
-                Spacer()
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 18)
-            .padding(.bottom, 14)
+            header
+                .padding(.horizontal, 14)
+                .padding(.top, 16)
+                .padding(.bottom, 10)
 
-            sidebarButton(title: "新会话", systemImage: "square.and.pencil") {
+            if model.sidebarCollapsed {
+                collapsedRail
+            } else {
+                expandedContent
+            }
+        }
+        .background(palette.sidebar)
+    }
+
+    private var header: some View {
+        HStack {
+            if model.sidebarCollapsed {
+                Button { model.sidebarCollapsed = false } label: {
+                    GrokMark(size: 20)
+                }
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity)
+            } else {
+                GrokMark(size: 22)
+                Spacer()
+                Button {
+                    model.sidebarCollapsed = true
+                } label: {
+                    Image(systemName: "chevron.left.2")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(palette.secondary)
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+                .help("收起侧栏")
+            }
+        }
+    }
+
+    private var collapsedRail: some View {
+        VStack(spacing: 8) {
+            iconButton("magnifyingglass") { model.sidebarCollapsed = false; model.showSearchField = true }
+            iconButton("square.and.pencil") { model.startNewSession() }
+            iconButton("photo") { model.draft = "/imagine " }
+            iconButton("bolt") {
+                model.showInspector = true
+            }
+            iconButton("square.grid.2x2") {
+                model.settingsSection = .extensions
+                model.showSettings = true
+            }
+            Spacer()
+            iconButton("gearshape") { model.showSettings = true }
+        }
+        .padding(.top, 8)
+        .padding(.bottom, 12)
+        .frame(maxWidth: .infinity)
+    }
+
+    private var expandedContent: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            navRow("Search", systemImage: "magnifyingglass", selected: model.showSearchField) {
+                model.showSearchField.toggle()
+            }
+            navRow("New Chat", systemImage: "square.and.pencil", selected: model.isEmptyChat) {
                 model.startNewSession()
             }
-            sidebarButton(title: "Imagine", systemImage: "sparkles") {
+            navRow("Imagine", systemImage: "photo") {
                 model.draft = "/imagine "
             }
+            navRow("Automations", systemImage: "bolt") {
+                model.showInspector = true
+            }
+            navRow("Skills and Connectors", systemImage: "square.grid.2x2") {
+                model.settingsSection = .extensions
+                model.showSettings = true
+            }
 
-            searchField
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
+            if model.showSearchField {
+                searchField
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+            }
 
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 18) {
-                    liveSection
-                    ForEach(model.groupedSessions, id: \.key) { group in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(group.key)
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(GrokTheme.secondary)
+                VStack(alignment: .leading, spacing: 16) {
+                    disclosure(title: "Projects", expanded: $model.projectsExpanded) {
+                        if model.projectPaths.isEmpty {
+                            Text("No projects yet")
+                                .font(.system(size: 13))
+                                .foregroundStyle(palette.secondary)
                                 .padding(.horizontal, 16)
-                            ForEach(group.values) { session in
-                                sessionRow(session)
+                                .padding(.vertical, 4)
+                        } else {
+                            ForEach(model.projectPaths, id: \.path) { project in
+                                Button {
+                                    model.client.workingDirectory = URL(fileURLWithPath: project.path)
+                                    model.startNewSession()
+                                } label: {
+                                    Label(project.name, systemImage: "folder")
+                                        .labelStyle(.titleAndIcon)
+                                        .font(.system(size: 13.5))
+                                        .foregroundStyle(palette.text)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(.horizontal, 16)
+                                        .padding(.vertical, 6)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        Button {
+                            model.chooseWorkingDirectory()
+                        } label: {
+                            Label("Add project", systemImage: "plus")
+                                .font(.system(size: 13.5))
+                                .foregroundStyle(palette.secondary)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 6)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    disclosure(title: "History", expanded: $model.historyExpanded) {
+                        if model.client.isTurnRunning {
+                            historyRow(title: model.client.workingDirectory.lastPathComponent, subtitle: "Running", selected: true) {}
+                        }
+                        ForEach(model.filteredSessions) { session in
+                            historyRow(
+                                title: session.title,
+                                subtitle: nil,
+                                selected: model.client.sessionID == session.id
+                            ) {
+                                model.open(session)
                             }
                         }
                     }
                 }
-                .padding(.bottom, 20)
+                .padding(.top, 14)
+                .padding(.bottom, 16)
             }
-
-            Divider().overlay(GrokTheme.hairline)
-            HStack {
-                Button {
-                    model.settingsSection = .account
-                    model.showSettings = true
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "person.crop.circle")
-                        Text("账号")
-                    }
-                    .font(.system(size: 13))
-                    .foregroundStyle(GrokTheme.secondary)
-                }
-                .buttonStyle(.plain)
-                Spacer()
-                Button {
-                    model.showSettings = true
-                } label: {
-                    Image(systemName: "gearshape")
-                        .foregroundStyle(GrokTheme.secondary)
-                }
-                .buttonStyle(.plain)
-                .help("设置")
-            }
-            .padding(14)
         }
-        .background(GrokTheme.sidebar)
     }
 
     private var searchField: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
-                .foregroundStyle(GrokTheme.secondary)
-            TextField("搜索", text: $model.search)
+                .foregroundStyle(palette.secondary)
+            TextField("Search", text: $model.search)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .background(GrokTheme.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(palette.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
-    @ViewBuilder
-    private var liveSection: some View {
-        if model.client.isTurnRunning {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("进行中")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(GrokTheme.secondary)
-                    .padding(.horizontal, 16)
-                HStack {
-                    Circle()
-                        .fill(Color.green)
-                        .frame(width: 7, height: 7)
-                    Text(model.client.workingDirectory.lastPathComponent)
-                        .lineLimit(1)
+    private func navRow(_ title: String, systemImage: String, selected: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 14, weight: .medium))
+                    .frame(width: 18)
+                Text(title)
+                    .font(.system(size: 14, weight: selected ? .semibold : .regular))
+                Spacer()
+            }
+            .foregroundStyle(palette.text)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(selected ? palette.selected : Color.clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 8)
+    }
+
+    private func disclosure<Content: View>(title: String, expanded: Binding<Bool>, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button {
+                expanded.wrappedValue.toggle()
+            } label: {
+                HStack(spacing: 6) {
+                    Text(title)
+                        .font(.system(size: 13, weight: .semibold))
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 9, weight: .semibold))
+                        .rotationEffect(.degrees(expanded.wrappedValue ? 0 : -90))
                     Spacer()
                 }
-                .font(.system(size: 13))
+                .foregroundStyle(palette.text)
                 .padding(.horizontal, 16)
-                .padding(.vertical, 8)
+                .padding(.vertical, 4)
+            }
+            .buttonStyle(.plain)
+            if expanded.wrappedValue {
+                content()
             }
         }
     }
 
-    private func sessionRow(_ session: SessionRecord) -> some View {
-        Button {
-            model.open(session)
-        } label: {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(session.title)
-                    .font(.system(size: 13))
+    private func historyRow(title: String, subtitle: String?, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                if subtitle == "Running" {
+                    Circle().fill(Color.green).frame(width: 6, height: 6)
+                }
+                Text(title)
+                    .font(.system(size: 13.5))
                     .lineLimit(1)
-                Text(session.cwdName)
-                    .font(.system(size: 11))
-                    .foregroundStyle(GrokTheme.secondary)
-                    .lineLimit(1)
+                    .foregroundStyle(palette.text)
+                Spacer()
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .background(
-                model.client.sessionID == session.id ? GrokTheme.chip : Color.clear,
-                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-            )
+            .padding(.vertical, 6)
+            .background(selected ? palette.selected : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .buttonStyle(.plain)
     }
 
-    private func sidebarButton(title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+    private func iconButton(_ systemImage: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: 10) {
-                Image(systemName: systemImage)
-                    .frame(width: 16)
-                Text(title)
-                Spacer()
-            }
-            .font(.system(size: 13.5))
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .contentShape(Rectangle())
+            Image(systemName: systemImage)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(palette.text)
+                .frame(width: 36, height: 36)
+                .background(palette.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain)
     }

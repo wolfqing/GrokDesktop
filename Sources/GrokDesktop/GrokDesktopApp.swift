@@ -4,6 +4,7 @@ import SwiftUI
 @main
 struct GrokDesktopApp: App {
     @StateObject private var model = AppModel()
+    @Environment(\.colorScheme) private var systemScheme
 
     init() {
         NSApplication.shared.setActivationPolicy(.regular)
@@ -13,8 +14,7 @@ struct GrokDesktopApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(model)
-                .background(GrokTheme.canvas)
-                .preferredColorScheme(.dark)
+                .preferredColorScheme(model.appearance.colorScheme)
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1280, height: 840)
