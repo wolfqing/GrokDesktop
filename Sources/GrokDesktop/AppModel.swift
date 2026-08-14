@@ -337,15 +337,36 @@ final class AppModel: ObservableObject {
     }
 
     func startNewSession() {
+        startNewSession(cwd: client.workingDirectory)
+    }
+
+    func startNewSession(cwd: URL) {
         destination = .chat
+        rememberWorkingDirectory(cwd)
         Task {
             do {
-                try await client.newSession()
+                try await client.newSession(cwd: cwd)
                 firstRunReason = nil
+                refreshWorkspace()
             } catch {
                 present(error)
             }
         }
+    }
+
+    func openProject(_ project: NamedProject) {
+        startNewSession(cwd: URL(fileURLWithPath: project.path))
+    }
+
+    func rememberWorkingDirectory(_ url: URL) {
+        UserDefaults.standard.set(url.path, forKey: "lastWorkingDirectory")
+        client.workingDirectory = url
+        refreshWorkspace()
+    }
+
+    func isCurrentProject(_ project: NamedProject) -> Bool {
+        URL(fileURLWithPath: project.path).standardizedFileURL.path
+            == client.workingDirectory.standardizedFileURL.path
     }
 
     func chooseWorkingDirectory() {
@@ -357,9 +378,7 @@ final class AppModel: ObservableObject {
         panel.prompt = copy.chooseFolder
         panel.directoryURL = client.workingDirectory
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        client.workingDirectory = url
-        refreshWorkspace()
-        startNewSession()
+        startNewSession(cwd: url)
     }
 
     func createProject() {
@@ -370,12 +389,10 @@ final class AppModel: ObservableObject {
         let project = NamedProject(name: name, path: folder.path)
         namedProjects.insert(project, at: 0)
         projectStore.save(namedProjects)
-        client.workingDirectory = folder
-        refreshWorkspace()
         showCreateProject = false
         newProjectName = ""
         newProjectFolder = nil
-        startNewSession()
+        startNewSession(cwd: folder)
     }
 
     func open(_ record: SessionRecord) {

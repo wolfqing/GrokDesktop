@@ -614,7 +614,7 @@ struct SettingsView: View {
                     .foregroundStyle(palette.secondary)
             }
             Button(l10n.t("Remember this folder for new chats", "新会话记住当前目录")) {
-                UserDefaults.standard.set(model.client.workingDirectory.path, forKey: "lastWorkingDirectory")
+                model.rememberWorkingDirectory(model.client.workingDirectory)
             }
             .buttonStyle(GrokSecondaryButtonStyle())
             toggle(l10n.enableAutoScroll, isOn: $model.autoScroll)

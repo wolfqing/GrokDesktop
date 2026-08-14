@@ -71,6 +71,7 @@ public final class ACPClient: ObservableObject {
     private var thoughtBufferID: String?
     private var sessionAllowTitles: Set<String> = []
     private var lastSessionID: String?
+    private var pendingWorkingDirectory: URL?
     private var shouldReconnect = true
     private var reconnectTask: Task<Void, Never>?
     private var workspaceByID: [String: SessionWorkspace] = [:]
@@ -184,10 +185,12 @@ public final class ACPClient: ObservableObject {
     }
 
     public func newSession(cwd: URL? = nil) async throws {
+        let target = cwd ?? pendingWorkingDirectory ?? workingDirectory
+        pendingWorkingDirectory = target
+        workingDirectory = target
+        defer { pendingWorkingDirectory = nil }
         try await connectIfNeeded()
-        if let cwd {
-            workingDirectory = cwd
-        }
+        workingDirectory = target
         var meta: [String: Any] = [:]
         if mode == .alwaysApprove {
             meta["yoloMode"] = true
@@ -198,7 +201,7 @@ public final class ACPClient: ObservableObject {
         let result = try await request(
             method: "session/new",
             params: [
-                "cwd": workingDirectory.path,
+                "cwd": target.path,
                 "mcpServers": [],
                 "_meta": meta
             ]
@@ -208,9 +211,11 @@ public final class ACPClient: ObservableObject {
         guard let sessionID else {
             throw ACPError.rpc("No session")
         }
-        let directory = SessionIndex().directory(cwd: workingDirectory.path, id: sessionID)
+        workingDirectory = target
+        let directory = SessionIndex().directory(cwd: target.path, id: sessionID)
         sessionDirectory = directory
-        let workspace = ensureWorkspace(id: sessionID, cwd: workingDirectory, directory: directory)
+        let workspace = ensureWorkspace(id: sessionID, cwd: target, directory: directory)
+        workspace.cwd = target
         workspace.items = []
         workspace.planEntries = []
         workspace.planMarkdown = ""
@@ -801,7 +806,8 @@ public final class ACPClient: ObservableObject {
     @discardableResult
     private func ensureWorkspace(id: String, cwd: URL, directory: URL?) -> SessionWorkspace {
         if let existing = workspaceByID[id] {
-            existing.cwd = cwd
+            // A session's cwd is fixed at create/load. Never clobber it with the
+            // currently displayed folder (that races when switching projects).
             if let directory { existing.directory = directory }
             return existing
         }
@@ -822,7 +828,9 @@ public final class ACPClient: ObservableObject {
             hunks = workspace.hunks
             promptQueue = workspace.promptQueue
             sessionDirectory = workspace.directory
-            workingDirectory = workspace.cwd
+            if pendingWorkingDirectory == nil {
+                workingDirectory = workspace.cwd
+            }
             mode = workspace.mode
             allowEditsThisSession = workspace.allowEditsThisSession
             itemDates = workspace.itemDates

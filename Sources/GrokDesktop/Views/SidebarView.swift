@@ -101,8 +101,7 @@ struct SidebarView: View {
                         } else {
                             ForEach(model.visibleProjects) { project in
                                 Button {
-                                    model.client.workingDirectory = URL(fileURLWithPath: project.path)
-                                    model.startNewSession()
+                                    model.openProject(project)
                                 } label: {
                                     Text(project.name)
                                         .font(.system(size: 13.5))
@@ -110,6 +109,10 @@ struct SidebarView: View {
                                         .frame(maxWidth: .infinity, alignment: .leading)
                                         .padding(.horizontal, 16)
                                         .padding(.vertical, 6)
+                                        .background(
+                                            model.isCurrentProject(project) ? palette.selected : Color.clear,
+                                            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        )
                                 }
                                 .buttonStyle(.plain)
                             }
