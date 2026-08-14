@@ -307,32 +307,21 @@ struct InspectorView: View {
                     .textSelection(.enabled)
                     .lineLimit(8)
             }
-            if !model.client.gitDiffText.isEmpty {
-                let diffFiles = TranscriptLoader.parseDiffFiles(model.client.gitDiffText)
-                if !diffFiles.isEmpty, model.client.hunks.isEmpty {
-                    ForEach(diffFiles, id: \.self) { path in
-                        let url = ChatLinkDetector.resolve(path, baseDirectory: model.client.workingDirectory)?.url
-                            ?? URL(fileURLWithPath: path)
-                        Button(URL(fileURLWithPath: path).lastPathComponent) {
-                            ChatLinkActions.open(url)
-                        }
-                        .buttonStyle(.plain)
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color(nsColor: .linkColor))
-                        .help(path)
-                        .contextMenu { ChatLinkContextButtons(url: url) }
-                    }
+            if !scannedDiffs.isEmpty {
+                ForEach(scannedDiffs) { file in
+                    DiffFileBlock(file: file)
                 }
+            } else if !model.client.gitDiffText.isEmpty {
                 Text(model.client.gitDiffText)
                     .font(.system(size: 11, design: .monospaced))
                     .textSelection(.enabled)
                     .lineLimit(10)
             }
-            if model.client.hunks.isEmpty && model.client.gitDiffText.isEmpty {
+            if model.client.hunks.isEmpty && scannedDiffs.isEmpty && model.client.gitDiffText.isEmpty {
                 Text(l10n.t("No session diffs yet.", "这一轮还没有 diff。"))
                     .font(.system(size: 12))
                     .foregroundStyle(palette.secondary)
-            } else if !model.client.hunks.isEmpty {
+            } else if !model.client.hunks.isEmpty, scannedDiffs.isEmpty {
                 ForEach(model.client.hunks) { hunk in
                     let url = ChatLinkDetector.resolve(hunk.path, baseDirectory: model.client.workingDirectory)?.url
                         ?? URL(fileURLWithPath: hunk.path)
@@ -402,9 +391,88 @@ struct InspectorView: View {
         }
     }
 
+    private var scannedDiffs: [DiffFile] {
+        DiffScan.parse(model.client.gitDiffText)
+    }
+
     private func sectionTitle(_ title: String) -> some View {
         Text(title)
             .font(.system(size: 12, weight: .semibold))
             .foregroundStyle(palette.secondary)
+    }
+}
+
+private struct DiffFileBlock: View {
+    let file: DiffFile
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.palette) private var palette
+    @State private var expanded = true
+
+    var body: some View {
+        let url = ChatLinkDetector.resolve(file.path, baseDirectory: model.client.workingDirectory)?.url
+            ?? URL(fileURLWithPath: file.path)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Button {
+                    expanded.toggle()
+                } label: {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 9, weight: .semibold))
+                        .rotationEffect(.degrees(expanded ? 0 : -90))
+                }
+                .buttonStyle(.plain)
+                Button(file.name) {
+                    ChatLinkActions.open(url)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color(nsColor: .linkColor))
+                .help(file.path)
+                .contextMenu { ChatLinkContextButtons(url: url) }
+                Spacer()
+                Text("+\(file.added)")
+                    .foregroundStyle(.green)
+                Text("-\(file.removed)")
+                    .foregroundStyle(.red)
+            }
+            .font(.system(size: 12))
+            if expanded {
+                VStack(alignment: .leading, spacing: 1) {
+                    ForEach(Array(file.lines.prefix(40).enumerated()), id: \.offset) { _, line in
+                        if line.kind != .meta {
+                            Text(line.text)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(color(for: line.kind))
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 1)
+                                .background(background(for: line.kind), in: RoundedRectangle(cornerRadius: 3, style: .continuous))
+                        }
+                    }
+                    if file.lines.count > 40 {
+                        Text("+\(file.lines.count - 40)")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(palette.secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    private func color(for kind: DiffLine.Kind) -> Color {
+        switch kind {
+        case .added: return Color.green
+        case .removed: return Color.red
+        case .header: return palette.secondary
+        case .meta, .context: return palette.text
+        }
+    }
+
+    private func background(for kind: DiffLine.Kind) -> Color {
+        switch kind {
+        case .added: return Color.green.opacity(0.12)
+        case .removed: return Color.red.opacity(0.12)
+        default: return .clear
+        }
     }
 }

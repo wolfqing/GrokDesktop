@@ -242,16 +242,46 @@ public struct PermissionRequest: Identifiable, Sendable, Equatable {
     public var sessionId: String?
     public var title: String
     public var options: [Option]
+    public var kind: String
+    public var detail: String
+    public var command: String?
+    public var path: String?
+    public var questions: [UserQuestion]
 
-    public init(id: JSONRPCID, sessionId: String? = nil, title: String, options: [Option]) {
+    public init(
+        id: JSONRPCID,
+        sessionId: String? = nil,
+        title: String,
+        options: [Option],
+        kind: String = "",
+        detail: String = "",
+        command: String? = nil,
+        path: String? = nil,
+        questions: [UserQuestion] = []
+    ) {
         self.id = id
         self.sessionId = sessionId
         self.title = title
         self.options = options
+        self.kind = kind
+        self.detail = detail
+        self.command = command
+        self.path = path
+        self.questions = questions
+    }
+
+    public var isQuestion: Bool {
+        !questions.isEmpty || title.lowercased().contains("ask_user") || title.lowercased().contains("ask user")
     }
 
     public static func parse(id: JSONRPCID, params: [String: Any]) -> PermissionRequest {
-        let toolCall = params["toolCall"] as? [String: Any] ?? [:]
+        let toolCall = params["toolCall"] as? [String: Any]
+            ?? params["tool_call"] as? [String: Any]
+            ?? [:]
+        let rawInput = toolCall["rawInput"] as? [String: Any]
+            ?? toolCall["raw_input"] as? [String: Any]
+            ?? params["rawInput"] as? [String: Any]
+            ?? [:]
         let title = (toolCall["title"] as? String)
             ?? (params["title"] as? String)
             ?? "Approve tool"
@@ -266,12 +296,188 @@ public struct PermissionRequest: Identifiable, Sendable, Equatable {
                 kind: item["kind"] as? String ?? ""
             )
         }
+        let command = firstString(rawInput, keys: ["command", "cmd", "shell"])
+        let path = firstString(rawInput, keys: ["path", "file_path", "filePath", "target"])
+        let detail = permissionDetail(toolCall: toolCall, rawInput: rawInput, command: command, path: path)
         return PermissionRequest(
             id: id,
             sessionId: params["sessionId"] as? String ?? params["session_id"] as? String,
             title: title,
-            options: options
+            options: options,
+            kind: toolCall["kind"] as? String ?? params["kind"] as? String ?? "",
+            detail: detail,
+            command: command,
+            path: path,
+            questions: UserQuestion.parseList(rawInput["questions"] ?? params["questions"] ?? toolCall["questions"])
         )
+    }
+
+    private static func permissionDetail(
+        toolCall: [String: Any],
+        rawInput: [String: Any],
+        command: String?,
+        path: String?
+    ) -> String {
+        if let command, !command.isEmpty { return command }
+        if let path, !path.isEmpty { return path }
+        if let description = toolCall["description"] as? String, !description.isEmpty {
+            return description
+        }
+        let extracted = SessionUpdate.extractText(toolCall)
+        if !extracted.isEmpty {
+            return String(extracted.prefix(400))
+        }
+        if let description = rawInput["description"] as? String, !description.isEmpty {
+            return description
+        }
+        return ""
+    }
+
+    private static func firstString(_ dict: [String: Any], keys: [String]) -> String? {
+        for key in keys {
+            if let value = dict[key] as? String, !value.isEmpty { return value }
+        }
+        return nil
+    }
+}
+
+public struct UserQuestion: Identifiable, Hashable, Sendable {
+    public var id: String
+    public var header: String
+    public var question: String
+    public var options: [UserQuestionOption]
+    public var multiSelect: Bool
+
+    public init(
+        id: String = UUID().uuidString,
+        header: String = "",
+        question: String,
+        options: [UserQuestionOption],
+        multiSelect: Bool = false
+    ) {
+        self.id = id
+        self.header = header
+        self.question = question
+        self.options = options
+        self.multiSelect = multiSelect
+    }
+
+    public static func parseList(_ value: Any?) -> [UserQuestion] {
+        if let rows = value as? [[String: Any]] {
+            return rows.compactMap(parse)
+        }
+        if let dict = value as? [String: Any], dict["question"] != nil || dict["options"] != nil {
+            return parse(dict).map { [$0] } ?? []
+        }
+        return []
+    }
+
+    public static func parse(_ raw: [String: Any]) -> UserQuestion? {
+        let question = (raw["question"] as? String)
+            ?? (raw["prompt"] as? String)
+            ?? (raw["text"] as? String)
+            ?? ""
+        let options = parseOptions(raw["options"] ?? raw["choices"])
+        if question.isEmpty && options.isEmpty { return nil }
+        return UserQuestion(
+            id: raw["id"] as? String ?? question,
+            header: raw["header"] as? String ?? raw["title"] as? String ?? "",
+            question: question,
+            options: options,
+            multiSelect: raw["multi_select"] as? Bool ?? raw["multiSelect"] as? Bool ?? false
+        )
+    }
+
+    private static func parseOptions(_ value: Any?) -> [UserQuestionOption] {
+        if let rows = value as? [[String: Any]] {
+            return rows.compactMap { row in
+                let label = row["label"] as? String ?? row["name"] as? String ?? row["id"] as? String
+                guard let label, !label.isEmpty else { return nil }
+                return UserQuestionOption(
+                    label: label,
+                    detail: row["description"] as? String ?? row["detail"] as? String ?? "",
+                    preview: row["preview"] as? String
+                )
+            }
+        }
+        if let labels = value as? [String] {
+            return labels.filter { !$0.isEmpty }.map { UserQuestionOption(label: $0) }
+        }
+        return []
+    }
+}
+
+public struct UserQuestionOption: Hashable, Sendable, Identifiable {
+    public var id: String { label }
+    public var label: String
+    public var detail: String
+    public var preview: String?
+
+    public init(label: String, detail: String = "", preview: String? = nil) {
+        self.label = label
+        self.detail = detail
+        self.preview = preview
+    }
+}
+
+public struct UserQuestionRequest: Identifiable, Equatable, Sendable {
+    public var rpcID: JSONRPCID
+    public var sessionId: String?
+    public var questions: [UserQuestion]
+
+    public var id: String {
+        switch rpcID {
+        case .int(let value): return "q-\(value)"
+        case .string(let value): return "q-\(value)"
+        }
+    }
+
+    public init(rpcID: JSONRPCID, sessionId: String? = nil, questions: [UserQuestion]) {
+        self.rpcID = rpcID
+        self.sessionId = sessionId
+        self.questions = questions
+    }
+
+    public static func parse(id: JSONRPCID, params: [String: Any]) -> UserQuestionRequest? {
+        let questions = UserQuestion.parseList(params["questions"] ?? params["payload"])
+        guard !questions.isEmpty else { return nil }
+        return UserQuestionRequest(
+            rpcID: id,
+            sessionId: params["sessionId"] as? String ?? params["session_id"] as? String,
+            questions: questions
+        )
+    }
+
+    public static func isMethod(_ method: String) -> Bool {
+        let name = method.split(separator: "/").last.map(String.init) ?? method
+        return name == "ask_user_question" || name == "askUserQuestion"
+    }
+}
+
+public enum UserQuestionOutcome: Equatable, Sendable {
+    case accepted(answers: [String: [String]], partial: Bool)
+    case chatAboutThis(String)
+    case skipInterview
+
+    public var json: [String: Any] {
+        switch self {
+        case .accepted(let answers, let partial):
+            var mapped: [String: Any] = [:]
+            for (question, labels) in answers {
+                mapped[question] = labels.count == 1 ? labels[0] : labels
+            }
+            return [
+                "type": "Accepted",
+                "answers": mapped,
+                "partial_answers": partial
+            ]
+        case .chatAboutThis(let text):
+            var body: [String: Any] = ["type": "ChatAboutThis"]
+            if !text.isEmpty { body["text"] = text }
+            return body
+        case .skipInterview:
+            return ["type": "SkipInterview"]
+        }
     }
 }
 

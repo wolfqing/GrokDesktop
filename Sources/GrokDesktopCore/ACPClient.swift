@@ -18,6 +18,7 @@ public final class ACPClient: ObservableObject {
     @Published public private(set) var isTurnRunning = false
     @Published public private(set) var isStopping = false
     @Published public private(set) var permission: PermissionRequest?
+    @Published public private(set) var userQuestion: UserQuestionRequest?
     @Published public private(set) var lastError: String?
     @Published public private(set) var stderrLines: [String] = []
     @Published public private(set) var decodeFailures = 0
@@ -59,6 +60,10 @@ public final class ACPClient: ObservableObject {
 
     public var backgroundPermissions: [SessionWorkspace] {
         liveWorkspaces.filter { $0.id != sessionID && $0.permission != nil }
+    }
+
+    public var backgroundQuestions: [SessionWorkspace] {
+        liveWorkspaces.filter { $0.id != sessionID && $0.userQuestion != nil }
     }
 
     public var config: GrokConfig { configStore.load() }
@@ -168,7 +173,7 @@ public final class ACPClient: ObservableObject {
                 "protocolVersion": 1,
                 "clientInfo": [
                     "name": "GrokDesktop",
-                    "version": "0.1.5"
+                    "version": "0.1.6"
                 ],
                 "clientCapabilities": [
                     "fs": [
@@ -231,6 +236,7 @@ public final class ACPClient: ObservableObject {
         workspace.assistantBufferID = nil
         workspace.thoughtBufferID = nil
         workspace.permission = nil
+        workspace.userQuestion = nil
         workspace.lastError = nil
         workspace.mode = mode
         workspace.loadedOnAgent = true
@@ -283,6 +289,7 @@ public final class ACPClient: ObservableObject {
         workspace.thoughtBufferID = nil
         if !workspace.isLive {
             workspace.permission = nil
+            workspace.userQuestion = nil
         }
         sessionID = id
         lastSessionID = id
@@ -433,6 +440,10 @@ public final class ACPClient: ObservableObject {
                     workspace.permission = nil
                     respond(id: permission.id, result: ["outcome": ["outcome": "cancelled"]])
                 }
+                if let question = workspace.userQuestion {
+                    workspace.userQuestion = nil
+                    respond(id: question.rpcID, result: UserQuestionOutcome.skipInterview.json)
+                }
                 for taskID in runningTaskIDs {
                     let params: [String: Any] = ["taskId": taskID, "task_id": taskID, "sessionId": id]
                     fire(method: "x.ai/task/kill", params: params)
@@ -487,6 +498,20 @@ public final class ACPClient: ObservableObject {
             ]
         )
         workspace.permission = nil
+        syncFromCurrent()
+    }
+
+    public func answerQuestion(_ outcome: UserQuestionOutcome, sessionID target: String? = nil) {
+        let workspace = (target ?? sessionID).flatMap { workspaceByID[$0] } ?? currentWorkspace
+        guard let workspace, let question = workspace.userQuestion else { return }
+        respond(id: question.rpcID, result: outcome.json)
+        workspace.userQuestion = nil
+        if case .chatAboutThis(let text) = outcome {
+            let note = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !note.isEmpty {
+                Task { try? await send(text: note, sessionID: workspace.id) }
+            }
+        }
         syncFromCurrent()
     }
 
@@ -552,9 +577,14 @@ public final class ACPClient: ObservableObject {
     }
 
     public func resetConversation() {
+        if let question = currentWorkspace?.userQuestion {
+            currentWorkspace?.userQuestion = nil
+            respond(id: question.rpcID, result: UserQuestionOutcome.skipInterview.json)
+        }
         sessionID = nil
         items = []
         permission = nil
+        userQuestion = nil
         assistantBufferID = nil
         thoughtBufferID = nil
         isTurnRunning = false
@@ -633,7 +663,11 @@ public final class ACPClient: ObservableObject {
             gitStatusText = Self.pretty(status.result)
         }
         if let diffs = try? await request(method: "x.ai/git/diffs", params: ["cwd": workingDirectory.path]) {
-            gitDiffText = Self.pretty(diffs.result)
+            let extracted = DiffScan.extractPatch(from: diffs.result)
+            gitDiffText = extracted.isEmpty ? Self.pretty(diffs.result) : extracted
+        }
+        if gitDiffText.isEmpty {
+            gitDiffText = DiffScan.workspaceDiff(cwd: workingDirectory)
         }
         if gitStatusText.isEmpty, gitDiffText.isEmpty {
             // keep WorkspaceSnapshot as the fallback
@@ -699,7 +733,9 @@ public final class ACPClient: ObservableObject {
         for workspace in workspaceByID.values {
             workspace.isTurnRunning = false
             workspace.loadedOnAgent = false
+            workspace.userQuestion = nil
         }
+        userQuestion = nil
         isTurnRunning = false
         refreshLive()
         guard shouldReconnect, lastSessionID != nil else {
@@ -759,6 +795,11 @@ public final class ACPClient: ObservableObject {
                 lastError = "Repeated invalid ACP JSON. Reconnecting."
                 process?.terminate()
             }
+            return
+        }
+
+        if let method = envelope.method, let id = envelope.id, UserQuestionRequest.isMethod(method) {
+            present(questionID: id, params: envelope.params)
             return
         }
 
@@ -867,6 +908,7 @@ public final class ACPClient: ObservableObject {
             items = workspace.items
             isTurnRunning = workspace.isTurnRunning
             permission = workspace.permission
+            userQuestion = workspace.userQuestion
             lastError = workspace.lastError ?? lastError
             planEntries = workspace.planEntries
             planMarkdown = workspace.planMarkdown
@@ -888,6 +930,32 @@ public final class ACPClient: ObservableObject {
 
     private func refreshLive() {
         liveWorkspaces = workspaceByID.values.filter(\.isLive).sorted { $0.id < $1.id }
+    }
+
+    private func present(questionID id: JSONRPCID, params: [String: Any]) {
+        if let request = UserQuestionRequest.parse(id: id, params: params) {
+            present(question: request)
+            return
+        }
+        respond(id: id, result: UserQuestionOutcome.skipInterview.json)
+        appendStderr("ask_user_question had no questions")
+    }
+
+    private func present(question: UserQuestionRequest) {
+        let workspace = ensureWorkspace(
+            id: question.sessionId ?? sessionID ?? UUID().uuidString,
+            cwd: workingDirectory,
+            directory: sessionDirectory
+        )
+        if let existing = workspace.userQuestion, existing.rpcID != question.rpcID {
+            respond(id: existing.rpcID, result: UserQuestionOutcome.skipInterview.json)
+        }
+        workspace.userQuestion = question
+        if sessionID == nil {
+            sessionID = workspace.id
+            lastSessionID = workspace.id
+        }
+        syncFromCurrent()
     }
 
     private func isPlanPermission(_ request: PermissionRequest) -> Bool {

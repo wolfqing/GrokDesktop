@@ -542,4 +542,84 @@ expect(snapshot.servers.contains(where: { $0.name == "brave-search" && $0.transp
 expect(snapshot.servers.contains(where: { $0.name == "remote" && $0.transport == "http" }), "http server")
 expect(snapshot.report.contains("brave-search"), "report names servers")
 
+let questionJSON: [String: Any] = [
+    "sessionId": "s1",
+    "questions": [[
+        "question": "Which approach?",
+        "header": "Approach",
+        "multi_select": false,
+        "options": [
+            ["label": "A", "description": "Fast", "preview": "do A"],
+            ["label": "B", "description": "Careful"]
+        ]
+    ]]
+]
+let parsedQuestion = UserQuestionRequest.parse(id: .int(9), params: questionJSON)
+expect(parsedQuestion?.questions.count == 1, "parse ask_user_question")
+expect(parsedQuestion?.questions.first?.options.count == 2, "question options")
+expect(UserQuestionRequest.isMethod("x.ai/ask_user_question"), "ask method suffix")
+expect(UserQuestionRequest.isMethod("ask_user_question"), "ask method bare")
+expect(!UserQuestionRequest.isMethod("session/update"), "other method is not ask")
+let accepted = UserQuestionOutcome.accepted(answers: ["Which approach?": ["A"]], partial: false).json
+expect(accepted["type"] as? String == "Accepted", "accepted type")
+expect((accepted["answers"] as? [String: Any])?["Which approach?"] as? String == "A", "accepted string or vec")
+
+let richPermission = PermissionRequest.parse(id: .int(3), params: [
+    "sessionId": "s1",
+    "options": [["optionId": "proceed_once", "name": "Allow", "kind": "allow_once"]],
+    "toolCall": [
+        "title": "run_terminal_command",
+        "kind": "execute",
+        "rawInput": ["command": "swift test", "path": "/tmp/App.swift"]
+    ]
+] as [String: Any])
+expect(richPermission.command == "swift test", "permission command")
+expect(richPermission.path == "/tmp/App.swift", "permission path")
+expect(richPermission.detail.contains("swift test"), "permission detail uses command")
+
+let yesterdayDate = Calendar.current.date(byAdding: .day, value: -1, to: now) ?? now.addingTimeInterval(-86_400)
+let yesterday = SessionRecord(
+    id: "y",
+    cwd: "/tmp/Demo",
+    title: "Night work",
+    updatedAt: yesterdayDate,
+    model: "grok-4.6",
+    directory: URL(fileURLWithPath: "/tmp")
+)
+expect(SessionSearch.matches(yesterday, query: "Night", now: now, chinese: true), "search title")
+expect(SessionSearch.matches(yesterday, query: "Demo", now: now, chinese: true), "search folder")
+expect(SessionSearch.matches(yesterday, query: "昨天", now: now, chinese: true), "search yesterday zh")
+expect(SessionSearch.matches(yesterday, query: "yesterday", now: now, chinese: false), "search yesterday en")
+expect(!SessionSearch.matches(yesterday, query: "missing-token", now: now, chinese: true), "search miss")
+
+let diff = """
+diff --git a/App.swift b/App.swift
+--- a/App.swift
++++ b/App.swift
+@@ -1,3 +1,4 @@
+ keep
+-old
++new
+"""
+let scanned = DiffScan.parse(diff)
+expect(scanned.count == 1, "diff file count")
+expect(scanned[0].name == "App.swift", "diff file name")
+expect(scanned[0].added == 1, "diff added")
+expect(scanned[0].removed == 1, "diff removed")
+let wrapped = DiffScan.extractPatch("{\"diff\":\"diff --git a/A.swift b/A.swift\\n+ok\"}")
+expect(wrapped.contains("diff --git"), "extract patch from json")
+
+let imageRoot = FileManager.default.temporaryDirectory.appendingPathComponent("gd-imagine-\(UUID().uuidString)", isDirectory: true)
+let imageFolder = imageRoot.appendingPathComponent("sid/images", isDirectory: true)
+try! FileManager.default.createDirectory(at: imageFolder, withIntermediateDirectories: true)
+let thumb = imageFolder.appendingPathComponent("shot.png")
+try! Data([0x89, 0x50, 0x4E, 0x47]).write(to: thumb)
+let recents = ImagineLibrary.recent(sessionsRoot: imageRoot, limit: 8)
+expect(recents.contains(where: { $0.url.lastPathComponent == "shot.png" }), "imagine recent thumb")
+
+expect(!ChatLinkDetector.likelyContainsLinks("plain hello"), "plain text is not linky")
+expect(ChatLinkDetector.likelyContainsLinks("see https://x.ai/build"), "http is linky")
+expect(ChatLinkDetector.likelyContainsLinks("open Sources/App.swift"), "relative file is linky")
+
 print("GrokDesktopSmoke ok")
+

@@ -12,9 +12,49 @@ struct PermissionBar: View {
             Text(l10n.t("Needs your OK", "需要你点头"))
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(palette.secondary)
-            Text(request.title)
+            Text(displayTitle)
                 .font(.system(size: 14, weight: .medium))
                 .lineLimit(3)
+            if !request.detail.isEmpty, request.detail != request.title {
+                Text(request.detail)
+                    .font(.system(size: 12, design: request.command == nil ? .default : .monospaced))
+                    .foregroundStyle(palette.secondary)
+                    .textSelection(.enabled)
+                    .lineLimit(6)
+            }
+            if let path = request.path, !path.isEmpty {
+                let url = ChatLinkDetector.resolve(path, baseDirectory: model.client.workingDirectory)?.url
+                    ?? URL(fileURLWithPath: path)
+                Button(url.lastPathComponent) {
+                    ChatLinkActions.open(url)
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 12))
+                .foregroundStyle(Color(nsColor: .linkColor))
+                .help(path)
+                .contextMenu { ChatLinkContextButtons(url: url) }
+            }
+            if !request.questions.isEmpty {
+                ForEach(request.questions) { question in
+                    VStack(alignment: .leading, spacing: 4) {
+                        if !question.question.isEmpty {
+                            Text(question.question)
+                                .font(.system(size: 13, weight: .medium))
+                        }
+                        ForEach(question.options) { option in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(option.label)
+                                    .font(.system(size: 12, weight: .medium))
+                                if !option.detail.isEmpty {
+                                    Text(option.detail)
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(palette.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             HStack(spacing: 8) {
                 if let allow = allowOption {
                     Button(l10n.t("Allow once", "允许一次")) {
@@ -59,6 +99,14 @@ struct PermissionBar: View {
                 .stroke(palette.hairline, lineWidth: 1)
         )
         .padding(.horizontal, 24)
+    }
+
+    private var displayTitle: String {
+        let title = request.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if title.lowercased() == "ask_user_question" || title.lowercased() == "ask user question" {
+            return l10n.t("Grok has a question", "Grok 在问你")
+        }
+        return title
     }
 
     private var allowOption: PermissionRequest.Option? {

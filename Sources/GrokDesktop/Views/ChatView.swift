@@ -35,13 +35,17 @@ struct ChatView: View {
                         .padding(.top, 8)
                 }
 
-                if let other = model.client.backgroundPermissions.first {
+                if let other = model.client.backgroundQuestions.first ?? model.client.backgroundPermissions.first {
                     Button {
                         _ = model.client.focusIfLoaded(other.id)
                     } label: {
                         HStack {
                             Image(systemName: "exclamationmark.circle")
-                            Text(l10n.t("Another session is waiting for approval", "另一个会话在等你批准"))
+                            Text(
+                                other.userQuestion != nil
+                                    ? l10n.t("Another session is waiting for an answer", "另一个会话在等你回答")
+                                    : l10n.t("Another session is waiting for approval", "另一个会话在等你批准")
+                            )
                             Spacer()
                             Text(other.title.isEmpty ? String(other.id.prefix(8)) : other.title)
                                 .foregroundStyle(palette.secondary)
@@ -144,7 +148,11 @@ struct ChatView: View {
                     }
                 }
 
-                if let permission = model.client.permission {
+                if let question = model.client.userQuestion {
+                    QuestionCard(request: question)
+                        .frame(maxWidth: GrokTheme.contentWidth)
+                        .padding(.bottom, 8)
+                } else if let permission = model.client.permission {
                     PermissionBar(request: permission)
                         .frame(maxWidth: GrokTheme.contentWidth)
                         .padding(.bottom, 8)

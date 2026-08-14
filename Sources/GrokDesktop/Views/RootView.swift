@@ -161,6 +161,19 @@ struct RootView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text(model.copy.t("Resume session", "恢复会话"))
                     .font(.system(size: 16, weight: .semibold))
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(palette.secondary)
+                    TextField(
+                        model.copy.t("Title, folder, or time", "标题、目录或时间"),
+                        text: $model.search
+                    )
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13))
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(palette.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 ScrollView {
                     VStack(alignment: .leading, spacing: 4) {
                         ForEach(model.filteredSessions.prefix(30)) { session in

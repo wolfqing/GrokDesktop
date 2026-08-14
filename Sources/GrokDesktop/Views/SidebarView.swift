@@ -265,7 +265,7 @@ struct SidebarView: View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(palette.secondary)
-            TextField(l10n.search, text: $model.search)
+            TextField(l10n.t("Title, folder, or time", "标题、目录或时间"), text: $model.search)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
         }

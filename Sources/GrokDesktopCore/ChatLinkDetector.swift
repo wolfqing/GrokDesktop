@@ -31,6 +31,22 @@ public enum ChatLinkDetector {
         "etc", "home", "Library", "System", "Applications", "dev", "cores", "opt"
     ]
 
+    public static func likelyContainsLinks(_ text: String) -> Bool {
+        guard !text.isEmpty else { return false }
+        return text.contains("http")
+            || text.contains("www.")
+            || text.contains("://")
+            || text.contains("](")
+            || text.contains("~/")
+            || text.contains("@/")
+            || text.contains("mailto:")
+            || text.contains("/Users/")
+            || text.contains("/tmp/")
+            || text.contains("/var/")
+            || text.contains("/opt/")
+            || (text.contains("/") && text.contains("."))
+    }
+
     public static func detect(
         in text: String,
         baseDirectory: URL? = nil,

@@ -1,3 +1,5 @@
+import AppKit
+import GrokDesktopCore
 import SwiftUI
 
 struct ImagineView: View {
@@ -5,6 +7,7 @@ struct ImagineView: View {
     @Environment(\.palette) private var palette
     @Environment(\.l10n) private var l10n
     @State private var prompt = ""
+    @State private var recent: [ImagineAsset] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -26,11 +29,52 @@ struct ImagineView: View {
                 model.sendDraft()
             }
             .buttonStyle(GrokPrimaryButtonStyle())
+            if !recent.isEmpty {
+                Text(l10n.t("Recent", "最近生成"))
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(palette.secondary)
+                    .padding(.top, 8)
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 112), spacing: 10)], spacing: 10) {
+                    ForEach(recent) { asset in
+                        Button {
+                            ChatLinkActions.open(asset.url)
+                        } label: {
+                            ImagineThumb(url: asset.url)
+                        }
+                        .buttonStyle(.plain)
+                        .help(asset.url.lastPathComponent)
+                        .contextMenu { ChatLinkContextButtons(url: asset.url) }
+                    }
+                }
+            }
             Spacer()
         }
         .padding(36)
         .frame(maxWidth: 720)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(palette.canvas)
+        .onAppear { recent = ImagineLibrary.recent() }
+    }
+}
+
+private struct ImagineThumb: View {
+    let url: URL
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        Group {
+            if let image = NSImage(contentsOf: url) {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } else {
+                Image(systemName: "photo")
+                    .foregroundStyle(palette.secondary)
+            }
+        }
+        .frame(width: 112, height: 112)
+        .clipped()
+        .background(palette.chip)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }

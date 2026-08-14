@@ -7,7 +7,7 @@ struct AboutView: View {
     @Environment(\.l10n) private var l10n
 
     private var version: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.5"
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.6"
     }
 
     var body: some View {

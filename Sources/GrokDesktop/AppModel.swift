@@ -283,12 +283,8 @@ final class AppModel: ObservableObject {
         let visible = sessions.filter { !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return visible }
-        return visible.filter {
-            $0.title.localizedCaseInsensitiveContains(query)
-                || $0.cwd.localizedCaseInsensitiveContains(query)
-                || $0.cwdName.localizedCaseInsensitiveContains(query)
-                || ($0.model?.localizedCaseInsensitiveContains(query) ?? false)
-        }
+        let chinese = language.resolved() == .chinese
+        return visible.filter { SessionSearch.matches($0, query: query, chinese: chinese) }
     }
 
     var visibleProjects: [NamedProject] {
@@ -795,6 +791,7 @@ final class AppModel: ObservableObject {
         case "/home", "/welcome":
             openChat()
         case "/resume":
+            if !rest.isEmpty { search = rest }
             showResumePicker = true
             sidebarCollapsed = false
             showSearchField = true
@@ -1391,7 +1388,7 @@ final class AppModel: ObservableObject {
 
     func exportDiagnostics() {
         let text = DiagnosticExport.make(
-            version: "0.1.5",
+            version: "0.1.6",
             grokVersion: client.grokVersion,
             state: String(describing: client.state),
             lastError: client.lastError,

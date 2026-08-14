@@ -18,7 +18,7 @@ struct LinkedText: View {
     var live = false
 
     var body: some View {
-        if live || !Self.mightContainLinks(text) {
+        if live || !Self.shouldUseNativeView(text, baseDirectory: model.client.workingDirectory) {
             plainText
         } else {
             LinkedTextNSView(
@@ -52,14 +52,9 @@ struct LinkedText: View {
         .frame(maxWidth: fillsWidth ? .infinity : nil, alignment: .leading)
     }
 
-    private static func mightContainLinks(_ text: String) -> Bool {
-        text.contains("http")
-            || text.contains("www.")
-            || text.contains("://")
-            || text.contains("/")
-            || text.contains("@")
-            || text.contains("~")
-            || text.contains("](")
+    private static func shouldUseNativeView(_ text: String, baseDirectory: URL) -> Bool {
+        guard ChatLinkDetector.likelyContainsLinks(text) else { return false }
+        return !ChatLinkDetector.detect(in: text, baseDirectory: baseDirectory).isEmpty
     }
 
     private static func swiftUIMarkdown(_ text: String) -> AttributedString {
@@ -173,6 +168,8 @@ private struct LinkedTextNSView: NSViewRepresentable {
     }
 
     private func apply(to view: ChatTextView) {
+        let fingerprint = "\(text.count)|\(text.hashValue)|\(fontSize)|\(monospaced)|\(markdown)|\(textColor.hash)|\(baseDirectory.path)"
+        if view.appliedFingerprint == fingerprint { return }
         let rendered = Self.attributed(
             text,
             fontSize: fontSize,
@@ -182,8 +179,12 @@ private struct LinkedTextNSView: NSViewRepresentable {
             linkColor: linkColor,
             baseDirectory: baseDirectory
         )
-        if view.textStorage?.isEqual(to: rendered) == true { return }
+        if view.textStorage?.isEqual(to: rendered) == true {
+            view.appliedFingerprint = fingerprint
+            return
+        }
         view.textStorage?.setAttributedString(rendered)
+        view.appliedFingerprint = fingerprint
     }
 
     static func attributed(
@@ -264,6 +265,7 @@ private struct LinkedTextNSView: NSViewRepresentable {
 
 final class ChatTextView: NSTextView {
     var chinese = false
+    var appliedFingerprint = ""
 
     override var intrinsicContentSize: NSSize {
         guard let container = textContainer, let manager = layoutManager else {

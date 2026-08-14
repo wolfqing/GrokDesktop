@@ -8,6 +8,7 @@ public final class SessionWorkspace: Identifiable {
     public var items: [ConversationItem] = []
     public var isTurnRunning = false
     public var permission: PermissionRequest?
+    public var userQuestion: UserQuestionRequest?
     public var promptQueue: [String] = []
     public var planEntries: [PlanEntry] = []
     public var planMarkdown = ""
@@ -33,7 +34,7 @@ public final class SessionWorkspace: Identifiable {
     }
 
     public var isLive: Bool {
-        !stopRequested && (isTurnRunning || permission != nil || !promptQueue.isEmpty)
+        !stopRequested && (isTurnRunning || permission != nil || userQuestion != nil || !promptQueue.isEmpty)
     }
 
     public func markWorkStopped() {

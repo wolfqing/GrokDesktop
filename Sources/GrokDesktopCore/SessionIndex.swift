@@ -154,3 +154,61 @@ public struct SessionIndex {
         return basic.date(from: raw)
     }
 }
+
+public enum SessionSearch {
+    public static func matches(
+        _ session: SessionRecord,
+        query: String,
+        now: Date = Date(),
+        chinese: Bool = false
+    ) -> Bool {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !needle.isEmpty else { return true }
+        return haystack(session, now: now, chinese: chinese).contains {
+            $0.localizedCaseInsensitiveContains(needle)
+        }
+    }
+
+    public static func haystack(
+        _ session: SessionRecord,
+        now: Date = Date(),
+        chinese: Bool = false
+    ) -> [String] {
+        var tokens = [
+            session.title,
+            session.cwd,
+            session.cwdName,
+            session.model ?? "",
+            RelativeTime.format(session.updatedAt, now: now, chinese: true),
+            RelativeTime.format(session.updatedAt, now: now, chinese: false),
+            RelativeTime.meta(session, now: now, chinese: chinese),
+            PromptTimestamp.format(session.updatedAt)
+        ]
+        tokens.append(contentsOf: dayTokens(session.updatedAt, now: now))
+        return tokens.filter { !$0.isEmpty }
+    }
+
+    public static func dayTokens(_ date: Date, now: Date = Date()) -> [String] {
+        let calendar = Calendar.current
+        var tokens: [String] = []
+        if calendar.isDate(date, inSameDayAs: now) {
+            tokens.append(contentsOf: ["today", "今天"])
+        }
+        if calendar.isDate(date, inSameDayAs: now.addingTimeInterval(-86_400)) {
+            tokens.append(contentsOf: ["yesterday", "昨天"])
+        }
+        let posix = DateFormatter()
+        posix.locale = Locale(identifier: "en_US_POSIX")
+        posix.dateFormat = "yyyy-MM-dd"
+        tokens.append(posix.string(from: date))
+        let english = DateFormatter()
+        english.locale = Locale(identifier: "en_US")
+        english.dateFormat = "MMM d"
+        tokens.append(english.string(from: date))
+        let chinese = DateFormatter()
+        chinese.locale = Locale(identifier: "zh_CN")
+        chinese.dateFormat = "M月d日"
+        tokens.append(chinese.string(from: date))
+        return tokens
+    }
+}
