@@ -64,6 +64,30 @@ struct RootView: View {
                 resumePicker
                     .zIndex(6)
             }
+            if model.showPromptHistory {
+                PromptHistorySheet()
+                    .zIndex(6)
+            }
+            if model.showCLIReport {
+                CLIReportSheet()
+                    .zIndex(6)
+            }
+            if model.showDocsPicker {
+                DocsPickerSheet()
+                    .zIndex(6)
+            }
+            if model.showFeedbackSheet {
+                FeedbackSheet()
+                    .zIndex(6)
+            }
+            if model.showShortcuts {
+                ShortcutsSheet()
+                    .zIndex(6)
+            }
+            if model.showClaudeImport {
+                ClaudeImportSheet()
+                    .zIndex(6)
+            }
             if model.showAddWorkflow {
                 addWorkflowSheet
                     .zIndex(6)

@@ -14,10 +14,7 @@ struct MessageMarkdownView: View {
             ForEach(Array(ChatMarkdown.blocks(in: text).enumerated()), id: \.offset) { _, block in
                 switch block {
                 case .prose(let value):
-                    Text(Self.attributed(value))
-                        .font(.system(size: fontSize))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    LinkedText(text: value, fontSize: fontSize, markdown: true)
                 case .code(let language, let code):
                     codeBlock(language: language, code: code)
                 }
@@ -49,19 +46,10 @@ struct MessageMarkdownView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
-            Text(code)
-                .font(.system(size: 12.5, design: .monospaced))
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            LinkedText(text: code, fontSize: 12.5, monospaced: true, markdown: false)
                 .padding(.horizontal, 12)
                 .padding(.bottom, 12)
         }
         .background(palette.chip, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-
-    private static func attributed(_ text: String) -> AttributedString {
-        var options = AttributedString.MarkdownParsingOptions()
-        options.interpretedSyntax = .inlineOnlyPreservingWhitespace
-        return (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
     }
 }

@@ -174,10 +174,9 @@ struct ComposerView: View {
             .padding(.horizontal, 6)
         }
         .onExitCommand {
-            if showsSuggestPanel {
-                model.dismissComposerSuggestions()
-            }
+            _ = model.handleEscape()
         }
+        .background(ComposerKeyMonitor())
         .onPasteCommand(of: [.image, .fileURL]) { _ in
             model.pasteAttachments()
         }
@@ -360,7 +359,7 @@ struct ComposerView: View {
             model.beginBusySend(text)
             return
         }
-        if model.draft.hasPrefix("/") && !model.draft.contains(" ") && model.draft.count > 1 {
+        if SlashBuiltins.handles(model.draft) {
             model.handleCommand(model.draft)
             model.draft = ""
             return
@@ -480,5 +479,50 @@ struct BusySendBar: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(palette.hairline, lineWidth: 1)
         )
+    }
+}
+
+private final class ComposerKeyMonitorBox: ObservableObject {
+    var monitor: Any?
+
+    func start(_ handler: @escaping (NSEvent) -> NSEvent?) {
+        stop()
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: handler)
+    }
+
+    func stop() {
+        if let monitor {
+            NSEvent.removeMonitor(monitor)
+            self.monitor = nil
+        }
+    }
+
+    deinit {
+        if let monitor {
+            NSEvent.removeMonitor(monitor)
+        }
+    }
+}
+
+private struct ComposerKeyMonitor: View {
+    @EnvironmentObject private var model: AppModel
+    @StateObject private var box = ComposerKeyMonitorBox()
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .onAppear {
+                box.start { event in
+                    let keyCode = event.keyCode
+                    let flags = event.modifierFlags.rawValue
+                    let swallow = MainActor.assumeIsolated {
+                        model.handleComposerKey(keyCode: keyCode, modifierFlags: flags)
+                    }
+                    return swallow ? nil : event
+                }
+            }
+            .onDisappear {
+                box.stop()
+            }
     }
 }

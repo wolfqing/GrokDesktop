@@ -97,6 +97,20 @@ final class AppModel: ObservableObject {
     @Published var loginCode = ""
     @Published var toast: String?
     @Published var showResumePicker = false
+    @Published var showPromptHistory = false
+    @Published var showCLIReport = false
+    @Published var showDocsPicker = false
+    @Published var showFeedbackSheet = false
+    @Published var showShortcuts = false
+    @Published var showClaudeImport = false
+    @Published var docsPickerTutorial = false
+    @Published var cliReportTitle = ""
+    @Published var cliReportBody = ""
+    @Published var feedbackDraft = ""
+    @Published var historyCursor: Int?
+    @Published var claudeImport = ClaudeImportSnapshot()
+    @Published var promptHistory: [String] = UserDefaults.standard.stringArray(forKey: "promptHistory") ?? []
+    private var escapeArmedAt: Date?
     @Published var sidebarNotice: String?
     @Published var needsFolderPick = false
     @Published var personas: [String] = []
@@ -464,6 +478,8 @@ final class AppModel: ObservableObject {
     func copyText(_ text: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
+        let backup = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".grok/last-copy.txt")
+        try? text.write(to: backup, atomically: true, encoding: .utf8)
     }
 
     func forkCurrent() {
@@ -574,6 +590,8 @@ final class AppModel: ObservableObject {
 
     func sendDraft() {
         let text = draft
+        historyCursor = nil
+        recordPrompt(text)
         draft = ""
         destination = .chat
         Task {
@@ -601,6 +619,8 @@ final class AppModel: ObservableObject {
     func confirmBusySendNow() {
         guard let text = pendingBusySend else { return }
         pendingBusySend = nil
+        historyCursor = nil
+        recordPrompt(text)
         destination = .chat
         Task {
             do {
@@ -761,12 +781,12 @@ final class AppModel: ObservableObject {
 
     func handleCommand(_ raw: String) {
         let line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        let name = String(line.split(separator: " ").first ?? "")
-        let rest = line.dropFirst(name.count).trimmingCharacters(in: .whitespaces)
+        let name = String(line.split(separator: " ").first ?? "").lowercased()
+        let rest = line.dropFirst(line.split(separator: " ").first?.count ?? 0).trimmingCharacters(in: .whitespaces)
         switch name {
         case "/new", "/clear":
             startNewSession()
-        case "/settings", "/config", "/prefs":
+        case "/settings", "/config", "/prefs", "/preferences":
             showSettings = true
         case "/dashboard", "/sessions", "/agents-dashboard":
             destination = .dashboard
@@ -777,6 +797,10 @@ final class AppModel: ObservableObject {
             showResumePicker = true
             sidebarCollapsed = false
             showSearchField = true
+        case "/continue":
+            continueLastInFolder()
+        case "/history":
+            showPromptHistory = true
         case "/rename", "/title":
             if let id = client.sessionID, let record = sessions.first(where: { $0.id == id }) {
                 if rest == "--auto" || rest.isEmpty {
@@ -795,7 +819,7 @@ final class AppModel: ObservableObject {
                 export(record)
             }
         case "/copy":
-            copyLatestReply()
+            copyReply(argument: rest)
         case "/fork":
             forkCurrent()
         case "/plan":
@@ -804,32 +828,70 @@ final class AppModel: ObservableObject {
                 draft = rest
                 sendDraft()
             }
-        case "/jump", "/timeline":
+        case "/view-plan", "/show-plan", "/plan-view":
+            destination = .chat
+            showInspector = true
+            client.setMode(.plan)
+        case "/jump", "/timeline", "/find":
             jumpLatest()
         case "/rewind", "/undo":
             Task { await client.rewind() }
         case "/compact":
             Task { await client.compact(note: rest) }
+        case "/model", "/m":
+            applyModelCommand(rest)
+        case "/effort":
+            applyEffortCommand(rest)
+        case "/always-approve":
+            client.setMode(client.mode == .alwaysApprove ? .normal : .alwaysApprove)
+            flash(client.mode.title(chinese: language.resolved() == .chinese))
+        case "/auto":
+            client.setMode(client.mode == .auto ? .normal : .auto)
+            flash(client.mode.title(chinese: language.resolved() == .chinese))
+        case "/multiline", "/ml":
+            requireCmdEnter.toggle()
+            flash(requireCmdEnter ? copy.requireCmdEnter : copy.t("Enter sends", "Enter 发送"))
+        case "/compact-mode":
+            compactChat.toggle()
+        case "/timestamps":
+            showTimestamps.toggle()
+        case "/theme", "/t":
+            applyThemeCommand(rest)
         case "/feedback":
-            draft = rest.isEmpty ? "/feedback" : "/feedback \(rest)"
-            sendDraft()
+            if rest.isEmpty {
+                feedbackDraft = ""
+                showFeedbackSheet = true
+            } else {
+                draft = "/feedback \(rest)"
+                sendDraft()
+            }
         case "/logout":
             logout()
         case "/login":
             login()
         case "/context", "/session-info", "/status", "/info":
-            showInspector = true
             destination = .chat
-            flash(sessionInfoLine())
-        case "/docs":
-            openDocs()
-        case "/changelog":
+            showInspector = true
+            presentContextReport()
+        case "/docs", "/howto", "/guides":
+            openDocsCommand(rest)
+        case "/changelog", "/release-notes":
             openChangelog()
+        case "/tutorial", "/tour", "/onboarding":
+            docsPickerTutorial = true
+            showDocsPicker = true
         case "/imagine":
             destination = .imagine
             if !rest.isEmpty {
                 draft = "/imagine \(rest)"
                 destination = .chat
+                sendDraft()
+            }
+        case "/imagine-video":
+            if rest.isEmpty {
+                insertSlashPrompt("/imagine-video")
+            } else {
+                draft = "/imagine-video \(rest)"
                 sendDraft()
             }
         case "/usage", "/cost":
@@ -838,6 +900,73 @@ final class AppModel: ObservableObject {
             } else {
                 openUsage()
             }
+        case "/privacy":
+            settingsSection = .dataControls
+            showSettings = true
+        case "/skills":
+            destination = .skills
+            skillsTab = 0
+        case "/hooks", "/hooks-list", "/hooks-trust", "/hooks-add", "/hooks-remove", "/hooks-untrust":
+            settingsSection = .extensions
+            showSettings = true
+        case "/plugins":
+            if rest.isEmpty {
+                settingsSection = .extensions
+                showSettings = true
+            } else {
+                let parts = rest.split(whereSeparator: \.isWhitespace).map(String.init)
+                runGrokCLI(arguments: ["plugin"] + parts, title: "/plugins")
+            }
+        case "/marketplace":
+            runGrokCLI(arguments: ["plugin", "marketplace", "list"], title: "/marketplace")
+        case "/mcps":
+            if rest.hasPrefix("doctor") {
+                let extra = rest.split(whereSeparator: \.isWhitespace).dropFirst().map(String.init)
+                runGrokCLI(arguments: ["mcp", "doctor"] + extra, title: "/mcps doctor")
+            } else {
+                settingsSection = .extensions
+                showSettings = true
+            }
+        case "/workflows":
+            destination = .automations
+        case "/workflow":
+            if rest.isEmpty {
+                destination = .automations
+            } else {
+                draft = "/workflow \(rest)"
+                sendDraft()
+            }
+        case "/agents", "/config-agents", "/personas":
+            destination = .chat
+            showInspector = true
+        case "/doctor", "/terminal-setup", "/terminal-check", "/terminal-info":
+            runGrokCLI(arguments: rest == "fix" ? ["doctor", "fix"] : ["doctor"], title: "/doctor")
+        case "/inspect":
+            runGrokCLI(arguments: ["inspect"], title: "/inspect")
+        case "/du", "/disk-usage":
+            runGrokCLI(arguments: ["du"], title: "/du")
+        case "/models":
+            runGrokCLI(arguments: ["models"], title: "/models")
+        case "/update":
+            runGrokCLI(arguments: ["update", "--check"], title: "/update")
+        case "/shortcuts", "/keys":
+            showShortcuts = true
+        case "/vim-mode", "/minimal", "/fullscreen", "/full", "/edit-prompt", "/expand":
+            flash(copy.t("That command is terminal-only.", "这个命令只在终端 TUI 里有。"))
+        case "/memory", "/mem":
+            applyMemoryCommand(rest)
+        case "/remember", "/flush", "/dream", "/loop", "/goal", "/deep-research", "/btw":
+            if rest.isEmpty, name == "/remember" || name == "/loop" || name == "/goal" || name == "/deep-research" || name == "/btw" {
+                insertSlashPrompt(name)
+            } else {
+                draft = rest.isEmpty ? name : "\(name) \(rest)"
+                sendDraft()
+            }
+        case "/import-claude":
+            presentClaudeImport()
+        case "/worktree":
+            let parts = rest.split(whereSeparator: \.isWhitespace).map(String.init)
+            runGrokCLI(arguments: ["worktree"] + (parts.isEmpty ? ["list"] : parts), title: "/worktree")
         case "/quit", "/exit":
             NSApp.terminate(nil)
         default:
@@ -845,6 +974,362 @@ final class AppModel: ObservableObject {
             sendDraft()
         }
         showPalette = false
+    }
+
+    func continueLastInFolder() {
+        let cwd = client.workingDirectory.path
+        if let last = sessions.first(where: { $0.cwd == cwd }) {
+            open(last)
+        } else {
+            flash(copy.t("No previous session in this folder.", "这个文件夹还没有会话。"))
+        }
+    }
+
+    func applyHistory(_ text: String) {
+        draft = text
+        historyCursor = promptHistory.firstIndex(of: text)
+        showPromptHistory = false
+        showPalette = false
+        suppressSuggest = true
+    }
+
+    func recallHistory(delta: Int) {
+        let items = promptHistory
+        guard !items.isEmpty else { return }
+        let current = historyCursor ?? -1
+        let next = current + delta
+        if next < 0 {
+            historyCursor = nil
+            draft = ""
+            suppressSuggest = true
+            return
+        }
+        guard next < items.count else { return }
+        historyCursor = next
+        draft = items[next]
+        suppressSuggest = true
+        showPalette = false
+        mentionQuery = nil
+    }
+
+    func handleEscape() -> Bool {
+        if mentionQuery != nil || showPalette || showAttachMenu {
+            dismissComposerSuggestions()
+            return true
+        }
+        if showPromptHistory { showPromptHistory = false; return true }
+        if showDocsPicker { showDocsPicker = false; return true }
+        if showFeedbackSheet { showFeedbackSheet = false; return true }
+        if showShortcuts { showShortcuts = false; return true }
+        if showClaudeImport { showClaudeImport = false; return true }
+        if showCLIReport { showCLIReport = false; return true }
+        if client.hasActiveWork && !client.isStopping {
+            client.stopWork()
+            return true
+        }
+        let now = Date()
+        if let armed = escapeArmedAt, now.timeIntervalSince(armed) < 0.8 {
+            escapeArmedAt = nil
+            let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                Task { await client.rewind() }
+            } else {
+                recordPrompt(trimmed)
+                draft = ""
+                historyCursor = nil
+                flash(copy.t("Prompt cleared", "已清空输入"))
+            }
+            return true
+        }
+        escapeArmedAt = now
+        if !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            flash(copy.t("Press Esc again to clear", "再按一次 Esc 清空"))
+        }
+        return true
+    }
+
+    func handleComposerKey(keyCode: UInt16, modifierFlags: UInt) -> Bool {
+        guard destination == .chat else { return false }
+        if showSettings || showAbout || showResumePicker || showPromptHistory || showCLIReport
+            || showDocsPicker || showFeedbackSheet || showShortcuts || showClaudeImport || showAddWorkflow || showAddMCP {
+            return false
+        }
+        if showPalette || mentionQuery != nil || pendingBusySend != nil { return false }
+        let flags = NSEvent.ModifierFlags(rawValue: modifierFlags).intersection(.deviceIndependentFlagsMask)
+        if !flags.isEmpty && flags != .numericPad && flags != .function && flags != [.numericPad, .function] {
+            return false
+        }
+        switch keyCode {
+        case 126:
+            let empty = draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            if empty || historyCursor != nil {
+                recallHistory(delta: 1)
+                return true
+            }
+        case 125:
+            if historyCursor != nil {
+                recallHistory(delta: -1)
+                return true
+            }
+        default:
+            break
+        }
+        return false
+    }
+
+    func submitFeedback() {
+        let text = feedbackDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        showFeedbackSheet = false
+        feedbackDraft = ""
+        draft = text.isEmpty ? "/feedback" : "/feedback \(text)"
+        sendDraft()
+    }
+
+    func openGuide(_ guide: LocalGuide) {
+        showDocsPicker = false
+        NSWorkspace.shared.open(guide.url)
+    }
+
+    func openDocsCommand(_ rest: String) {
+        let query = rest.trimmingCharacters(in: .whitespacesAndNewlines)
+        if query.isEmpty || query == "how-to" || query == "howto" {
+            docsPickerTutorial = false
+            showDocsPicker = true
+            return
+        }
+        if query == "web" {
+            openDocs()
+            return
+        }
+        let guides = LocalGuides.all()
+        if let match = LocalGuides.match(query, in: guides) {
+            NSWorkspace.shared.open(match.url)
+        } else {
+            docsPickerTutorial = false
+            showDocsPicker = true
+            flash(copy.t("No guide matching \(query)", "没有匹配 \(query) 的指南"))
+        }
+    }
+
+    func presentContextReport() {
+        refreshWorkspace()
+        let used = workspace.contextUsed
+        let window = workspace.contextWindow
+        let free = max(window - used, 0)
+        let todos = client.todos
+        let done = todos.filter { $0.status == "completed" }.count
+        cliReportTitle = "/context"
+        cliReportBody = [
+            "model: \(client.buildModel.rawValue)",
+            "effort: \(client.effort.rawValue)",
+            "mode: \(client.mode.rawValue)",
+            "session: \(client.sessionID ?? "—")",
+            "cwd: \(client.workingDirectory.path)",
+            "auth: \(client.authPresence.isReady ? "signed in" : "unsigned")",
+            "turns: \(client.items.filter { if case .user = $0 { return true }; return false }.count)",
+            "messages: \(client.items.count)",
+            "context: \(workspace.contextPercent)% (\(used)/\(window), free \(free))",
+            "todos: \(done)/\(todos.count)",
+            "skills: \(skills.count)",
+            "mcp: \(mcpServers.count)",
+            "branch: \(workspace.branch ?? "—")"
+        ].joined(separator: "\n")
+        showCLIReport = true
+    }
+
+    func presentClaudeImport() {
+        claudeImport = ClaudeImportSnapshot.discover()
+        showClaudeImport = true
+    }
+
+    func importClaudeMCP() {
+        let existing = Set(mcpServers.map { $0.name.lowercased() })
+        var imported = 0
+        var skipped = 0
+        var failed: [String] = []
+        for server in claudeImport.servers {
+            if existing.contains(server.name.lowercased()) {
+                skipped += 1
+                continue
+            }
+            do {
+                try mcpCatalog.add(
+                    name: server.name,
+                    transport: server.transport,
+                    commandOrURL: server.commandOrURL,
+                    args: server.args,
+                    locator: locator
+                )
+                imported += 1
+            } catch {
+                failed.append("\(server.name): \(error.localizedDescription)")
+            }
+        }
+        mcpServers = mcpCatalog.load(locator: locator, cwd: client.workingDirectory)
+        extensions = ExtensionInventory.load(mcpNames: grokConfig.mcpNames)
+        if failed.isEmpty {
+            flash(copy.t("Imported \(imported) MCP, skipped \(skipped)", "已导入 \(imported) 个 MCP，跳过 \(skipped) 个"))
+        } else {
+            cliReportTitle = "/import-claude"
+            cliReportBody = (["Imported \(imported), skipped \(skipped)", ""] + failed).joined(separator: "\n")
+            showCLIReport = true
+        }
+    }
+
+    func sendClaudeImportToAgent() {
+        showClaudeImport = false
+        draft = "/import-claude"
+        sendDraft()
+    }
+
+    private func recordPrompt(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        if SlashBuiltins.handles(trimmed) { return }
+        var next = promptHistory.filter { $0 != trimmed }
+        next.insert(trimmed, at: 0)
+        promptHistory = Array(next.prefix(50))
+        UserDefaults.standard.set(promptHistory, forKey: "promptHistory")
+    }
+
+    private func applyModelCommand(_ rest: String) {
+        let parts = rest.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard let first = parts.first, !first.isEmpty else {
+            insertSlashPrompt("/model")
+            return
+        }
+        let lower = first.lowercased()
+        if let match = BuildModel.allCases.first(where: {
+            $0.rawValue == lower || $0.shortTitle.lowercased() == lower || $0.menuTitle.lowercased() == lower
+        }) {
+            client.buildModel = match
+        } else if lower.contains("4.6") {
+            client.buildModel = .grok46
+        } else if lower.contains("4.5") {
+            client.buildModel = .grok45
+        } else if lower.contains("build") {
+            client.buildModel = .grokBuild
+        } else {
+            flash(copy.t("Unknown model \(first)", "未知模型 \(first)"))
+            return
+        }
+        if parts.count > 1 {
+            applyEffortCommand(parts[1])
+        }
+        flash("\(client.buildModel.rawValue) · \(client.effort.rawValue)")
+    }
+
+    private func applyEffortCommand(_ rest: String) {
+        let raw = rest.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !raw.isEmpty else {
+            insertSlashPrompt("/effort")
+            return
+        }
+        let mapped: EffortLevel?
+        switch raw {
+        case "low", "l", "低": mapped = .low
+        case "medium", "med", "m", "中": mapped = .medium
+        case "high", "h", "高": mapped = .high
+        case "xhigh", "max", "xh", "极高": mapped = .xhigh
+        default: mapped = EffortLevel(rawValue: raw)
+        }
+        guard let mapped else {
+            flash(copy.t("Unknown effort \(rest)", "未知推理强度 \(rest)"))
+            return
+        }
+        client.effort = mapped
+        flash(mapped.title(chinese: language.resolved() == .chinese))
+    }
+
+    private func applyThemeCommand(_ rest: String) {
+        let raw = rest.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if raw.isEmpty {
+            appearance = appearance == .dark ? .light : (appearance == .light ? .system : .dark)
+        } else if raw.contains("dark") || raw.contains("深") {
+            appearance = .dark
+        } else if raw.contains("light") || raw.contains("浅") {
+            appearance = .light
+        } else {
+            appearance = .system
+        }
+        flash(appearance.title)
+    }
+
+    private func applyMemoryCommand(_ rest: String) {
+        let raw = rest.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch raw {
+        case "on":
+            try? configStore.set(section: "memory", key: "enabled", bool: true)
+            grokConfig = configStore.load()
+            flash(copy.t("Memory on", "记忆已开"))
+        case "off":
+            try? configStore.set(section: "memory", key: "enabled", bool: false)
+            grokConfig = configStore.load()
+            flash(copy.t("Memory off", "记忆已关"))
+        case "clear":
+            runGrokCLI(arguments: ["memory", "clear", "--yes", "--workspace"], title: "/memory clear")
+        default:
+            settingsSection = .agent
+            showSettings = true
+        }
+    }
+
+    private func copyReply(argument: String) {
+        let replies: [String] = client.items.compactMap {
+            if case .assistant(_, let body, _) = $0 { return body }
+            return nil
+        }
+        if argument.isEmpty {
+            copyLatestReply()
+            return
+        }
+        if let index = Int(argument), index > 0, replies.count >= index {
+            copyText(replies[replies.count - index])
+            flash(copy.copied)
+            return
+        }
+        let url = (argument as NSString).expandingTildeInPath
+        if let text = replies.last {
+            try? text.write(toFile: url, atomically: true, encoding: .utf8)
+            flash(url)
+        }
+    }
+
+    private func openLocalGuide() {
+        let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".grok/docs/user-guide/01-getting-started.md")
+        if FileManager.default.fileExists(atPath: url.path) {
+            NSWorkspace.shared.open(url)
+        } else {
+            openDocs()
+        }
+    }
+
+    func runGrokCLI(arguments: [String], title: String) {
+        let cwd = client.workingDirectory
+        flash(copy.t("Running \(title)…", "正在运行 \(title)…"))
+        Task {
+            let output = await Task.detached { [locator] in
+                guard let binary = locator.locate() else { return "grok not found" }
+                let process = Process()
+                process.executableURL = binary
+                process.arguments = arguments
+                process.currentDirectoryURL = cwd
+                let pipe = Pipe()
+                process.standardOutput = pipe
+                process.standardError = pipe
+                do {
+                    try process.run()
+                    process.waitUntilExit()
+                } catch {
+                    return error.localizedDescription
+                }
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                return String(data: data, encoding: .utf8) ?? ""
+            }.value
+            cliReportTitle = title
+            cliReportBody = output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "(no output)" : output
+            showCLIReport = true
+        }
     }
 
     func retryLocate() {
@@ -905,7 +1390,7 @@ final class AppModel: ObservableObject {
 
     func exportDiagnostics() {
         let text = DiagnosticExport.make(
-            version: "0.1.2",
+            version: "0.1.3",
             grokVersion: client.grokVersion,
             state: String(describing: client.state),
             lastError: client.lastError,

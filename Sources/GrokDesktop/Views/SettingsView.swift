@@ -588,7 +588,7 @@ struct SettingsView: View {
             ))
             .foregroundStyle(palette.secondary)
             HStack {
-                Text("Grok Desktop 0.1.2")
+                Text("Grok Desktop 0.1.3")
                 Spacer()
                 Text(model.client.grokVersion ?? "grok ?")
                     .foregroundStyle(palette.secondary)
@@ -673,6 +673,18 @@ struct SettingsView: View {
             labeledList("Skills", model.skills.prefix(8).map(\.title))
             labeledList("Plugins", model.extensions.plugins.isEmpty ? [l10n.t("None installed", "未安装")] : model.extensions.plugins)
             labeledList("Hooks", model.extensions.hooks.isEmpty ? [l10n.t("None", "无")] : model.extensions.hooks)
+            HStack {
+                Button(l10n.t("MCP doctor", "MCP 诊断")) {
+                    model.showSettings = false
+                    model.handleCommand("/mcps doctor")
+                }
+                .buttonStyle(GrokSecondaryButtonStyle())
+                Button(l10n.t("List plugins", "列出插件")) {
+                    model.showSettings = false
+                    model.handleCommand("/plugins list")
+                }
+                .buttonStyle(GrokSecondaryButtonStyle())
+            }
             Button(l10n.t("Open config.toml", "打开 config.toml")) {
                 model.configStore.openInEditor()
             }
@@ -749,7 +761,7 @@ struct SettingsView: View {
             HStack {
                 Text("App")
                 Spacer()
-                Text("0.1.2")
+                Text("0.1.3")
             }
             HStack {
                 Text("grok")
@@ -771,15 +783,23 @@ struct SettingsView: View {
             }
             .buttonStyle(GrokSecondaryButtonStyle())
             Button("/doctor") {
-                model.draft = "/doctor"
                 model.showSettings = false
-                model.sendDraft()
+                model.handleCommand("/doctor")
+            }
+            .buttonStyle(GrokSecondaryButtonStyle())
+            Button("/inspect") {
+                model.showSettings = false
+                model.handleCommand("/inspect")
             }
             .buttonStyle(GrokSecondaryButtonStyle())
             Button("/import-claude") {
-                model.draft = "/import-claude"
                 model.showSettings = false
-                model.sendDraft()
+                model.handleCommand("/import-claude")
+            }
+            .buttonStyle(GrokSecondaryButtonStyle())
+            Button(l10n.t("Check CLI updates", "检查 CLI 更新")) {
+                model.showSettings = false
+                model.handleCommand("/update")
             }
             .buttonStyle(GrokSecondaryButtonStyle())
             Button(l10n.t("Export diagnostic", "导出诊断包")) {

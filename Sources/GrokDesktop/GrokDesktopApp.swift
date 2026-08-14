@@ -44,15 +44,60 @@ struct GrokDesktopApp: App {
                     .keyboardShortcut(",", modifiers: .command)
                 Button(model.copy.chooseFolder) { model.chooseWorkingDirectory() }
                     .keyboardShortcut("o", modifiers: [.command, .shift])
-                Button("命令面板") {
+                Button(model.copy.t("Command palette", "命令面板")) {
                     model.draft = "/"
                     model.showPalette = true
+                    model.destination = .chat
                 }
                 .keyboardShortcut("k", modifiers: .command)
-                Button("Cycle Mode") { model.cycleMode() }
+                Button(model.copy.t("Open slash menu", "打开斜杠菜单")) {
+                    model.draft = "/"
+                    model.showPalette = true
+                    model.destination = .chat
+                }
+                .keyboardShortcut("p", modifiers: .command)
+                Button(model.copy.t("Prompt history", "提示词历史")) {
+                    model.showPromptHistory = true
+                }
+                .keyboardShortcut("y", modifiers: .command)
+                Button(model.copy.t("Resume session", "恢复会话")) {
+                    model.showResumePicker = true
+                    model.sidebarCollapsed = false
+                    model.showSearchField = true
+                }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+                Button(model.copy.t("Inspector", "右侧栏")) {
+                    model.showInspector.toggle()
+                    model.destination = .chat
+                }
+                .keyboardShortcut("i", modifiers: .command)
+                Button(model.copy.t("Cycle mode", "切换模式")) { model.cycleMode() }
                     .keyboardShortcut(.tab, modifiers: .shift)
-                Button("Dashboard") { model.destination = .dashboard }
+                Button(model.copy.t("Always approve", "全权")) {
+                    model.handleCommand("/always-approve")
+                }
+                .keyboardShortcut("o", modifiers: .control)
+                Button(model.copy.t("Dashboard", "任务面板")) { model.destination = .dashboard }
                     .keyboardShortcut("\\", modifiers: .control)
+                Button(model.copy.usage) { model.openUsage() }
+            }
+            CommandGroup(replacing: .help) {
+                Button(model.copy.t("Grok Build Docs", "Grok Build 文档")) {
+                    model.handleCommand("/docs")
+                }
+                Button(model.copy.t("Tutorial", "教程")) {
+                    model.handleCommand("/tutorial")
+                }
+                Button(model.copy.t("Keyboard shortcuts", "键盘快捷键")) {
+                    model.showShortcuts = true
+                }
+                .keyboardShortcut("/", modifiers: [.command, .shift])
+                Button("/doctor") { model.handleCommand("/doctor") }
+                Button("/inspect") { model.handleCommand("/inspect") }
+                Button(model.copy.t("Check CLI updates", "检查 CLI 更新")) {
+                    model.handleCommand("/update")
+                }
+                Button("CHANGELOG") { model.openChangelog() }
             }
         }
     }

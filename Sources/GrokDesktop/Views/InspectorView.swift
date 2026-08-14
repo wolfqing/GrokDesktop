@@ -9,47 +9,27 @@ struct InspectorView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text(l10n.inspector)
-                    .font(.system(size: 13, weight: .semibold))
-                Spacer()
-                Button {
-                    model.showInspector = false
-                } label: {
-                    Image(systemName: "sidebar.right")
-                        .foregroundStyle(palette.secondary)
-                }
-                .buttonStyle(.plain)
-                .help(l10n.inspector)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
+            Text(l10n.inspector)
+                .font(.system(size: 13, weight: .semibold))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
 
             Divider().overlay(palette.hairline)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     contextSection
-                    if !model.client.todos.isEmpty || !model.client.tasks.isEmpty {
-                        tasksSection
-                    }
-                    if showsPlan {
-                        planSection
+                    if showsWork {
+                        workSection
                     }
                     if showsChanges {
                         changesSection
-                    }
-                    if hasTimeline {
-                        timelineSection
                     }
                     if !model.officialWorkflows.isEmpty {
                         workflowsSection
                     }
                     if !model.personas.isEmpty {
                         personasSection
-                    }
-                    if model.client.runningTools > 0 || model.client.finishedTools > 0 {
-                        subagentSection
                     }
                 }
                 .padding(14)
@@ -107,13 +87,13 @@ struct InspectorView: View {
         }
     }
 
-    private var tasksSection: some View {
+    private var workSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                sectionTitle(l10n.tasks)
+                sectionTitle(model.client.mode == .plan ? l10n.t("Plan", "计划") : l10n.tasks)
                 Spacer()
-                if todoProgress.total > 0 {
-                    Text("\(todoProgress.done)/\(todoProgress.total)")
+                if checklistProgress.total > 0 {
+                    Text("\(checklistProgress.done)/\(checklistProgress.total)")
                         .font(.system(size: 11, weight: .medium, design: .monospaced))
                         .foregroundStyle(palette.secondary)
                 }
@@ -127,39 +107,67 @@ struct InspectorView: View {
                     .disabled(model.client.isStopping)
                 }
             }
-            if todoProgress.total > 0 {
+            if checklistProgress.total > 0 {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         Capsule().fill(palette.chip)
                         Capsule()
                             .fill(Color.orange)
-                            .frame(width: geo.size.width * CGFloat(todoProgress.done) / CGFloat(max(todoProgress.total, 1)))
+                            .frame(width: geo.size.width * CGFloat(checklistProgress.done) / CGFloat(max(checklistProgress.total, 1)))
                     }
                 }
                 .frame(height: 6)
             }
-            if model.client.todos.isEmpty && model.client.tasks.isEmpty {
-                Text(l10n.noTasks)
+            if checklist.isEmpty, model.client.mode == .plan {
+                Text(l10n.t("No plan yet.", "还没有计划。"))
                     .font(.system(size: 12))
                     .foregroundStyle(palette.secondary)
             }
-            ForEach(model.client.todos) { todo in
+            ForEach(checklist, id: \.id) { row in
                 HStack(alignment: .top, spacing: 6) {
                     RunningStatusIcon(
-                        active: todo.isActive,
-                        idleSystemImage: todoIcon(todo.status),
-                        color: todoColor(todo.status),
+                        active: row.status == "in_progress" || row.status == "running",
+                        idleSystemImage: todoIcon(row.status),
+                        color: todoColor(row.status),
                         size: 12
                     )
                     .padding(.top, 2)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(todo.content)
+                        Text(row.content)
                             .font(.system(size: 12))
-                            .strikethrough(todo.isDone || todo.isCancelled)
-                        Text(todoStatusLabel(todo.status))
+                            .strikethrough(row.status == "completed" || row.status == "cancelled")
+                        Text(todoStatusLabel(row.status))
                             .font(.system(size: 10))
                             .foregroundStyle(palette.secondary)
                     }
+                }
+            }
+            if model.client.mode == .plan, !extraPlanMarkdown.isEmpty {
+                Text(extraPlanMarkdown)
+                    .font(.system(size: 11))
+                    .foregroundStyle(palette.secondary)
+                    .textSelection(.enabled)
+                    .lineLimit(12)
+            }
+            if model.client.mode == .plan {
+                TextField(l10n.t("Request changes…", "打回意见…"), text: $planNote)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .padding(8)
+                    .background(palette.chip, in: RoundedRectangle(cornerRadius: 8))
+                HStack(spacing: 6) {
+                    Button(l10n.t("Approve", "批准")) {
+                        Task { await model.client.approvePlan() }
+                    }
+                    .buttonStyle(GrokPrimaryButtonStyle())
+                    Button(l10n.t("Revise", "打回")) {
+                        Task { await model.client.requestPlanChanges(planNote) }
+                    }
+                    .buttonStyle(GrokSecondaryButtonStyle())
+                    Button(l10n.t("Quit plan", "退出 Plan")) {
+                        model.client.quitPlan()
+                    }
+                    .buttonStyle(GrokSecondaryButtonStyle())
                 }
             }
             if !model.client.tasks.isEmpty {
@@ -202,8 +210,31 @@ struct InspectorView: View {
         }
     }
 
-    private var todoProgress: (done: Int, total: Int) {
-        PromptTimestamp.progress(for: model.client.todos)
+    private var showsWork: Bool {
+        !checklist.isEmpty || !model.client.tasks.isEmpty || model.client.mode == .plan
+    }
+
+    private var checklist: [(id: String, content: String, status: String)] {
+        if !model.client.todos.isEmpty {
+            return model.client.todos.map { ($0.id, $0.content, $0.status) }
+        }
+        return model.client.planEntries.map { ($0.id, $0.content, $0.status) }
+    }
+
+    private var checklistProgress: (done: Int, total: Int) {
+        let total = checklist.count
+        let done = checklist.filter { $0.status == "completed" }.count
+        return (done, total)
+    }
+
+    private var extraPlanMarkdown: String {
+        let text = model.client.planMarkdown.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return "" }
+        let listed = Set(checklist.map { $0.content.lowercased() })
+        if listed.contains(where: { text.lowercased().contains($0) }), text.count < 400 {
+            return ""
+        }
+        return text
     }
 
     private func todoIcon(_ status: String) -> String {
@@ -239,71 +270,10 @@ struct InspectorView: View {
         return String(format: "%.1fh", value / 3600)
     }
 
-    private var planSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionTitle("Plan")
-            if model.client.planEntries.isEmpty && model.client.planMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text(l10n.t("No plan yet.", "还没有计划。"))
-                    .font(.system(size: 12))
-                    .foregroundStyle(palette.secondary)
-            } else {
-                ForEach(model.client.planEntries) { entry in
-                    HStack(alignment: .top, spacing: 6) {
-                        Image(systemName: entry.status == "completed" ? "checkmark.circle" : (entry.status == "in_progress" ? "circle.dotted" : "circle"))
-                            .font(.system(size: 11))
-                        Text(entry.content)
-                            .font(.system(size: 12))
-                    }
-                }
-                if !model.client.planMarkdown.isEmpty {
-                    Text(model.client.planMarkdown)
-                        .font(.system(size: 11))
-                        .foregroundStyle(palette.secondary)
-                        .textSelection(.enabled)
-                        .lineLimit(16)
-                }
-            }
-            if model.client.mode == .plan {
-                TextField(l10n.t("Request changes…", "打回意见…"), text: $planNote)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12))
-                    .padding(8)
-                    .background(palette.chip, in: RoundedRectangle(cornerRadius: 8))
-                HStack(spacing: 6) {
-                    Button(l10n.t("Approve", "批准")) {
-                        Task { await model.client.approvePlan() }
-                    }
-                    .buttonStyle(GrokPrimaryButtonStyle())
-                    Button(l10n.t("Revise", "打回")) {
-                        Task { await model.client.requestPlanChanges(planNote) }
-                    }
-                    .buttonStyle(GrokSecondaryButtonStyle())
-                    Button(l10n.t("Quit plan", "退出 Plan")) {
-                        model.client.quitPlan()
-                    }
-                    .buttonStyle(GrokSecondaryButtonStyle())
-                }
-            }
-        }
-    }
-
-    private var showsPlan: Bool {
-        model.client.mode == .plan
-            || !model.client.planEntries.isEmpty
-            || !model.client.planMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
     private var showsChanges: Bool {
         !model.client.hunks.isEmpty
             || !model.client.gitDiffText.isEmpty
             || (model.workspace.isRepo && (model.workspace.insertions + model.workspace.deletions) > 0)
-    }
-
-    private var hasTimeline: Bool {
-        model.client.items.contains { item in
-            if case .user = item { return true }
-            return false
-        }
     }
 
     private var changesSection: some View {
@@ -332,45 +302,27 @@ struct InspectorView: View {
                     .foregroundStyle(palette.secondary)
             } else if !model.client.hunks.isEmpty {
                 ForEach(model.client.hunks) { hunk in
-                    HStack {
-                        Text(hunk.name)
-                            .lineLimit(1)
-                        Spacer()
-                        Text("+\(hunk.added)")
-                            .foregroundStyle(.green)
-                        Text("-\(hunk.removed)")
-                            .foregroundStyle(.red)
-                    }
-                    .font(.system(size: 12))
-                    .help(hunk.path)
-                }
-            }
-        }
-    }
-
-    private var timelineSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionTitle(l10n.t("Timeline", "时间线"))
-            let users = model.client.items.compactMap { item -> String? in
-                guard case .user(let id, let text) = item else { return nil }
-                let shown = PromptMedia.displayText(text)
-                let count = PromptMedia.resolvedImages(stored: model.client.itemImages[id], text: text).count
-                if shown.isEmpty && count > 0 {
-                    return count == 1
-                        ? l10n.t("Image", "图片")
-                        : l10n.t("\(count) images", "\(count) 张图片")
-                }
-                return shown.isEmpty ? text : shown
-            }
-            if users.isEmpty {
-                Text(l10n.t("No turns yet.", "还没有回合。"))
-                    .font(.system(size: 12))
-                    .foregroundStyle(palette.secondary)
-            } else {
-                ForEach(Array(users.enumerated()), id: \.offset) { index, text in
-                    Text("\(index + 1). \(text)")
+                    let url = ChatLinkDetector.resolve(hunk.path, baseDirectory: model.client.workingDirectory)?.url
+                        ?? URL(fileURLWithPath: hunk.path)
+                    Button {
+                        ChatLinkActions.open(url)
+                    } label: {
+                        HStack {
+                            Text(hunk.name)
+                                .lineLimit(1)
+                                .underline()
+                            Spacer()
+                            Text("+\(hunk.added)")
+                                .foregroundStyle(.green)
+                            Text("-\(hunk.removed)")
+                                .foregroundStyle(.red)
+                        }
                         .font(.system(size: 12))
-                        .lineLimit(2)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(hunk.path)
+                    .contextMenu { ChatLinkContextButtons(url: url) }
                 }
             }
         }
@@ -415,29 +367,6 @@ struct InspectorView: View {
                     .buttonStyle(.plain)
                 }
             }
-        }
-    }
-
-    private var docsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionTitle(l10n.t("Docs", "文档"))
-            Button("docs.x.ai/build") { model.openDocs() }
-                .buttonStyle(GrokSecondaryButtonStyle())
-            Button("CHANGELOG") { model.openChangelog() }
-                .buttonStyle(GrokSecondaryButtonStyle())
-        }
-    }
-
-    private var subagentSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionTitle(l10n.subagents)
-            HStack {
-                Text("\(model.client.runningTools) \(l10n.running)")
-                Spacer()
-                Text("\(model.client.finishedTools) \(l10n.completed)")
-                    .foregroundStyle(palette.secondary)
-            }
-            .font(.system(size: 13))
         }
     }
 

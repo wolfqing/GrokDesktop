@@ -439,4 +439,75 @@ expect(story?.step == "改对话区", "turn step from active todo")
 expect(story?.files.contains("ChatView.swift") == true, "turn files include hunk")
 expect(TurnNarrative.fileNames(in: "edited Sources/GrokDesktop/Views/ChatView.swift").contains("ChatView.swift"), "extract file name")
 
+let exists: (String) -> Bool = {
+    [
+        "/Users/demo/app/Sources/GrokDesktop/AppModel.swift",
+        "/Users/demo/app/README.md",
+        "/tmp/photo.png"
+    ].contains($0)
+}
+let base = URL(fileURLWithPath: "/Users/demo/app")
+let webLinks = ChatLinkDetector.detect(
+    in: "See https://docs.x.ai/build/overview and www.example.com/path.",
+    baseDirectory: base,
+    fileExists: exists
+)
+expect(webLinks.contains(where: { $0.url.host == "docs.x.ai" && $0.kind == .web }), "detect https link")
+expect(webLinks.contains(where: { $0.url.host == "www.example.com" && $0.kind == .web }), "detect www link")
+
+let pathLinks = ChatLinkDetector.detect(
+    in: "edited Sources/GrokDesktop/AppModel.swift and README.md plus @/tmp/photo.png",
+    baseDirectory: base,
+    fileExists: exists
+)
+expect(pathLinks.contains(where: { $0.url.path.hasSuffix("AppModel.swift") && $0.kind == .file }), "detect relative file")
+expect(pathLinks.contains(where: { $0.url.path.hasSuffix("README.md") }), "detect existing basename")
+expect(pathLinks.contains(where: { $0.url.path == "/tmp/photo.png" }), "detect @ absolute file")
+
+let skipLinks = ChatLinkDetector.detect(
+    in: "run /usage then bump 0.1.2 and e.g. wait",
+    baseDirectory: base,
+    fileExists: { _ in false }
+)
+expect(!skipLinks.contains(where: { $0.url.path.contains("usage") }), "slash commands are not files")
+expect(skipLinks.isEmpty, "versions and latin abbreviations stay plain")
+
+expect(ChatLinkDetector.resolve("mailto:hi@x.ai")?.kind == .mail, "mailto is mail")
+expect(ChatLinkDetector.resolve("hi@x.ai")?.kind == .mail, "bare email is mail")
+expect(ChatLinkDetector.resolve("/usage", fileExists: { _ in false }) == nil, "bare slash command is not a file")
+
+expect(SlashBuiltins.handles("/model grok-4.6"), "model with args is builtin")
+expect(SlashBuiltins.handles("/effort high"), "effort is builtin")
+expect(SlashBuiltins.handles("/history"), "history is builtin")
+expect(SlashBuiltins.handles("/import-claude"), "import-claude is builtin")
+expect(!SlashBuiltins.handles("/commit fix typo"), "skills are not builtins")
+expect(SlashBuiltins.name(in: "  /Docs web") == "/docs", "slash name is lowercased")
+
+expect(LocalGuides.displayTitle("01-getting-started.md") == "Getting Started", "guide title strips index")
+expect(LocalGuides.displayTitle("04-slash-commands.md") == "Slash Commands", "guide title keeps words")
+let sampleGuides = [
+    LocalGuide(filename: "04-slash-commands.md", title: "Slash Commands", url: URL(fileURLWithPath: "/tmp/04-slash-commands.md")),
+    LocalGuide(filename: "19-plan-mode.md", title: "Plan Mode", url: URL(fileURLWithPath: "/tmp/19-plan-mode.md"))
+]
+expect(LocalGuides.match("plan", in: sampleGuides)?.filename == "19-plan-mode.md", "guide match by title")
+expect(LocalGuides.match("04-slash", in: sampleGuides)?.filename == "04-slash-commands.md", "guide match by file")
+
+let claudeJSON = """
+{
+  "mcpServers": {
+    "brave-search": { "command": "npx", "args": ["-y", "brave"], "type": "stdio" },
+    "remote": { "url": "https://mcp.example.com", "type": "http" }
+  }
+}
+"""
+let claudeURL = FileManager.default.temporaryDirectory.appendingPathComponent("claude-import-\(UUID().uuidString).json")
+try! claudeJSON.write(to: claudeURL, atomically: true, encoding: .utf8)
+let missingHome = FileManager.default.temporaryDirectory.appendingPathComponent("claude-missing-\(UUID().uuidString)")
+let snapshot = ClaudeImportSnapshot.discover(claudeHome: missingHome, claudeJSON: claudeURL)
+expect(snapshot.exists, "claude json counts as import source")
+expect(snapshot.servers.count == 2, "parses claude mcp servers")
+expect(snapshot.servers.contains(where: { $0.name == "brave-search" && $0.transport == "stdio" }), "stdio server")
+expect(snapshot.servers.contains(where: { $0.name == "remote" && $0.transport == "http" }), "http server")
+expect(snapshot.report.contains("brave-search"), "report names servers")
+
 print("GrokDesktopSmoke ok")

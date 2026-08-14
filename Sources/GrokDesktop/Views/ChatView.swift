@@ -455,11 +455,22 @@ struct ChatView: View {
                 storyLine(l10n.t("Next", "下一步"), next)
             }
             if !story.files.isEmpty {
-                storyLine(
-                    l10n.t("Changed", "改了"),
-                    story.files.prefix(5).joined(separator: " · ")
-                        + (story.files.count > 5 ? " +\(story.files.count - 5)" : "")
-                )
+                HStack(alignment: .top, spacing: 8) {
+                    Text(l10n.t("Changed", "改了"))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(palette.secondary)
+                        .frame(width: 52, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(Array(story.files.prefix(5)), id: \.self) { name in
+                            ChatFileLabel(path: name)
+                        }
+                        if story.files.count > 5 {
+                            Text("+\(story.files.count - 5)")
+                                .font(.system(size: 12))
+                                .foregroundStyle(palette.secondary)
+                        }
+                    }
+                }
             }
         }
         .padding(14)
@@ -474,9 +485,7 @@ struct ChatView: View {
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(palette.secondary)
                 .frame(width: 52, alignment: .leading)
-            Text(value)
-                .font(.system(size: 13))
-                .textSelection(.enabled)
+            LinkedText(text: value, fontSize: 13, markdown: false)
         }
     }
 
@@ -504,13 +513,19 @@ struct ChatView: View {
                             PromptImageView(url: url)
                         }
                         if !shown.isEmpty {
-                            Text(shown)
-                                .font(.system(size: model.compactChat ? 14 : 16))
-                                .textSelection(.enabled)
+                            LinkedText(
+                                text: shown,
+                                fontSize: model.compactChat ? 14 : 16,
+                                markdown: false,
+                                fillsWidth: false
+                            )
                         } else if images.isEmpty {
-                            Text(text)
-                                .font(.system(size: model.compactChat ? 14 : 16))
-                                .textSelection(.enabled)
+                            LinkedText(
+                                text: text,
+                                fontSize: model.compactChat ? 14 : 16,
+                                markdown: false,
+                                fillsWidth: false
+                            )
                         }
                     }
                     .padding(.horizontal, 16)
@@ -549,10 +564,7 @@ struct ChatView: View {
             .padding(.horizontal, model.compactChat ? 16 : 28)
         case .thought(_, let text):
             DisclosureGroup(l10n.think) {
-                Text(text)
-                    .font(.system(size: 13))
-                    .foregroundStyle(palette.secondary)
-                    .textSelection(.enabled)
+                LinkedText(text: text, fontSize: 13, markdown: false, color: palette.secondary)
             }
             .padding(.horizontal, model.compactChat ? 16 : 28)
         case .tool(let id, let title, let status, let detail):
@@ -560,11 +572,13 @@ struct ChatView: View {
             let active = status == "running" || status == "in_progress"
             DisclosureGroup {
                 if !detail.isEmpty {
-                    Text(detail)
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(palette.secondary)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    LinkedText(
+                        text: detail,
+                        fontSize: 12,
+                        monospaced: true,
+                        markdown: false,
+                        color: palette.secondary
+                    )
                 }
             } label: {
                 HStack(spacing: 8) {
@@ -574,7 +588,12 @@ struct ChatView: View {
                         color: status == "completed" ? .green : (status == "failed" || status == "cancelled" ? .orange : palette.secondary),
                         size: 13
                     )
-                    Text(ToolVoice.headline(title, chinese: chinese))
+                    LinkedText(
+                        text: ToolVoice.headline(title, chinese: chinese),
+                        fontSize: 13,
+                        markdown: false,
+                        fillsWidth: false
+                    )
                     Spacer()
                     Text(model.client.isStopping && active ? l10n.stopping : ToolVoice.statusLabel(status, chinese: chinese))
                         .foregroundStyle(palette.secondary)
@@ -586,9 +605,7 @@ struct ChatView: View {
             .padding(.horizontal, 28)
             .help(id)
         case .notice(_, let text):
-            Text(text)
-                .font(.system(size: 13))
-                .foregroundStyle(palette.secondary)
+            LinkedText(text: text, fontSize: 13, markdown: false, color: palette.secondary)
                 .padding(.horizontal, 28)
         }
     }
@@ -601,7 +618,7 @@ private struct PromptImageView: View {
 
     var body: some View {
         Button {
-            NSWorkspace.shared.open(url)
+            ChatLinkActions.open(url)
         } label: {
             if let image = NSImage(contentsOf: url) {
                 Image(nsImage: image)
@@ -624,5 +641,26 @@ private struct PromptImageView: View {
         }
         .buttonStyle(.plain)
         .help(l10n.t("Open image", "打开图片"))
+        .contextMenu { ChatLinkContextButtons(url: url) }
+    }
+}
+
+private struct ChatFileLabel: View {
+    let path: String
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        let url = ChatLinkDetector.resolve(path, baseDirectory: model.client.workingDirectory)?.url
+            ?? URL(fileURLWithPath: path)
+        Button(path) {
+            ChatLinkActions.open(url)
+        }
+        .buttonStyle(.plain)
+        .font(.system(size: 13))
+        .foregroundStyle(Color(nsColor: .linkColor))
+        .underline()
+        .help(url.path)
+        .contextMenu { ChatLinkContextButtons(url: url) }
     }
 }

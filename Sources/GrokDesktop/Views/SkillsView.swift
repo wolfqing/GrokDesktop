@@ -92,10 +92,63 @@ struct SkillsView: View {
                     .padding(.bottom, 24)
                 }
             } else {
-                Text(l10n.noConnectors)
-                    .foregroundStyle(palette.secondary)
-                    .padding(.top, 20)
-                Spacer()
+                HStack {
+                    Text(l10n.t("MCP servers", "MCP 服务器"))
+                        .font(.system(size: 15, weight: .semibold))
+                    Spacer()
+                    Button(l10n.t("Doctor", "诊断")) {
+                        model.handleCommand("/mcps doctor")
+                    }
+                    .buttonStyle(GrokSecondaryButtonStyle())
+                    Button(l10n.t("Add MCP", "添加 MCP")) { model.showAddMCP = true }
+                        .buttonStyle(GrokPrimaryButtonStyle())
+                }
+                if model.mcpServers.isEmpty {
+                    Text(l10n.noConnectors)
+                        .foregroundStyle(palette.secondary)
+                        .padding(.top, 20)
+                    Spacer()
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 10) {
+                            ForEach(model.mcpServers) { server in
+                                HStack(alignment: .top, spacing: 12) {
+                                    Image(systemName: "server.rack")
+                                        .foregroundStyle(palette.secondary)
+                                        .frame(width: 28, height: 28)
+                                        .background(palette.chip, in: RoundedRectangle(cornerRadius: 8))
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(server.name)
+                                            .font(.system(size: 15, weight: .semibold))
+                                        Text(server.detail)
+                                            .font(.system(size: 13))
+                                            .foregroundStyle(palette.secondary)
+                                            .lineLimit(2)
+                                    }
+                                    Spacer()
+                                    Toggle("", isOn: Binding(
+                                        get: { server.enabled },
+                                        set: { _ in model.toggleMCPServer(server) }
+                                    ))
+                                    .labelsHidden()
+                                    .toggleStyle(.switch)
+                                    Button(role: .destructive) {
+                                        model.removeMCPServer(server)
+                                    } label: {
+                                        Image(systemName: "trash")
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                                .padding(16)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                        .stroke(palette.hairline, lineWidth: 1)
+                                )
+                            }
+                        }
+                        .padding(.bottom, 24)
+                    }
+                }
             }
         }
         .padding(36)

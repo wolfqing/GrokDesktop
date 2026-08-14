@@ -38,7 +38,7 @@ Release zip (unsigned unless you have a Developer ID):
 
 ```bash
 ./scripts/release.sh
-# ./scripts/release.sh --publish   # also creates GitHub release v0.1.2
+# ./scripts/release.sh --publish   # also creates GitHub release v0.1.3
 ```
 
 Notarization needs a Developer ID Application certificate and a stored notary profile:
@@ -64,7 +64,7 @@ This machine only needs Command Line Tools. There is no XCTest target.
 ## Layout
 
 - Left: new session, search, Imagine, live agents, history (from `~/.grok/sessions`)
-- Center: conversation with Markdown, readable tool steps, and a this-turn card (goal / now / files)
+- Center: conversation with Markdown, clickable links/files, readable tool steps, and a this-turn card (goal / now / files)
 - Right inspector: only the live pieces — context, tasks, Plan, diffs
 - Settings: appearance, account, behavior, extensions — reads `~/.grok/config.toml`
 
