@@ -369,12 +369,23 @@ public enum AgentMode: String, CaseIterable, Identifiable, Sendable {
 
     public var id: String { rawValue }
 
-    public var title: String {
+    public var title: String { self.title(chinese: false) }
+
+    public func title(chinese: Bool) -> String {
         switch self {
-        case .normal: return "Normal"
-        case .plan: return "Plan"
-        case .auto: return "Auto"
-        case .alwaysApprove: return "Always-approve"
+        case .normal: return chinese ? "询问" : "Ask me"
+        case .plan: return chinese ? "计划" : "Plan"
+        case .auto: return chinese ? "自动" : "Auto"
+        case .alwaysApprove: return chinese ? "全权" : "Do it"
+        }
+    }
+
+    public func subtitle(chinese: Bool) -> String {
+        switch self {
+        case .normal: return chinese ? "做事之前先问你" : "Ask before acting"
+        case .plan: return chinese ? "先做计划，你点头再动手" : "Plan first, then act"
+        case .auto: return chinese ? "自己判断，必要时再问" : "Act, ask when unsure"
+        case .alwaysApprove: return chinese ? "自己干，不再问" : "Act without asking"
         }
     }
 

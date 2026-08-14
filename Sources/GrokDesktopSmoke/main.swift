@@ -409,4 +409,16 @@ expect(blocks[0]["type"] as? String == "text", "first block is text")
 expect((blocks[0]["text"] as? String)?.contains("[Image #1]") == true, "text uses image token")
 expect(blocks[1]["type"] as? String == "image", "second block is image")
 
+let markdown = ChatMarkdown.blocks(in: "Hello **world**\n```swift\nlet x = 1\n```\nDone")
+expect(markdown.count == 3, "markdown splits prose and fence")
+if case .code(let language, let code) = markdown[1] {
+    expect(language == "swift", "code language")
+    expect(code.contains("let x"), "code body")
+} else {
+    fail("expected code block")
+}
+expect(ToolVoice.headline("read_file AppModel.swift", chinese: true).contains("读了"), "tool read headline")
+expect(ToolVoice.statusLabel("running", chinese: true) == "进行中", "tool running label")
+expect(AgentMode.normal.title(chinese: true) == "询问", "mode ask title")
+
 print("GrokDesktopSmoke ok")

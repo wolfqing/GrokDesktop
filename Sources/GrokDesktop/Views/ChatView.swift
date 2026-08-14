@@ -192,11 +192,11 @@ struct ChatView: View {
                 .font(.system(size: 12))
                 .foregroundStyle(palette.secondary)
                 .lineLimit(1)
-                Button(model.client.mode.title) { model.cycleMode() }
+                Button(model.client.mode.title(chinese: model.language.resolved() == .chinese)) { model.cycleMode() }
                     .buttonStyle(.plain)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(palette.secondary)
-                    .help("Shift+Tab")
+                    .help(model.client.mode.subtitle(chinese: model.language.resolved() == .chinese))
                 Text("\(model.client.buildModel.shortTitle) \(model.client.effort.title(chinese: model.language.resolved() == .chinese))")
                     .font(.system(size: 11))
                     .foregroundStyle(palette.secondary)
@@ -236,18 +236,82 @@ struct ChatView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 22) {
+        VStack(spacing: 18) {
             Color.clear
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .contentShape(Rectangle())
                 .onTapGesture { model.dismissComposerSuggestions() }
-            SuperGrokWordmark(markSize: 48, title: model.account.plan.wordmark)
+            GrokMark(size: 36)
+            Text(l10n.t("Open a project to start", "打开一个项目开始工作"))
+                .font(.system(size: 20, weight: .semibold))
+            Button(l10n.chooseFolder) {
+                model.chooseWorkingDirectory()
+            }
+            .buttonStyle(GrokPrimaryButtonStyle())
+            if !model.visibleProjects.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(l10n.t("Recent projects", "最近项目"))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(palette.secondary)
+                    ForEach(model.visibleProjects.prefix(5)) { project in
+                        Button {
+                            model.openProject(project)
+                        } label: {
+                            HStack {
+                                Image(systemName: "folder")
+                                    .foregroundStyle(palette.secondary)
+                                Text(project.name)
+                                Spacer()
+                            }
+                            .font(.system(size: 13))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(palette.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .frame(maxWidth: 420)
+            }
+            if !model.filteredSessions.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(l10n.t("Continue", "继续上次"))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(palette.secondary)
+                    ForEach(model.filteredSessions.prefix(4)) { session in
+                        Button {
+                            model.open(session)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(session.title)
+                                    .font(.system(size: 13, weight: .medium))
+                                    .lineLimit(1)
+                                Text(session.cwdName)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(palette.secondary)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(palette.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .frame(maxWidth: 420)
+            }
             composerBlock
+            if model.isHomeDirectory {
+                Text(l10n.t("Home folder is a messy default. Pick a project first.", "当前在家目录，先选一个项目会更干净。"))
+                    .font(.system(size: 12))
+                    .foregroundStyle(palette.secondary)
+            }
             Color.clear
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .contentShape(Rectangle())
                 .onTapGesture { model.dismissComposerSuggestions() }
         }
+        .padding(.horizontal, 24)
     }
 
     private var displayedItems: [ConversationItem] {
@@ -320,6 +384,13 @@ struct ChatView: View {
         }
     }
 
+    private func isLatestAssistant(_ id: String) -> Bool {
+        model.client.items.last(where: {
+            if case .assistant = $0 { return true }
+            return false
+        })?.id == id
+    }
+
     private func isTodoTool(_ item: ConversationItem) -> Bool {
         guard case .tool(_, let title, _, _) = item else { return false }
         let name = title.lowercased()
@@ -337,8 +408,8 @@ struct ChatView: View {
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .foregroundStyle(palette.secondary)
                 if model.client.hasActiveWork {
-                    Button(l10n.stop) {
-                        model.client.stopWork()
+                    Button(model.client.isStopping ? l10n.stopping : l10n.stop) {
+                        if !model.client.isStopping { model.client.stopWork() }
                     }
                     .buttonStyle(.plain)
                     .font(.system(size: 11, weight: .semibold))
@@ -346,6 +417,7 @@ struct ChatView: View {
                     .padding(.horizontal, 10)
                     .padding(.vertical, 4)
                     .background(palette.send, in: Capsule())
+                    .disabled(model.client.isStopping)
                 }
             }
             if progress.total > 0 {
@@ -463,9 +535,19 @@ struct ChatView: View {
         case .assistant(let id, let text, _):
             VStack(alignment: .leading, spacing: 4) {
                 timestamp(id)
-                Text(text.isEmpty ? "…" : text)
-                    .font(.system(size: model.compactChat ? 14 : 16))
-                    .textSelection(.enabled)
+                if text.isEmpty {
+                    Text("…")
+                        .font(.system(size: model.compactChat ? 14 : 16))
+                        .foregroundStyle(palette.secondary)
+                } else {
+                    MessageMarkdownView(text: text, fontSize: model.compactChat ? 14 : 16)
+                }
+                if model.client.isTurnRunning, isLatestAssistant(id) {
+                    Circle()
+                        .fill(palette.secondary)
+                        .frame(width: 6, height: 6)
+                        .opacity(0.7)
+                }
             }
             .padding(.horizontal, model.compactChat ? 16 : 28)
         case .thought(_, let text):
@@ -477,6 +559,8 @@ struct ChatView: View {
             }
             .padding(.horizontal, model.compactChat ? 16 : 28)
         case .tool(let id, let title, let status, let detail):
+            let chinese = model.language.resolved() == .chinese
+            let active = status == "running" || status == "in_progress"
             DisclosureGroup {
                 if !detail.isEmpty {
                     Text(detail)
@@ -486,16 +570,16 @@ struct ChatView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } label: {
-                HStack {
+                HStack(spacing: 8) {
                     RunningStatusIcon(
-                        active: status == "running" || status == "in_progress",
-                        idleSystemImage: status == "completed" ? "checkmark.circle.fill" : "wrench.and.screwdriver",
-                        color: status == "completed" ? .green : (status == "failed" ? .orange : palette.secondary),
+                        active: active && !model.client.isStopping,
+                        idleSystemImage: status == "completed" ? "checkmark.circle.fill" : (status == "cancelled" ? "xmark.circle" : "wrench.and.screwdriver"),
+                        color: status == "completed" ? .green : (status == "failed" || status == "cancelled" ? .orange : palette.secondary),
                         size: 13
                     )
-                    Text(title)
+                    Text(ToolVoice.headline(title, chinese: chinese))
                     Spacer()
-                    Text(status)
+                    Text(model.client.isStopping && active ? l10n.stopping : ToolVoice.statusLabel(status, chinese: chinese))
                         .foregroundStyle(palette.secondary)
                 }
                 .font(.system(size: 13, weight: .medium))

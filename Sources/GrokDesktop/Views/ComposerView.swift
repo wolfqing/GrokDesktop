@@ -78,13 +78,23 @@ struct ComposerView: View {
 
                         Menu {
                             ForEach(AgentMode.allCases) { mode in
-                                Button(mode.title) { model.client.setMode(mode) }
+                                Button {
+                                    model.client.setMode(mode)
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(mode.title(chinese: isChinese))
+                                        Text(mode.subtitle(chinese: isChinese))
+                                            .font(.system(size: 11))
+                                            .foregroundStyle(palette.secondary)
+                                    }
+                                }
                             }
                         } label: {
-                            chip(model.client.mode.title)
+                            chip(model.client.mode.title(chinese: isChinese))
                         }
                         .menuStyle(.borderlessButton)
                         .fixedSize()
+                        .help(model.client.mode.subtitle(chinese: isChinese))
 
                         Spacer(minLength: 8)
 
@@ -100,16 +110,24 @@ struct ComposerView: View {
 
                         if model.client.hasActiveWork {
                             Button {
-                                model.client.stopWork()
+                                if !model.client.isStopping { model.client.stopWork() }
                             } label: {
-                                Image(systemName: "stop.fill")
-                                    .font(.system(size: 11, weight: .bold))
-                                    .foregroundStyle(palette.sendGlyph)
-                                    .frame(width: 30, height: 30)
-                                    .background(palette.send, in: Circle())
+                                Group {
+                                    if model.client.isStopping {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                    } else {
+                                        Image(systemName: "stop.fill")
+                                            .font(.system(size: 11, weight: .bold))
+                                    }
+                                }
+                                .foregroundStyle(palette.sendGlyph)
+                                .frame(width: 30, height: 30)
+                                .background(palette.send, in: Circle())
                             }
                             .buttonStyle(.plain)
-                            .help(l10n.stop)
+                            .disabled(model.client.isStopping)
+                            .help(model.client.isStopping ? l10n.stopping : l10n.stop)
                         }
 
                         Button(action: { submit() }) {

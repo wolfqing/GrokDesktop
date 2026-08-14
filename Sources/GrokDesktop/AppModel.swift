@@ -294,6 +294,11 @@ final class AppModel: ObservableObject {
         destination == .chat && client.items.isEmpty && firstRunReason == nil
     }
 
+    var isHomeDirectory: Bool {
+        client.workingDirectory.standardizedFileURL.path
+            == FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
+    }
+
     var filteredSkills: [SkillRecord] {
         let query = skillsQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return skills }
@@ -900,7 +905,7 @@ final class AppModel: ObservableObject {
 
     func exportDiagnostics() {
         let text = DiagnosticExport.make(
-            version: "0.1.0",
+            version: "0.1.1",
             grokVersion: client.grokVersion,
             state: String(describing: client.state),
             lastError: client.lastError,

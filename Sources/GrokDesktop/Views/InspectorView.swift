@@ -30,14 +30,27 @@ struct InspectorView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     contextSection
-                    tasksSection
-                    planSection
-                    changesSection
-                    timelineSection
-                    workflowsSection
-                    personasSection
-                    docsSection
-                    subagentSection
+                    if !model.client.todos.isEmpty || !model.client.tasks.isEmpty {
+                        tasksSection
+                    }
+                    if showsPlan {
+                        planSection
+                    }
+                    if showsChanges {
+                        changesSection
+                    }
+                    if hasTimeline {
+                        timelineSection
+                    }
+                    if !model.officialWorkflows.isEmpty {
+                        workflowsSection
+                    }
+                    if !model.personas.isEmpty {
+                        personasSection
+                    }
+                    if model.client.runningTools > 0 || model.client.finishedTools > 0 {
+                        subagentSection
+                    }
                 }
                 .padding(14)
             }
@@ -105,12 +118,13 @@ struct InspectorView: View {
                         .foregroundStyle(palette.secondary)
                 }
                 if model.client.hasActiveWork {
-                    Button(l10n.stop) {
-                        model.client.stopWork()
+                    Button(model.client.isStopping ? l10n.stopping : l10n.stop) {
+                        if !model.client.isStopping { model.client.stopWork() }
                     }
                     .buttonStyle(.plain)
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Color.orange)
+                    .disabled(model.client.isStopping)
                 }
             }
             if todoProgress.total > 0 {
@@ -229,7 +243,7 @@ struct InspectorView: View {
         VStack(alignment: .leading, spacing: 8) {
             sectionTitle("Plan")
             if model.client.planEntries.isEmpty && model.client.planMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text(l10n.t("No plan.md yet. You can still approve, request changes, or quit plan mode.", "还没有 plan.md。仍可批准、打回或退出 Plan。"))
+                Text(l10n.t("No plan yet.", "还没有计划。"))
                     .font(.system(size: 12))
                     .foregroundStyle(palette.secondary)
             } else {
@@ -249,25 +263,46 @@ struct InspectorView: View {
                         .lineLimit(16)
                 }
             }
-            TextField(l10n.t("Request changes…", "打回意见…"), text: $planNote)
-                .textFieldStyle(.plain)
-                .font(.system(size: 12))
-                .padding(8)
-                .background(palette.chip, in: RoundedRectangle(cornerRadius: 8))
-            HStack(spacing: 6) {
-                Button(l10n.t("Approve", "批准")) {
-                    Task { await model.client.approvePlan() }
+            if model.client.mode == .plan {
+                TextField(l10n.t("Request changes…", "打回意见…"), text: $planNote)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .padding(8)
+                    .background(palette.chip, in: RoundedRectangle(cornerRadius: 8))
+                HStack(spacing: 6) {
+                    Button(l10n.t("Approve", "批准")) {
+                        Task { await model.client.approvePlan() }
+                    }
+                    .buttonStyle(GrokPrimaryButtonStyle())
+                    Button(l10n.t("Revise", "打回")) {
+                        Task { await model.client.requestPlanChanges(planNote) }
+                    }
+                    .buttonStyle(GrokSecondaryButtonStyle())
+                    Button(l10n.t("Quit plan", "退出 Plan")) {
+                        model.client.quitPlan()
+                    }
+                    .buttonStyle(GrokSecondaryButtonStyle())
                 }
-                .buttonStyle(GrokPrimaryButtonStyle())
-                Button(l10n.t("Revise", "打回")) {
-                    Task { await model.client.requestPlanChanges(planNote) }
-                }
-                .buttonStyle(GrokSecondaryButtonStyle())
-                Button(l10n.t("Quit plan", "退出 Plan")) {
-                    model.client.quitPlan()
-                }
-                .buttonStyle(GrokSecondaryButtonStyle())
             }
+        }
+    }
+
+    private var showsPlan: Bool {
+        model.client.mode == .plan
+            || !model.client.planEntries.isEmpty
+            || !model.client.planMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var showsChanges: Bool {
+        !model.client.hunks.isEmpty
+            || !model.client.gitDiffText.isEmpty
+            || (model.workspace.isRepo && (model.workspace.insertions + model.workspace.deletions) > 0)
+    }
+
+    private var hasTimeline: Bool {
+        model.client.items.contains { item in
+            if case .user = item { return true }
+            return false
         }
     }
 

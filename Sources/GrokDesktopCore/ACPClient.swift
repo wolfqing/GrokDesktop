@@ -16,6 +16,7 @@ public final class ACPClient: ObservableObject {
     @Published public private(set) var sessionID: String?
     @Published public private(set) var items: [ConversationItem] = []
     @Published public private(set) var isTurnRunning = false
+    @Published public private(set) var isStopping = false
     @Published public private(set) var permission: PermissionRequest?
     @Published public private(set) var lastError: String?
     @Published public private(set) var stderrLines: [String] = []
@@ -165,7 +166,7 @@ public final class ACPClient: ObservableObject {
                 "protocolVersion": 1,
                 "clientInfo": [
                     "name": "GrokDesktop",
-                    "version": "0.1.0"
+                    "version": "0.1.1"
                 ],
                 "clientCapabilities": [
                     "fs": [
@@ -336,6 +337,7 @@ public final class ACPClient: ObservableObject {
             workspace.itemImages[userID] = PromptMedia.imageURLs(in: trimmed)
         }
         workspace.stopRequested = false
+        isStopping = false
         workspace.isTurnRunning = true
         workspace.assistantBufferID = nil
         workspace.thoughtBufferID = nil
@@ -407,6 +409,7 @@ public final class ACPClient: ObservableObject {
 
     public func stopWork(sessionID target: String? = nil) {
         let id = target ?? sessionID
+        isStopping = true
         if let id {
             fire(method: "session/cancel", params: ["sessionId": id])
             if let workspace = workspaceByID[id] {
@@ -424,6 +427,13 @@ public final class ACPClient: ObservableObject {
         }
         isTurnRunning = false
         syncFromCurrent()
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            if self.currentWorkspace?.stopRequested == true || !self.hasActiveWork {
+                self.isStopping = false
+                self.syncFromCurrent()
+            }
+        }
     }
 
     public func killTask(_ taskID: String, sessionID target: String? = nil) {
@@ -442,6 +452,7 @@ public final class ACPClient: ObservableObject {
     }
 
     public var hasActiveWork: Bool {
+        if isStopping { return true }
         guard currentWorkspace?.stopRequested != true else { return false }
         return isTurnRunning || todos.contains(where: \.isActive) || tasks.contains(where: \.isRunning)
     }

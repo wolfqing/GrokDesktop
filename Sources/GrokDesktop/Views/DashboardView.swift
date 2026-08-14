@@ -75,7 +75,7 @@ struct DashboardView: View {
                 Text(statusText(workspace))
                     .font(.system(size: 13, weight: .semibold))
                 Spacer()
-                Text(workspace.mode.title)
+                Text(workspace.mode.title(chinese: model.language.resolved() == .chinese))
                     .font(.system(size: 12))
                     .foregroundStyle(palette.secondary)
             }
