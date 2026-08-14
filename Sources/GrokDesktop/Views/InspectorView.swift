@@ -63,11 +63,19 @@ struct InspectorView: View {
                 }
             }
             .frame(height: 6)
-            Text(model.client.workingDirectory.path)
-                .font(.system(size: 11))
-                .foregroundStyle(palette.secondary)
-                .lineLimit(2)
-            connectionLine
+            Button {
+                model.chooseWorkingDirectory()
+            } label: {
+                Text(model.client.workingDirectory.lastPathComponent)
+                    .font(.system(size: 11))
+                    .foregroundStyle(palette.secondary)
+                    .lineLimit(1)
+            }
+            .buttonStyle(.plain)
+            .help(model.client.workingDirectory.path)
+            if showsConnection {
+                connectionLine
+            }
         }
     }
 
@@ -84,6 +92,15 @@ struct InspectorView: View {
         case .initialized: return l10n.t("Agent initialized, no session", "已握手，尚未建会话")
         case .ready: return l10n.t("Session ready", "会话就绪")
         case .failed(let message): return message
+        }
+    }
+
+    private var showsConnection: Bool {
+        switch model.client.state {
+        case .connecting, .initialized, .failed:
+            return true
+        default:
+            return false
         }
     }
 

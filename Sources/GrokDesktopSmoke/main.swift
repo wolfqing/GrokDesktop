@@ -476,6 +476,22 @@ expect(ChatLinkDetector.resolve("mailto:hi@x.ai")?.kind == .mail, "mailto is mai
 expect(ChatLinkDetector.resolve("hi@x.ai")?.kind == .mail, "bare email is mail")
 expect(ChatLinkDetector.resolve("/usage", fileExists: { _ in false }) == nil, "bare slash command is not a file")
 
+let now = Date()
+expect(RelativeTime.format(now.addingTimeInterval(-10), now: now, chinese: true) == "刚刚", "relative just now")
+expect(RelativeTime.format(now.addingTimeInterval(-180), now: now, chinese: false) == "3m", "relative minutes")
+expect(RelativeTime.meta(
+    SessionRecord(
+        id: "s",
+        cwd: "/tmp/Demo",
+        title: "Demo",
+        updatedAt: now.addingTimeInterval(-120),
+        model: nil,
+        directory: URL(fileURLWithPath: "/tmp")
+    ),
+    now: now,
+    chinese: true
+).contains("Demo"), "session meta includes folder")
+
 expect(SlashBuiltins.handles("/model grok-4.6"), "model with args is builtin")
 expect(SlashBuiltins.handles("/effort high"), "effort is builtin")
 expect(SlashBuiltins.handles("/history"), "history is builtin")

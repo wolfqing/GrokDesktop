@@ -1,3 +1,4 @@
+import GrokDesktopCore
 import SwiftUI
 
 struct RootView: View {
@@ -169,7 +170,9 @@ struct RootView: View {
                             } label: {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(session.title).font(.system(size: 14))
-                                    Text(session.cwdName).font(.system(size: 11)).foregroundStyle(palette.secondary)
+                                    Text(RelativeTime.meta(session, chinese: model.language.resolved() == .chinese))
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(palette.secondary)
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(8)

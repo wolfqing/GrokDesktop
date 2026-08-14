@@ -53,12 +53,17 @@ struct SidebarView: View {
 
     private var collapsedRail: some View {
         VStack(spacing: 8) {
-            iconButton("magnifyingglass") { model.sidebarCollapsed = false; model.showSearchField = true }
-            iconButton("square.and.pencil") { model.openChat() }
-            iconButton("circle.hexagongrid") { model.destination = .dashboard }
-            iconButton("photo") { model.destination = .imagine }
-            iconButton("bolt") { model.destination = .automations }
-            iconButton("square.grid.2x2") { model.destination = .skills }
+            iconButton("magnifyingglass", selected: model.showSearchField) {
+                model.sidebarCollapsed = false
+                model.showSearchField = true
+            }
+            iconButton("square.and.pencil", selected: model.destination == .chat) { model.openChat() }
+            iconButton("circle.hexagongrid", selected: model.destination == .dashboard, badge: model.client.isLive) {
+                model.destination = .dashboard
+            }
+            iconButton("photo", selected: model.destination == .imagine) { model.destination = .imagine }
+            iconButton("bolt", selected: model.destination == .automations) { model.destination = .automations }
+            iconButton("square.grid.2x2", selected: model.destination == .skills) { model.destination = .skills }
             Spacer()
         }
         .padding(.top, 8)
@@ -73,10 +78,15 @@ struct SidebarView: View {
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
             }
-            navRow(l10n.newChat, systemImage: "square.and.pencil", selected: model.destination == .chat) {
+            navRow(l10n.newChat, systemImage: "square.and.pencil", selected: model.destination == .chat, prominent: true) {
                 model.openChat()
             }
-            navRow(l10n.liveAgents, systemImage: "circle.hexagongrid", selected: model.destination == .dashboard || model.client.isLive) {
+            navRow(
+                l10n.liveAgents,
+                systemImage: "circle.hexagongrid",
+                selected: model.destination == .dashboard,
+                badge: model.client.isLive
+            ) {
                 model.destination = .dashboard
             }
             navRow(l10n.imagine, systemImage: "photo", selected: model.destination == .imagine) {
@@ -130,9 +140,9 @@ struct SidebarView: View {
                     }
 
                     if !model.liveSessions.isEmpty {
-                        disclosure(title: l10n.liveAgents, expanded: .constant(true)) {
+                        disclosure(title: l10n.t("Running", "进行中"), expanded: .constant(true)) {
                             ForEach(model.liveSessions) { session in
-                                historyRow(title: session.title, selected: true) {
+                                historyRow(session, selected: model.client.sessionID == session.id, live: true) {
                                     model.open(session)
                                 }
                             }
@@ -149,7 +159,7 @@ struct SidebarView: View {
 
                     disclosure(title: l10n.history, expanded: $model.historyExpanded) {
                         ForEach(model.filteredSessions) { session in
-                            historyRow(title: session.title, selected: model.client.sessionID == session.id) {
+                            historyRow(session, selected: model.client.sessionID == session.id) {
                                 model.open(session)
                             }
                             .contextMenu {
@@ -264,17 +274,30 @@ struct SidebarView: View {
         .background(palette.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
-    private func navRow(_ title: String, systemImage: String, selected: Bool = false, action: @escaping () -> Void) -> some View {
+    private func navRow(
+        _ title: String,
+        systemImage: String,
+        selected: Bool = false,
+        prominent: Bool = false,
+        badge: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
             HStack(spacing: 10) {
                 Image(systemName: systemImage)
                     .font(.system(size: 14, weight: .medium))
                     .frame(width: 18)
                 Text(title)
-                    .font(.system(size: 14, weight: selected ? .semibold : .regular))
-                Spacer()
+                    .font(.system(size: 14, weight: selected || prominent ? .semibold : .regular))
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                if badge {
+                    Circle()
+                        .fill(Color.orange)
+                        .frame(width: 7, height: 7)
+                }
             }
-            .foregroundStyle(palette.text)
+            .foregroundStyle(selected || prominent ? palette.text : palette.secondary)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(selected ? palette.selected : Color.clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
@@ -308,29 +331,58 @@ struct SidebarView: View {
         }
     }
 
-    private func historyRow(title: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.system(size: 13.5))
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .foregroundStyle(palette.text)
-                .frame(maxWidth: .infinity, minHeight: 18, maxHeight: 18, alignment: .leading)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 6)
-                .background(selected ? palette.selected : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    private func historyRow(
+        _ session: SessionRecord,
+        selected: Bool,
+        live: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        let chinese = model.language.resolved() == .chinese
+        return Button(action: action) {
+            HStack(alignment: .center, spacing: 8) {
+                if live {
+                    Circle()
+                        .fill(Color.orange)
+                        .frame(width: 6, height: 6)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(session.title)
+                        .font(.system(size: 13.5, weight: selected ? .medium : .regular))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .foregroundStyle(palette.text)
+                    Text(RelativeTime.meta(session, chinese: chinese))
+                        .font(.system(size: 11))
+                        .foregroundStyle(palette.secondary)
+                        .lineLimit(1)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 7)
+            .background(selected ? palette.selected : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .buttonStyle(.plain)
-        .frame(height: 30)
     }
 
-    private func iconButton(_ systemImage: String, action: @escaping () -> Void) -> some View {
+    private func iconButton(_ systemImage: String, selected: Bool = false, badge: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(palette.text)
-                .frame(width: 36, height: 36)
-                .background(palette.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(selected ? palette.text : palette.secondary)
+                    .frame(width: 36, height: 36)
+                    .background(
+                        selected ? palette.selected : palette.chip,
+                        in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    )
+                if badge {
+                    Circle()
+                        .fill(Color.orange)
+                        .frame(width: 7, height: 7)
+                        .offset(x: 1, y: -1)
+                }
+            }
         }
         .buttonStyle(.plain)
     }

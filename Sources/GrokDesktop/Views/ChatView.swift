@@ -184,134 +184,154 @@ struct ChatView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            if !model.client.items.isEmpty {
-                Button(model.client.workingDirectory.path) {
-                    model.chooseWorkingDirectory()
+            Button {
+                model.chooseWorkingDirectory()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "folder")
+                    Text(model.client.workingDirectory.lastPathComponent)
+                        .lineLimit(1)
+                    if model.client.hasActiveWork {
+                        RunningStatusIcon(
+                            active: !model.client.isStopping,
+                            idleSystemImage: "pause.circle",
+                            color: .orange,
+                            size: 10
+                        )
+                    }
                 }
-                .buttonStyle(.plain)
-                .font(.system(size: 12))
+                .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(palette.secondary)
-                .lineLimit(1)
-                Button(model.client.mode.title(chinese: model.language.resolved() == .chinese)) { model.cycleMode() }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(palette.secondary)
-                    .help(model.client.mode.subtitle(chinese: model.language.resolved() == .chinese))
-                Text("\(model.client.buildModel.shortTitle) \(model.client.effort.title(chinese: model.language.resolved() == .chinese))")
-                    .font(.system(size: 11))
-                    .foregroundStyle(palette.secondary)
-                Button {
-                    model.openUsage()
-                } label: {
-                    Text(model.accountUsage.isLoaded ? "\(model.accountUsage.displayPercent)%" : "\(model.workspace.contextPercent)%")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(palette.secondary)
-                }
-                .buttonStyle(.plain)
-                .help("/usage")
             }
+            .buttonStyle(.plain)
+            .help(model.client.workingDirectory.path)
+
             Spacer()
+
             Button {
                 model.isPrivateChat.toggle()
             } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "eyeglasses")
-                    Text(l10n.privateChat)
-                }
-                .font(.system(size: 13))
-                .foregroundStyle(model.isPrivateChat ? Color.blue : palette.secondary)
+                Image(systemName: "eyeglasses")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(model.isPrivateChat ? Color.blue : palette.secondary)
+                    .frame(width: 26, height: 26)
+                    .background(
+                        model.isPrivateChat ? palette.selected : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    )
             }
             .buttonStyle(.plain)
+            .help(l10n.privateChat)
+
             Button {
                 model.showInspector.toggle()
             } label: {
                 Image(systemName: "sidebar.right")
+                    .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(model.showInspector ? palette.text : palette.secondary)
+                    .frame(width: 26, height: 26)
+                    .background(
+                        model.showInspector ? palette.selected : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    )
             }
             .buttonStyle(.plain)
             .help(l10n.inspector)
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 12)
+        .padding(.vertical, 10)
     }
 
     private var emptyState: some View {
-        VStack(spacing: 18) {
+        let chinese = model.language.resolved() == .chinese
+        let folderSessions = model.filteredSessions.filter { $0.cwd == model.client.workingDirectory.path }
+        return VStack(spacing: 16) {
             Color.clear
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .contentShape(Rectangle())
                 .onTapGesture { model.dismissComposerSuggestions() }
-            GrokMark(size: 36)
-            Text(l10n.t("Open a project to start", "打开一个项目开始工作"))
-                .font(.system(size: 20, weight: .semibold))
-            Button(l10n.chooseFolder) {
-                model.chooseWorkingDirectory()
-            }
-            .buttonStyle(GrokPrimaryButtonStyle())
-            if !model.visibleProjects.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(l10n.t("Recent projects", "最近项目"))
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(palette.secondary)
-                    ForEach(model.visibleProjects.prefix(5)) { project in
-                        Button {
-                            model.openProject(project)
-                        } label: {
-                            HStack {
-                                Image(systemName: "folder")
-                                    .foregroundStyle(palette.secondary)
-                                Text(project.name)
-                                Spacer()
-                            }
-                            .font(.system(size: 13))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(palette.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .frame(maxWidth: 420)
-            }
-            if !model.filteredSessions.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(l10n.t("Continue", "继续上次"))
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(palette.secondary)
-                    ForEach(model.filteredSessions.prefix(4)) { session in
-                        Button {
-                            model.open(session)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(session.title)
-                                    .font(.system(size: 13, weight: .medium))
-                                    .lineLimit(1)
-                                Text(session.cwdName)
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(palette.secondary)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(palette.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .frame(maxWidth: 420)
-            }
-            composerBlock
+
+            GrokMark(size: 32)
             if model.isHomeDirectory {
+                Text(l10n.t("Open a project to start", "打开一个项目开始工作"))
+                    .font(.system(size: 20, weight: .semibold))
                 Text(l10n.t("Home folder is a messy default. Pick a project first.", "当前在家目录，先选一个项目会更干净。"))
-                    .font(.system(size: 12))
+                    .font(.system(size: 13))
                     .foregroundStyle(palette.secondary)
+                Button(l10n.chooseFolder) {
+                    model.chooseWorkingDirectory()
+                }
+                .buttonStyle(GrokPrimaryButtonStyle())
+                if !model.visibleProjects.isEmpty {
+                    emptyList(title: l10n.t("Recent projects", "最近项目")) {
+                        ForEach(model.visibleProjects.prefix(4)) { project in
+                            Button {
+                                model.openProject(project)
+                            } label: {
+                                HStack {
+                                    Image(systemName: "folder")
+                                        .foregroundStyle(palette.secondary)
+                                    Text(project.name)
+                                    Spacer()
+                                }
+                                .font(.system(size: 13))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(palette.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            } else {
+                Text(model.client.workingDirectory.lastPathComponent)
+                    .font(.system(size: 20, weight: .semibold))
+                Text(l10n.t("Ask Grok to work in this folder.", "在这个项目里开始问。"))
+                    .font(.system(size: 13))
+                    .foregroundStyle(palette.secondary)
+                if !folderSessions.isEmpty {
+                    emptyList(title: l10n.t("Continue here", "继续这个项目")) {
+                        ForEach(folderSessions.prefix(3)) { session in
+                            Button {
+                                model.open(session)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(session.title)
+                                        .font(.system(size: 13, weight: .medium))
+                                        .lineLimit(1)
+                                    Text(RelativeTime.format(session.updatedAt, chinese: chinese))
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(palette.secondary)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(palette.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
             }
+
+            composerBlock
+
             Color.clear
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .contentShape(Rectangle())
                 .onTapGesture { model.dismissComposerSuggestions() }
         }
         .padding(.horizontal, 24)
+    }
+
+    private func emptyList<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(palette.secondary)
+            content()
+        }
+        .frame(maxWidth: 420)
     }
 
     private var displayedItems: [ConversationItem] {

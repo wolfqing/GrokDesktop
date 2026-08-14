@@ -163,14 +163,18 @@ struct ComposerView: View {
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "folder")
-                    Text(model.client.workingDirectory.path)
+                    Text(model.client.workingDirectory.lastPathComponent)
                         .lineLimit(1)
-                        .truncationMode(.middle)
+                    if model.isHomeDirectory {
+                        Text(l10n.t("pick a project", "先选项目"))
+                            .foregroundStyle(Color.orange)
+                    }
                 }
                 .font(.system(size: 12))
                 .foregroundStyle(palette.secondary)
             }
             .buttonStyle(.plain)
+            .help(model.client.workingDirectory.path)
             .padding(.horizontal, 6)
         }
         .onExitCommand {

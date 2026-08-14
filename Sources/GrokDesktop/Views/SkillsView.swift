@@ -10,9 +10,9 @@ struct SkillsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            HStack {
+            HStack(alignment: .firstTextBaseline) {
                 Text(l10n.skillsAndConnectors)
-                    .font(.system(size: 34, weight: .bold))
+                    .font(.system(size: 22, weight: .semibold))
                 Spacer()
                 Menu {
                     Button(l10n.newSkill) {

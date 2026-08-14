@@ -8,91 +8,65 @@ struct DashboardView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            HStack {
-                Text(l10n.liveAgents)
-                    .font(.system(size: 28, weight: .bold))
-                Spacer()
+            PageHeader(
+                title: l10n.liveAgents,
+                subtitle: l10n.t("Only work that is running right now.", "只看此刻还在跑的任务。")
+            ) {
                 Button(l10n.newChat) { model.startNewSession() }
                     .buttonStyle(GrokPrimaryButtonStyle())
             }
 
             if model.client.liveWorkspaces.isEmpty {
-                Text(l10n.t("No live agents. Start a chat to dispatch work.", "没有进行中的 agent。开一个会话开始干活。"))
-                    .foregroundStyle(palette.secondary)
-                    .padding(.top, 12)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(l10n.t("Nothing is running.", "现在没有进行中的任务。"))
+                        .font(.system(size: 15, weight: .medium))
+                    Text(l10n.t("Start a chat when you want to dispatch work.", "要派活时，开一个新对话就行。"))
+                        .font(.system(size: 13))
+                        .foregroundStyle(palette.secondary)
+                }
+                .padding(.top, 8)
             } else {
                 ForEach(model.client.liveWorkspaces) { workspace in
                     liveCard(workspace)
                 }
             }
 
-            Text(l10n.history)
-                .font(.system(size: 16, weight: .semibold))
-                .padding(.top, 12)
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(model.filteredSessions.prefix(20)) { session in
-                        Button {
-                            model.open(session)
-                        } label: {
-                            HStack {
-                                Circle()
-                                    .fill(model.client.sessionID == session.id && model.client.isLive ? Color.orange : palette.hairline)
-                                    .frame(width: 8, height: 8)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(session.title)
-                                        .font(.system(size: 14, weight: .medium))
-                                        .foregroundStyle(palette.text)
-                                        .lineLimit(1)
-                                    Text(session.cwd)
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(palette.secondary)
-                                        .lineLimit(1)
-                                }
-                                Spacer()
-                                Text(session.model ?? "")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(palette.secondary)
-                            }
-                            .padding(12)
-                            .background(palette.chip, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
+            Spacer()
         }
         .padding(32)
-        .frame(maxWidth: 880)
+        .frame(maxWidth: 720)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(palette.canvas)
     }
 
     private func liveCard(_ workspace: SessionWorkspace) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
+            HStack(spacing: 8) {
+                RunningStatusIcon(
+                    active: workspace.isTurnRunning || workspace.tasks.contains(where: \.isRunning),
+                    idleSystemImage: workspace.permission != nil ? "exclamationmark.circle" : "checkmark.circle",
+                    color: workspace.permission != nil ? .orange : palette.secondary,
+                    size: 12
+                )
                 Text(statusText(workspace))
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 14, weight: .semibold))
                 Spacer()
                 Text(workspace.mode.title(chinese: model.language.resolved() == .chinese))
                     .font(.system(size: 12))
                     .foregroundStyle(palette.secondary)
             }
-            Text(workspace.cwd.path)
+            Text(workspace.cwd.lastPathComponent)
                 .font(.system(size: 12))
                 .foregroundStyle(palette.secondary)
+                .help(workspace.cwd.path)
             HStack {
                 Text("\(workspace.runningTools) \(l10n.running)")
                 Text("\(workspace.finishedTools) \(l10n.completed)")
                     .foregroundStyle(palette.secondary)
                 Spacer()
                 Button(l10n.t("Open", "打开")) {
-                    if !model.client.focusIfLoaded(workspace.id) {
-                        model.destination = .chat
-                    } else {
-                        model.destination = .chat
-                    }
+                    _ = model.client.focusIfLoaded(workspace.id)
+                    model.destination = .chat
                 }
                 .buttonStyle(GrokSecondaryButtonStyle())
                 if workspace.isTurnRunning || workspace.todos.contains(where: \.isActive) || workspace.tasks.contains(where: \.isRunning) {
@@ -103,7 +77,7 @@ struct DashboardView: View {
             .font(.system(size: 13))
         }
         .padding(16)
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(palette.hairline))
+        .background(palette.chip, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private func statusText(_ workspace: SessionWorkspace) -> String {

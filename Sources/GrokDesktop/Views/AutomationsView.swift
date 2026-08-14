@@ -12,20 +12,16 @@ struct AutomationsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
-                HStack {
-                    Text(l10n.automations)
-                        .font(.system(size: 34, weight: .bold))
-                    Spacer()
+                PageHeader(
+                    title: l10n.automations,
+                    subtitle: l10n.t(
+                        "Official Grok Build workflows are `.rhai` scripts in ~/.grok/workflows and the project `.grok/workflows` folder. Run one with /workflow <name>.",
+                        "官方工作流是 ~/.grok/workflows 和项目 .grok/workflows 里的 .rhai 脚本。用 /workflow <name> 运行。"
+                    )
+                ) {
                     Button(l10n.t("New workflow", "新建工作流")) { model.showAddWorkflow = true }
                         .buttonStyle(GrokPrimaryButtonStyle())
                 }
-
-                Text(l10n.t(
-                    "Official Grok Build workflows are `.rhai` scripts in ~/.grok/workflows and the project `.grok/workflows` folder. Run one with /workflow <name>.",
-                    "官方工作流是 ~/.grok/workflows 和项目 .grok/workflows 里的 .rhai 脚本。用 /workflow <name> 运行。"
-                ))
-                .font(.system(size: 13))
-                .foregroundStyle(palette.secondary)
 
                 if model.officialWorkflows.isEmpty {
                     Text(l10n.t("No saved workflows yet.", "还没有已保存的工作流。"))
