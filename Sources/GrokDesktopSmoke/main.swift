@@ -421,4 +421,22 @@ expect(ToolVoice.headline("read_file AppModel.swift", chinese: true).contains("�
 expect(ToolVoice.statusLabel("running", chinese: true) == "进行中", "tool running label")
 expect(AgentMode.normal.title(chinese: true) == "询问", "mode ask title")
 
+let storyItems: [ConversationItem] = [
+    .user(id: "u1", text: "把一轮工作收成可读叙事"),
+    .tool(id: "t1", title: "search_replace ChatView.swift", status: "completed", detail: ""),
+    .tool(id: "t2", title: "read_file AppModel.swift", status: "running", detail: "")
+]
+let story = TurnNarrative.story(
+    items: storyItems,
+    todos: [AgentTodo(id: "1", content: "改对话区", status: "in_progress")],
+    hunks: [FileHunk(id: "h1", path: "/tmp/ChatView.swift", added: 3, removed: 1)],
+    chinese: true,
+    running: true,
+    stopping: false
+)
+expect(story?.goal.contains("可读叙事") == true, "turn goal from last user")
+expect(story?.step == "改对话区", "turn step from active todo")
+expect(story?.files.contains("ChatView.swift") == true, "turn files include hunk")
+expect(TurnNarrative.fileNames(in: "edited Sources/GrokDesktop/Views/ChatView.swift").contains("ChatView.swift"), "extract file name")
+
 print("GrokDesktopSmoke ok")

@@ -56,9 +56,9 @@ struct ChatView: View {
                                         messageRow(item)
                                             .id(item.id)
                                     }
-                                    if !model.client.todos.isEmpty {
-                                        liveTodosCard
-                                            .id("live-todos-\(todoFingerprint)")
+                                    if let story = turnStory {
+                                        turnStoryCard(story)
+                                            .id("turn-story-\(story.step)-\(story.files.joined())-\(story.phase)")
                                     }
                                     Color.clear
                                         .frame(height: 1)
@@ -351,7 +351,7 @@ struct ChatView: View {
         case .none:
             tail = "empty"
         }
-        return "\(model.client.sessionID ?? "")-\(model.client.items.count)-\(tail)-\(todoFingerprint)-\(model.client.isTurnRunning)"
+        return "\(model.client.sessionID ?? "")-\(model.client.items.count)-\(tail)-\(todoFingerprint)-\(model.client.isTurnRunning)-\(model.client.isStopping)"
     }
 
     private func pinToBottom(_ proxy: ScrollViewProxy) {
@@ -397,16 +397,28 @@ struct ChatView: View {
         return name == "todo_write" || name == "updating plan" || name.contains("todo")
     }
 
-    private var liveTodosCard: some View {
-        let progress = PromptTimestamp.progress(for: model.client.todos)
-        return VStack(alignment: .leading, spacing: 10) {
+    private var turnStory: TurnStory? {
+        TurnNarrative.story(
+            items: model.client.items,
+            todos: model.client.todos,
+            hunks: model.client.hunks,
+            chinese: model.language.resolved() == .chinese,
+            running: model.client.isTurnRunning,
+            stopping: model.client.isStopping
+        )
+    }
+
+    private func turnStoryCard(_ story: TurnStory) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text(l10n.tasks)
+                Text(l10n.t("This turn", "本轮"))
                     .font(.system(size: 13, weight: .semibold))
                 Spacer()
-                Text("\(progress.done)/\(progress.total)")
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundStyle(palette.secondary)
+                if story.total > 0 {
+                    Text("\(story.done)/\(story.total)")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundStyle(palette.secondary)
+                }
                 if model.client.hasActiveWork {
                     Button(model.client.isStopping ? l10n.stopping : l10n.stop) {
                         if !model.client.isStopping { model.client.stopWork() }
@@ -420,34 +432,34 @@ struct ChatView: View {
                     .disabled(model.client.isStopping)
                 }
             }
-            if progress.total > 0 {
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(palette.chip)
-                        Capsule()
-                            .fill(Color.orange)
-                            .frame(width: geo.size.width * CGFloat(progress.done) / CGFloat(max(progress.total, 1)))
+            storyLine(l10n.t("Goal", "目标"), story.goal)
+            HStack(alignment: .top, spacing: 8) {
+                Text(l10n.t("Now", "现在"))
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(palette.secondary)
+                    .frame(width: 52, alignment: .leading)
+                HStack(spacing: 6) {
+                    if story.phase == .working || story.phase == .stopping {
+                        RunningStatusIcon(
+                            active: story.phase == .working,
+                            idleSystemImage: "pause.circle",
+                            color: .orange,
+                            size: 12
+                        )
                     }
+                    Text(story.step)
+                        .font(.system(size: 13, weight: .medium))
                 }
-                .frame(height: 6)
             }
-            ForEach(model.client.todos) { todo in
-                HStack(alignment: .top, spacing: 8) {
-                    RunningStatusIcon(
-                        active: todo.isActive,
-                        idleSystemImage: todoIcon(todo.status),
-                        color: todoColor(todo.status),
-                        size: 13
-                    )
-                    .padding(.top, 2)
-                    Text(todo.content)
-                        .font(.system(size: 13))
-                        .strikethrough(todo.isDone || todo.isCancelled)
-                    Spacer(minLength: 0)
-                    Text(todoStatusLabel(todo.status))
-                        .font(.system(size: 11))
-                        .foregroundStyle(palette.secondary)
-                }
+            if let next = story.nextStep, !next.isEmpty {
+                storyLine(l10n.t("Next", "下一步"), next)
+            }
+            if !story.files.isEmpty {
+                storyLine(
+                    l10n.t("Changed", "改了"),
+                    story.files.prefix(5).joined(separator: " · ")
+                        + (story.files.count > 5 ? " +\(story.files.count - 5)" : "")
+                )
             }
         }
         .padding(14)
@@ -456,30 +468,15 @@ struct ChatView: View {
         .padding(.horizontal, model.compactChat ? 16 : 28)
     }
 
-    private func todoIcon(_ status: String) -> String {
-        switch status {
-        case "completed": return "checkmark.circle.fill"
-        case "in_progress": return "circle.dotted"
-        case "cancelled": return "xmark.circle"
-        default: return "circle"
-        }
-    }
-
-    private func todoColor(_ status: String) -> Color {
-        switch status {
-        case "completed": return .green
-        case "in_progress": return .orange
-        case "cancelled": return palette.secondary
-        default: return palette.secondary
-        }
-    }
-
-    private func todoStatusLabel(_ status: String) -> String {
-        switch status {
-        case "completed": return l10n.completed
-        case "in_progress": return l10n.running
-        case "cancelled": return l10n.t("Cancelled", "已取消")
-        default: return l10n.t("Pending", "待办")
+    private func storyLine(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text(label)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(palette.secondary)
+                .frame(width: 52, alignment: .leading)
+            Text(value)
+                .font(.system(size: 13))
+                .textSelection(.enabled)
         }
     }
 

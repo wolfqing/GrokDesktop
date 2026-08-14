@@ -905,7 +905,7 @@ final class AppModel: ObservableObject {
 
     func exportDiagnostics() {
         let text = DiagnosticExport.make(
-            version: "0.1.1",
+            version: "0.1.2",
             grokVersion: client.grokVersion,
             state: String(describing: client.state),
             lastError: client.lastError,
