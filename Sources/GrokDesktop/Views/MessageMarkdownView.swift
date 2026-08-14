@@ -5,6 +5,7 @@ import SwiftUI
 struct MessageMarkdownView: View {
     let text: String
     var fontSize: CGFloat = 16
+    var live = false
     @Environment(\.palette) private var palette
     @Environment(\.l10n) private var l10n
     @State private var copiedLanguage: String?
@@ -14,7 +15,7 @@ struct MessageMarkdownView: View {
             ForEach(Array(ChatMarkdown.blocks(in: text).enumerated()), id: \.offset) { _, block in
                 switch block {
                 case .prose(let value):
-                    LinkedText(text: value, fontSize: fontSize, markdown: true)
+                    LinkedText(text: value, fontSize: fontSize, markdown: true, live: live)
                 case .code(let language, let code):
                     codeBlock(language: language, code: code)
                 }
@@ -46,7 +47,7 @@ struct MessageMarkdownView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
-            LinkedText(text: code, fontSize: 12.5, monospaced: true, markdown: false)
+            LinkedText(text: code, fontSize: 12.5, monospaced: true, markdown: false, live: live)
                 .padding(.horizontal, 12)
                 .padding(.bottom, 12)
         }

@@ -477,6 +477,22 @@ expect(ChatLinkDetector.resolve("hi@x.ai")?.kind == .mail, "bare email is mail")
 expect(ChatLinkDetector.resolve("/usage", fileExists: { _ in false }) == nil, "bare slash command is not a file")
 
 let now = Date()
+expect(TranscriptLoader.displayUserText("<user_query>fix the bug</user_query>") == "fix the bug", "extract user_query")
+expect(TranscriptLoader.displayUserText("<system-reminder>hide</system-reminder>\nhello").contains("hello"), "strip reminder")
+expect(TranscriptLoader.parseDiffFiles("diff --git a/App.swift b/App.swift\n+ok") == ["App.swift"], "parse diff files")
+
+let imageDir = FileManager.default.temporaryDirectory.appendingPathComponent("gd-images-\(UUID().uuidString)", isDirectory: true)
+try! FileManager.default.createDirectory(at: imageDir.appendingPathComponent("images"), withIntermediateDirectories: true)
+let diskImage = imageDir.appendingPathComponent("images/image-1.png")
+try! Data([0x89]).write(to: diskImage)
+var attached: [String: [URL]] = [:]
+TranscriptLoader.attachDiskImages(
+    sessionDirectory: imageDir,
+    items: [.user(id: "u1", text: "[Image #1] look")],
+    itemImages: &attached
+)
+expect(attached["u1"]?.first?.lastPathComponent == "image-1.png", "attach disk image to user turn")
+
 expect(RelativeTime.format(now.addingTimeInterval(-10), now: now, chinese: true) == "刚刚", "relative just now")
 expect(RelativeTime.format(now.addingTimeInterval(-180), now: now, chinese: false) == "3m", "relative minutes")
 expect(RelativeTime.meta(

@@ -308,10 +308,25 @@ struct InspectorView: View {
                     .lineLimit(8)
             }
             if !model.client.gitDiffText.isEmpty {
+                let diffFiles = TranscriptLoader.parseDiffFiles(model.client.gitDiffText)
+                if !diffFiles.isEmpty, model.client.hunks.isEmpty {
+                    ForEach(diffFiles, id: \.self) { path in
+                        let url = ChatLinkDetector.resolve(path, baseDirectory: model.client.workingDirectory)?.url
+                            ?? URL(fileURLWithPath: path)
+                        Button(URL(fileURLWithPath: path).lastPathComponent) {
+                            ChatLinkActions.open(url)
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color(nsColor: .linkColor))
+                        .help(path)
+                        .contextMenu { ChatLinkContextButtons(url: url) }
+                    }
+                }
                 Text(model.client.gitDiffText)
                     .font(.system(size: 11, design: .monospaced))
                     .textSelection(.enabled)
-                    .lineLimit(16)
+                    .lineLimit(10)
             }
             if model.client.hunks.isEmpty && model.client.gitDiffText.isEmpty {
                 Text(l10n.t("No session diffs yet.", "这一轮还没有 diff。"))

@@ -286,6 +286,8 @@ final class AppModel: ObservableObject {
         return visible.filter {
             $0.title.localizedCaseInsensitiveContains(query)
                 || $0.cwd.localizedCaseInsensitiveContains(query)
+                || $0.cwdName.localizedCaseInsensitiveContains(query)
+                || ($0.model?.localizedCaseInsensitiveContains(query) ?? false)
         }
     }
 
@@ -434,7 +436,6 @@ final class AppModel: ObservableObject {
             } catch {
                 sidebarNotice = copy.t("Couldn't resume “\(record.title)”", "无法恢复「\(record.title)」")
                 flash(sidebarNotice ?? error.localizedDescription)
-                client.resetConversation()
                 firstRunReason = nil
             }
         }
@@ -1390,7 +1391,7 @@ final class AppModel: ObservableObject {
 
     func exportDiagnostics() {
         let text = DiagnosticExport.make(
-            version: "0.1.4",
+            version: "0.1.5",
             grokVersion: client.grokVersion,
             state: String(describing: client.state),
             lastError: client.lastError,

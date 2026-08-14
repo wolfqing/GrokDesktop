@@ -62,7 +62,6 @@ public struct Transcript: Sendable {
 
 public enum TranscriptLoader {
     public static func load(sessionDirectory: URL, limit: Int = 400) -> Transcript {
-        let updates = sessionDirectory.appendingPathComponent("updates.jsonl")
         var items: [ConversationItem] = []
         var planEntries: [PlanEntry] = []
         var itemDates: [String: Date] = [:]
@@ -72,29 +71,31 @@ public enum TranscriptLoader {
         var assistantID: String?
         var thoughtID: String?
 
-        if let handle = try? FileHandle(forReadingFrom: updates) {
-            defer { try? handle.close() }
-            let data = handle.readDataToEndOfFile()
-            let text = String(data: data, encoding: .utf8) ?? ""
-            for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
-                guard let payload = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any] else {
-                    continue
-                }
-                let params = payload["params"] as? [String: Any] ?? payload
-                let update = SessionUpdate.parse(params: params, envelopeTimestamp: payload["timestamp"])
-                apply(
-                    update: update,
-                    items: &items,
-                    planEntries: &planEntries,
-                    assistantID: &assistantID,
-                    thoughtID: &thoughtID,
-                    itemDates: &itemDates,
-                    itemImages: &itemImages,
-                    todos: &todos,
-                    tasks: &tasks
-                )
+        applyJSONL(
+            sessionDirectory.appendingPathComponent("updates.jsonl"),
+            items: &items,
+            planEntries: &planEntries,
+            assistantID: &assistantID,
+            thoughtID: &thoughtID,
+            itemDates: &itemDates,
+            itemImages: &itemImages,
+            todos: &todos,
+            tasks: &tasks
+        )
+
+        let hasUser = items.contains {
+            if case .user = $0 { return true }
+            return false
+        }
+        if !hasUser {
+            let fallback = loadChatHistory(sessionDirectory.appendingPathComponent("chat_history.jsonl"))
+            if !fallback.items.isEmpty {
+                items = fallback.items
+                itemDates.merge(fallback.itemDates) { current, _ in current }
             }
         }
+
+        attachDiskImages(sessionDirectory: sessionDirectory, items: items, itemImages: &itemImages)
 
         if items.count > limit {
             items = Array(items.suffix(limit))
@@ -112,6 +113,157 @@ public enum TranscriptLoader {
             todos: todos,
             tasks: tasks
         )
+    }
+
+    public static func applyJSONL(
+        _ url: URL,
+        items: inout [ConversationItem],
+        planEntries: inout [PlanEntry],
+        assistantID: inout String?,
+        thoughtID: inout String?,
+        itemDates: inout [String: Date],
+        itemImages: inout [String: [URL]],
+        todos: inout [AgentTodo],
+        tasks: inout [AgentTask]
+    ) {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return }
+        defer { try? handle.close() }
+        let text = String(data: handle.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
+            guard let payload = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any] else {
+                continue
+            }
+            let params = payload["params"] as? [String: Any] ?? payload
+            let update = SessionUpdate.parse(params: params, envelopeTimestamp: payload["timestamp"])
+            apply(
+                update: update,
+                items: &items,
+                planEntries: &planEntries,
+                assistantID: &assistantID,
+                thoughtID: &thoughtID,
+                itemDates: &itemDates,
+                itemImages: &itemImages,
+                todos: &todos,
+                tasks: &tasks
+            )
+        }
+    }
+
+    public static func loadChatHistory(_ url: URL) -> Transcript {
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return Transcript() }
+        var items: [ConversationItem] = []
+        let itemDates: [String: Date] = [:]
+        for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
+            guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+                  let type = object["type"] as? String
+            else { continue }
+            switch type {
+            case "user":
+                let raw = contentText(object["content"])
+                let shown = displayUserText(raw)
+                guard !shown.isEmpty else { continue }
+                let id = UUID().uuidString
+                items.append(.user(id: id, text: shown))
+            case "assistant":
+                let raw = contentText(object["content"])
+                guard !raw.isEmpty else { continue }
+                let id = UUID().uuidString
+                items.append(.assistant(id: id, text: raw, done: true))
+            case "reasoning":
+                let summary = object["summary"] as? String ?? contentText(object["content"])
+                guard !summary.isEmpty else { continue }
+                items.append(.thought(id: UUID().uuidString, text: summary))
+            default:
+                continue
+            }
+        }
+        return Transcript(items: items, itemDates: itemDates)
+    }
+
+    public static func displayUserText(_ raw: String) -> String {
+        if let query = slice(raw, start: "<user_query>", end: "</user_query>") {
+            return query.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        var text = raw
+        let blocks = [#"<system-reminder>[\s\S]*?</system-reminder>"#, #"<user_info>[\s\S]*?</user_info>"#, #"<git_status>[\s\S]*?</git_status>"#]
+        for pattern in blocks {
+            text = text.replacingOccurrences(of: pattern, with: " ", options: .regularExpression)
+        }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    public static func attachDiskImages(
+        sessionDirectory: URL,
+        items: [ConversationItem],
+        itemImages: inout [String: [URL]]
+    ) {
+        let files = diskImages(in: sessionDirectory)
+        guard !files.isEmpty else { return }
+        var cursor = 0
+        for item in items {
+            guard case .user(let id, let text) = item else { continue }
+            if let existing = itemImages[id], !existing.isEmpty { continue }
+            let count = max(PromptMedia.imageURLs(in: text).count, imageTokenCount(in: text))
+            guard count > 0, cursor < files.count else { continue }
+            let end = min(cursor + count, files.count)
+            itemImages[id] = Array(files[cursor..<end])
+            cursor = end
+        }
+    }
+
+    public static func diskImages(in sessionDirectory: URL) -> [URL] {
+        let folders = ["images", "assets"].map { sessionDirectory.appendingPathComponent($0) }
+        var urls: [URL] = []
+        for folder in folders {
+            guard let found = try? FileManager.default.contentsOfDirectory(
+                at: folder,
+                includingPropertiesForKeys: [.contentModificationDateKey],
+                options: [.skipsHiddenFiles]
+            ) else { continue }
+            urls.append(contentsOf: found.filter { PromptMedia.isImageURL($0) })
+        }
+        return urls.sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+
+    public static func parseDiffFiles(_ text: String) -> [String] {
+        var names: [String] = []
+        for line in text.split(separator: "\n") {
+            if line.hasPrefix("diff --git ") {
+                let parts = line.split(separator: " ")
+                if let last = parts.last {
+                    var path = String(last)
+                    if path.hasPrefix("b/") { path = String(path.dropFirst(2)) }
+                    if !path.isEmpty { names.append(path) }
+                }
+            }
+        }
+        return names
+    }
+
+    private static func contentText(_ raw: Any?) -> String {
+        if let text = raw as? String { return text }
+        if let items = raw as? [Any] {
+            return items.compactMap { item -> String? in
+                if let text = item as? String { return text }
+                if let dict = item as? [String: Any] {
+                    return dict["text"] as? String
+                }
+                return nil
+            }.joined(separator: "\n")
+        }
+        return ""
+    }
+
+    private static func slice(_ text: String, start: String, end: String) -> String? {
+        guard let lower = text.range(of: start), let upper = text.range(of: end, range: lower.upperBound..<text.endIndex) else {
+            return nil
+        }
+        return String(text[lower.upperBound..<upper.lowerBound])
+    }
+
+    private static func imageTokenCount(in text: String) -> Int {
+        guard let regex = try? NSRegularExpression(pattern: #"\[Image #\d+\]"#) else { return 0 }
+        return regex.numberOfMatches(in: text, range: NSRange(text.startIndex..., in: text))
     }
 
     public static func loadHunks(sessionDirectory: URL) -> [FileHunk] {

@@ -27,6 +27,14 @@ struct ChatView: View {
             } else if model.client.items.isEmpty {
                 emptyState
             } else {
+                if model.client.isReconnecting {
+                    Text(l10n.t("Reconnecting to grok…", "正在重新连接 grok…"))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color.orange)
+                        .padding(.horizontal, 24)
+                        .padding(.top, 8)
+                }
+
                 if let other = model.client.backgroundPermissions.first {
                     Button {
                         _ = model.client.focusIfLoaded(other.id)
@@ -145,7 +153,7 @@ struct ChatView: View {
                 composerBlock
             }
 
-            if let error = model.client.lastError, model.firstRunReason == nil {
+            if let error = model.client.lastError, model.firstRunReason == nil, !model.client.isReconnecting {
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill")
                     Text(error)
@@ -564,7 +572,7 @@ struct ChatView: View {
                 }
             }
             .padding(.horizontal, model.compactChat ? 16 : 28)
-        case .assistant(let id, let text, _):
+        case .assistant(let id, let text, let done):
             VStack(alignment: .leading, spacing: 4) {
                 timestamp(id)
                 if text.isEmpty {
@@ -572,7 +580,11 @@ struct ChatView: View {
                         .font(.system(size: model.compactChat ? 14 : 16))
                         .foregroundStyle(palette.secondary)
                 } else {
-                    MessageMarkdownView(text: text, fontSize: model.compactChat ? 14 : 16)
+                    MessageMarkdownView(
+                        text: text,
+                        fontSize: model.compactChat ? 14 : 16,
+                        live: !done && model.client.isTurnRunning
+                    )
                 }
                 if model.client.isTurnRunning, isLatestAssistant(id) {
                     Circle()

@@ -43,6 +43,7 @@ public final class ACPClient: ObservableObject {
     @Published public private(set) var capabilities = AgentCapabilities()
     @Published public var gitStatusText = ""
     @Published public var gitDiffText = ""
+    @Published public private(set) var isReconnecting = false
 
     public var runningTools: Int { currentWorkspace?.runningTools ?? 0 }
 
@@ -75,6 +76,7 @@ public final class ACPClient: ObservableObject {
     private var pendingWorkingDirectory: URL?
     private var shouldReconnect = true
     private var reconnectTask: Task<Void, Never>?
+    private var reconnectAttempt = 0
     private var workspaceByID: [String: SessionWorkspace] = [:]
 
     public init(
@@ -166,7 +168,7 @@ public final class ACPClient: ObservableObject {
                 "protocolVersion": 1,
                 "clientInfo": [
                     "name": "GrokDesktop",
-                    "version": "0.1.2"
+                    "version": "0.1.5"
                 ],
                 "clientCapabilities": [
                     "fs": [
@@ -179,6 +181,9 @@ public final class ACPClient: ObservableObject {
         )
         capabilities = AgentCapabilities.parse(handshake.result)
         state = .initialized
+        decodeFailures = 0
+        reconnectAttempt = 0
+        isReconnecting = false
         refreshAuth()
         if authPresence == .signedOut, capabilities.authMethods.isEmpty == false {
             // Agent advertised auth; session/new will fail until the user signs in.
@@ -294,13 +299,22 @@ public final class ACPClient: ObservableObject {
             workspace.loadedOnAgent = true
             workspace.lastError = nil
             lastError = nil
+            isReconnecting = false
             state = .ready
         } catch {
+            workspace.loadedOnAgent = false
+            if isReconnecting, !workspace.items.isEmpty {
+                syncFromCurrent()
+                throw error
+            }
             workspace.lastError = error.localizedDescription
             lastError = error.localizedDescription
             if workspace.items.isEmpty {
                 workspace.items = [.notice(id: UUID().uuidString, text: error.localizedDescription)]
-            } else {
+            } else if !workspace.items.contains(where: {
+                if case .notice(_, let text) = $0 { return text == error.localizedDescription }
+                return false
+            }) {
                 workspace.items.append(.notice(id: UUID().uuidString, text: error.localizedDescription))
             }
             syncFromCurrent()
@@ -671,6 +685,8 @@ public final class ACPClient: ObservableObject {
         pending.removeAll()
         if !reconnect {
             state = .idle
+            isReconnecting = false
+            reconnectAttempt = 0
         }
         isTurnRunning = false
     }
@@ -680,29 +696,47 @@ public final class ACPClient: ObservableObject {
             continuation.resume(throwing: ACPError.processExited(code))
         }
         pending.removeAll()
-        let message = ACPError.processExited(code).localizedDescription
-        if state == .ready || state == .connecting || state == .initialized {
-            state = .failed(message)
-            lastError = message
-        }
         for workspace in workspaceByID.values {
             workspace.isTurnRunning = false
             workspace.loadedOnAgent = false
         }
         isTurnRunning = false
         refreshLive()
-        guard shouldReconnect, lastSessionID != nil else { return }
+        guard shouldReconnect, lastSessionID != nil else {
+            let message = ACPError.processExited(code).localizedDescription
+            state = .failed(message)
+            lastError = message
+            return
+        }
+        scheduleReconnect()
+    }
+
+    private func scheduleReconnect() {
+        guard shouldReconnect else { return }
+        isReconnecting = true
+        lastError = nil
+        state = .connecting
         reconnectTask?.cancel()
         reconnectTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 1_200_000_000)
-            guard let self, !Task.isCancelled else { return }
+            guard let self else { return }
+            self.reconnectAttempt += 1
+            if self.reconnectAttempt > 8 {
+                self.isReconnecting = false
+                self.state = .failed("Lost grok agent.")
+                self.lastError = "Lost grok agent."
+                return
+            }
+            let delay = UInt64(min(1.2 * pow(2.0, Double(self.reconnectAttempt - 1)), 20.0) * 1_000_000_000)
+            try? await Task.sleep(nanoseconds: delay)
+            guard !Task.isCancelled, self.shouldReconnect else { return }
             do {
                 try await self.start()
                 if let id = self.lastSessionID {
                     try await self.loadSession(id: id, cwd: self.workingDirectory, directory: self.sessionDirectory)
                 }
+                self.isReconnecting = false
             } catch {
-                self.lastError = error.localizedDescription
+                self.scheduleReconnect()
             }
         }
     }
@@ -768,7 +802,7 @@ public final class ACPClient: ObservableObject {
             return
         }
 
-        if envelope.method == "session/update" {
+        if envelope.method == "session/update" || envelope.method == "_x.ai/session/update" {
             apply(update: SessionUpdate.parse(params: envelope.params, envelopeTimestamp: envelope.timestamp))
             return
         }
@@ -899,11 +933,17 @@ public final class ACPClient: ObservableObject {
 
     private func write(_ envelope: JSONRPCEnvelope) throws {
         guard let stdinHandle else {
+            scheduleReconnect()
             throw ACPError.rpc("Agent stdin is closed")
         }
         var data = try envelope.encoded()
         data.append(0x0A)
-        try stdinHandle.write(contentsOf: data)
+        do {
+            try stdinHandle.write(contentsOf: data)
+        } catch {
+            scheduleReconnect()
+            throw error
+        }
     }
 
     private func firstString(_ value: Any?, keys: [String]) -> String? {

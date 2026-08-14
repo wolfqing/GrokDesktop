@@ -15,21 +15,57 @@ struct LinkedText: View {
     @Environment(\.l10n) private var l10n
     @EnvironmentObject private var model: AppModel
 
+    var live = false
+
     var body: some View {
-        LinkedTextNSView(
-            text: text,
-            fontSize: fontSize,
-            monospaced: monospaced,
-            markdown: markdown,
-            fillsWidth: fillsWidth,
-            maxContentWidth: maxContentWidth,
-            textColor: NSColor(color ?? palette.text),
-            linkColor: .linkColor,
-            baseDirectory: model.client.workingDirectory,
-            chinese: l10n.language == .chinese
-        )
-        .frame(maxWidth: fillsWidth ? .infinity : maxContentWidth, alignment: .leading)
-        .fixedSize(horizontal: !fillsWidth, vertical: true)
+        if live || !Self.mightContainLinks(text) {
+            plainText
+        } else {
+            LinkedTextNSView(
+                text: text,
+                fontSize: fontSize,
+                monospaced: monospaced,
+                markdown: markdown,
+                fillsWidth: fillsWidth,
+                maxContentWidth: maxContentWidth,
+                textColor: NSColor(color ?? palette.text),
+                linkColor: .linkColor,
+                baseDirectory: model.client.workingDirectory,
+                chinese: l10n.language == .chinese
+            )
+            .frame(maxWidth: fillsWidth ? .infinity : maxContentWidth, alignment: .leading)
+            .fixedSize(horizontal: !fillsWidth, vertical: true)
+        }
+    }
+
+    private var plainText: some View {
+        Group {
+            if markdown {
+                Text(Self.swiftUIMarkdown(text))
+            } else {
+                Text(text)
+            }
+        }
+        .font(monospaced ? .system(size: fontSize, design: .monospaced) : .system(size: fontSize))
+        .foregroundStyle(color ?? palette.text)
+        .textSelection(.enabled)
+        .frame(maxWidth: fillsWidth ? .infinity : nil, alignment: .leading)
+    }
+
+    private static func mightContainLinks(_ text: String) -> Bool {
+        text.contains("http")
+            || text.contains("www.")
+            || text.contains("://")
+            || text.contains("/")
+            || text.contains("@")
+            || text.contains("~")
+            || text.contains("](")
+    }
+
+    private static func swiftUIMarkdown(_ text: String) -> AttributedString {
+        var options = AttributedString.MarkdownParsingOptions()
+        options.interpretedSyntax = .inlineOnlyPreservingWhitespace
+        return (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
     }
 }
 
