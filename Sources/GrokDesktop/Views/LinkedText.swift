@@ -69,6 +69,11 @@ struct ChatLinkContextButtons: View {
     @Environment(\.l10n) private var l10n
 
     var body: some View {
+        if url.isFileURL {
+            Button(l10n.t("Preview", "预览")) {
+                ChatLinkActions.activate(url)
+            }
+        }
         Button(l10n.t("Open", "打开")) {
             ChatLinkActions.open(url)
         }
@@ -313,7 +318,7 @@ final class LinkedTextCoordinator: NSObject, NSTextViewDelegate {
             url = nil
         }
         guard let url else { return false }
-        ChatLinkActions.open(url)
+        ChatLinkActions.activate(url)
         return true
     }
 }

@@ -16,6 +16,14 @@ struct InspectorView: View {
 
             Divider().overlay(palette.hairline)
 
+            if let preview = model.previewedFile {
+                FilePreviewPane(url: preview)
+                    .padding(.horizontal, 14)
+                    .padding(.top, 12)
+                    .frame(minHeight: 220, idealHeight: 320, maxHeight: 460)
+                Divider().overlay(palette.hairline).padding(.top, 10)
+            }
+
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     contextSection
@@ -391,7 +399,7 @@ struct InspectorView: View {
                     let url = ChatLinkDetector.resolve(hunk.path, baseDirectory: model.client.workingDirectory)?.url
                         ?? URL(fileURLWithPath: hunk.path)
                     Button {
-                        ChatLinkActions.open(url)
+                        model.previewFile(url)
                     } label: {
                         HStack {
                             Text(hunk.name)
@@ -487,7 +495,7 @@ private struct DiffFileBlock: View {
                 }
                 .buttonStyle(.plain)
                 Button(file.name) {
-                    ChatLinkActions.open(url)
+                    model.previewFile(url)
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(Color(nsColor: .linkColor))

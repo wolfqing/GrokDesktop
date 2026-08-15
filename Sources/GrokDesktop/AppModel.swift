@@ -68,6 +68,7 @@ final class AppModel: ObservableObject {
     @Published var showAbout = false
     @Published var showPalette = false
     @Published var showInspector = true
+    @Published var previewedFile: URL?
     @Published var showSearchField = false
     @Published var showAttachMenu = false
     @Published var showCreateProject = false
@@ -193,6 +194,27 @@ final class AppModel: ObservableObject {
         refreshWorkspace()
         refreshAccountUsage()
         bindClient()
+        ChatLinkActions.previewFile = { [weak self] url in
+            self?.previewFile(url)
+        }
+    }
+
+    func previewFile(_ url: URL) {
+        let standardized = url.standardizedFileURL
+        var isDir: ObjCBool = false
+        if FileManager.default.fileExists(atPath: standardized.path, isDirectory: &isDir), isDir.boolValue {
+            ChatLinkActions.open(standardized)
+            return
+        }
+        previewedFile = standardized
+        showInspector = true
+        if destination != .chat {
+            destination = .chat
+        }
+    }
+
+    func clearPreview() {
+        previewedFile = nil
     }
 
     private func bindClient() {

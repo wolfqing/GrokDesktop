@@ -35,7 +35,7 @@ struct RootView: View {
                         .fill(palette.hairline)
                         .frame(width: 1)
                     InspectorView()
-                        .frame(width: GrokTheme.inspectorWidth)
+                        .frame(width: model.previewedFile == nil ? GrokTheme.inspectorWidth : GrokTheme.inspectorPreviewWidth)
                 }
             }
 

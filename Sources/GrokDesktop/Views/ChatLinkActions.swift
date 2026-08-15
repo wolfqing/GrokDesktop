@@ -3,6 +3,23 @@ import UniformTypeIdentifiers
 
 @MainActor
 enum ChatLinkActions {
+    static var previewFile: ((URL) -> Void)?
+
+    static func activate(_ url: URL) {
+        if url.isFileURL {
+            var isDir: ObjCBool = false
+            if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
+                NSWorkspace.shared.open(url)
+                return
+            }
+            if let previewFile {
+                previewFile(url)
+                return
+            }
+        }
+        open(url)
+    }
+
     static func open(_ url: URL) {
         if url.isFileURL {
             var isDir: ObjCBool = false
@@ -88,6 +105,13 @@ enum ChatLinkActions {
             return item
         }
 
+        if url.isFileURL {
+            var isDir: ObjCBool = false
+            let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
+            if !exists || !isDir.boolValue {
+                menu.addItem(item("Preview", "预览", #selector(ChatLinkMenuController.preview)))
+            }
+        }
         menu.addItem(item("Open", "打开", #selector(ChatLinkMenuController.open)))
 
         let apps = applications(for: url)
@@ -139,6 +163,10 @@ final class ChatLinkMenuController: NSObject {
 
     init(url: URL) {
         self.url = url
+    }
+
+    @objc func preview() {
+        ChatLinkActions.activate(url)
     }
 
     @objc func open() {

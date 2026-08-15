@@ -680,7 +680,7 @@ private struct PromptImageView: View {
 
     var body: some View {
         Button {
-            ChatLinkActions.open(url)
+            ChatLinkActions.activate(url)
         } label: {
             if let image = NSImage(contentsOf: url) {
                 Image(nsImage: image)
@@ -716,7 +716,7 @@ private struct ChatFileLabel: View {
         let url = ChatLinkDetector.resolve(path, baseDirectory: model.client.workingDirectory)?.url
             ?? URL(fileURLWithPath: path)
         Button(path) {
-            ChatLinkActions.open(url)
+            ChatLinkActions.activate(url)
         }
         .buttonStyle(.plain)
         .font(.system(size: 13))

@@ -26,7 +26,7 @@ struct PermissionBar: View {
                 let url = ChatLinkDetector.resolve(path, baseDirectory: model.client.workingDirectory)?.url
                     ?? URL(fileURLWithPath: path)
                 Button(url.lastPathComponent) {
-                    ChatLinkActions.open(url)
+                    ChatLinkActions.activate(url)
                 }
                 .buttonStyle(.plain)
                 .font(.system(size: 12))
