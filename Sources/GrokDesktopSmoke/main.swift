@@ -555,6 +555,43 @@ let questionJSON: [String: Any] = [
     ]]
 ]
 let parsedQuestion = UserQuestionRequest.parse(id: .int(9), params: questionJSON)
+let folded = SessionFold.apply([
+    SessionFold.userTurn("look at Sources/App.swift"),
+    SessionUpdate(kind: .agentMessageChunk, text: "I'll edit it."),
+    SessionUpdate(kind: .sessionRecap, text: "We opened the file."),
+    SessionUpdate(kind: .autoCompactCompleted, text: "")
+])
+expect(folded.items.contains(where: { if case .user(_, let text) = $0 { return text.contains("App.swift") }; return false }), "fold records user")
+expect(folded.items.contains(where: { if case .notice(_, let text) = $0 { return text.contains("opened") }; return false }), "fold recap is durable")
+expect(folded.items.contains(where: { if case .notice(_, let text) = $0 { return text.contains("compacted") }; return false }), "fold compact is durable")
+expect(folded.lastUserPreview.contains("App.swift"), "projection last user")
+
+let planQ = UserQuestion.parse([
+    "question": "Approve this plan?",
+    "detail": "1. Fold events",
+    "intent": ["kind": "plan-review", "approve": "Approve"],
+    "options": [["label": "Approve"], ["label": "Revise"]]
+])
+if case .planReview(let approve) = planQ?.intent {
+    expect(approve == "Approve", "plan-review intent")
+} else {
+    fail("expected plan-review intent")
+}
+expect(planQ?.detail.contains("Fold") == true, "question keeps plan detail")
+
+let inferred = UserQuestion.parse([
+    "question": "Should I execute the plan?",
+    "options": [["label": "批准"], ["label": "打回"]]
+])
+if case .planReview(let approve) = inferred?.intent {
+    expect(approve == "批准", "infer plan-review from 批准")
+} else {
+    fail("expected inferred plan-review")
+}
+
+expect(SessionFold.isAside("/btw also check tests"), "btw is aside")
+expect(!SessionFold.isAside("also check tests"), "plain text is follow-up")
+
 expect(parsedQuestion?.questions.count == 1, "parse ask_user_question")
 expect(parsedQuestion?.questions.first?.options.count == 2, "question options")
 expect(UserQuestionRequest.isMethod("x.ai/ask_user_question"), "ask method suffix")

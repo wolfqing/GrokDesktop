@@ -105,6 +105,11 @@ public enum SessionUpdateKind: String, Sendable {
     case turnCompleted = "turn_completed"
     case taskBackgrounded = "task_backgrounded"
     case taskCompleted = "task_completed"
+    case sessionRecap = "session_recap"
+    case autoCompactStarted = "auto_compact_started"
+    case autoCompactCompleted = "auto_compact_completed"
+    case imageCompressed = "image_compressed"
+    case notice
     case unknown
 }
 
@@ -194,6 +199,8 @@ public struct SessionUpdate: Equatable {
             return text
         }
         if let text = update["text"] as? String { return text }
+        if let summary = update["summary"] as? String { return summary }
+        if let message = update["message"] as? String { return message }
         if let rawOutput = update["rawOutput"] as? String { return rawOutput }
         if let items = update["content"] as? [Any] {
             return items.compactMap(extractContentText).joined(separator: "\n")
@@ -341,25 +348,63 @@ public struct PermissionRequest: Identifiable, Sendable, Equatable {
     }
 }
 
+public enum UserQuestionIntent: Hashable, Sendable {
+    case generic
+    case planReview(approve: String)
+
+    public static func parse(
+        _ raw: Any?,
+        question: String,
+        header: String,
+        detail: String,
+        options: [UserQuestionOption]
+    ) -> UserQuestionIntent {
+        if let dict = raw as? [String: Any] {
+            let kind = (dict["kind"] as? String ?? "").lowercased()
+            if kind == "plan-review" || kind == "plan_review" || kind == "planreview" {
+                let approve = dict["approve"] as? String
+                    ?? options.first?.label
+                    ?? ""
+                if !approve.isEmpty { return .planReview(approve: approve) }
+            }
+        }
+        let blob = (question + " " + header + " " + detail).lowercased()
+        let looksLikePlan = blob.contains("plan") || blob.contains("计划")
+        if looksLikePlan, let approve = options.first(where: {
+            let label = $0.label.lowercased()
+            return label.contains("approve") || label.contains("批准") || label.contains("accept")
+        }) {
+            return .planReview(approve: approve.label)
+        }
+        return .generic
+    }
+}
+
 public struct UserQuestion: Identifiable, Hashable, Sendable {
     public var id: String
     public var header: String
     public var question: String
     public var options: [UserQuestionOption]
     public var multiSelect: Bool
+    public var detail: String
+    public var intent: UserQuestionIntent
 
     public init(
         id: String = UUID().uuidString,
         header: String = "",
         question: String,
         options: [UserQuestionOption],
-        multiSelect: Bool = false
+        multiSelect: Bool = false,
+        detail: String = "",
+        intent: UserQuestionIntent = .generic
     ) {
         self.id = id
         self.header = header
         self.question = question
         self.options = options
         self.multiSelect = multiSelect
+        self.detail = detail
+        self.intent = intent
     }
 
     public static func parseList(_ value: Any?) -> [UserQuestion] {
@@ -379,12 +424,15 @@ public struct UserQuestion: Identifiable, Hashable, Sendable {
             ?? ""
         let options = parseOptions(raw["options"] ?? raw["choices"])
         if question.isEmpty && options.isEmpty { return nil }
+        let detail = raw["detail"] as? String ?? raw["description"] as? String ?? ""
         return UserQuestion(
             id: raw["id"] as? String ?? question,
             header: raw["header"] as? String ?? raw["title"] as? String ?? "",
             question: question,
             options: options,
-            multiSelect: raw["multi_select"] as? Bool ?? raw["multiSelect"] as? Bool ?? false
+            multiSelect: raw["multi_select"] as? Bool ?? raw["multiSelect"] as? Bool ?? false,
+            detail: detail,
+            intent: UserQuestionIntent.parse(raw["intent"], question: question, header: raw["header"] as? String ?? "", detail: detail, options: options)
         )
     }
 
@@ -424,6 +472,13 @@ public struct UserQuestionRequest: Identifiable, Equatable, Sendable {
     public var rpcID: JSONRPCID
     public var sessionId: String?
     public var questions: [UserQuestion]
+
+    public var isPlanReview: Bool {
+        questions.contains {
+            if case .planReview = $0.intent { return true }
+            return false
+        }
+    }
 
     public var id: String {
         switch rpcID {

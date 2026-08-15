@@ -8,6 +8,7 @@ public struct SessionRecord: Identifiable, Hashable, Sendable {
     public var model: String?
     public var directory: URL
     public var messageCount: Int
+    public var preview: String
 
     public init(
         id: String,
@@ -16,7 +17,8 @@ public struct SessionRecord: Identifiable, Hashable, Sendable {
         updatedAt: Date,
         model: String?,
         directory: URL,
-        messageCount: Int = 0
+        messageCount: Int = 0,
+        preview: String = ""
     ) {
         self.id = id
         self.cwd = cwd
@@ -25,6 +27,7 @@ public struct SessionRecord: Identifiable, Hashable, Sendable {
         self.model = model
         self.directory = directory
         self.messageCount = messageCount
+        self.preview = preview
     }
 
     public var cwdName: String {
@@ -123,7 +126,11 @@ public struct SessionIndex {
             updatedAt: updated,
             model: dict["current_model_id"] as? String,
             directory: summaryURL.deletingLastPathComponent(),
-            messageCount: messages
+            messageCount: messages,
+            preview: Self.displayTitle(
+                dict["last_turn_summary"] as? String ?? "",
+                cwd: cwd
+            )
         )
     }
 
@@ -176,6 +183,7 @@ public enum SessionSearch {
     ) -> [String] {
         var tokens = [
             session.title,
+            session.preview,
             session.cwd,
             session.cwdName,
             session.model ?? "",

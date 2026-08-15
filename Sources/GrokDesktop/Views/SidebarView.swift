@@ -351,6 +351,12 @@ struct SidebarView: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
                         .foregroundStyle(palette.text)
+                    if !session.preview.isEmpty, session.preview != session.title {
+                        Text(session.preview)
+                            .font(.system(size: 11))
+                            .foregroundStyle(palette.secondary)
+                            .lineLimit(1)
+                    }
                     Text(RelativeTime.meta(session, chinese: chinese))
                         .font(.system(size: 11))
                         .foregroundStyle(palette.secondary)

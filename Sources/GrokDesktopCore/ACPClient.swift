@@ -31,7 +31,7 @@ public final class ACPClient: ObservableObject {
     @Published public var planEntries: [PlanEntry] = []
     @Published public var planMarkdown = ""
     @Published public var hunks: [FileHunk] = []
-    @Published public var promptQueue: [String] = []
+    @Published public var promptQueue: [QueuedPrompt] = []
     @Published public var sessionDirectory: URL?
     @Published public private(set) var liveWorkspaces: [SessionWorkspace] = []
     @Published public private(set) var authPresence: AuthPresence = .signedOut
@@ -173,7 +173,7 @@ public final class ACPClient: ObservableObject {
                 "protocolVersion": 1,
                 "clientInfo": [
                     "name": "GrokDesktop",
-                    "version": "0.1.6"
+                    "version": "0.1.7"
                 ],
                 "clientCapabilities": [
                     "fs": [
@@ -316,13 +316,11 @@ public final class ACPClient: ObservableObject {
             }
             workspace.lastError = error.localizedDescription
             lastError = error.localizedDescription
-            if workspace.items.isEmpty {
-                workspace.items = [.notice(id: UUID().uuidString, text: error.localizedDescription)]
-            } else if !workspace.items.contains(where: {
+            if !workspace.items.contains(where: {
                 if case .notice(_, let text) = $0 { return text == error.localizedDescription }
                 return false
             }) {
-                workspace.items.append(.notice(id: UUID().uuidString, text: error.localizedDescription))
+                workspace.fold(SessionFold.notice(error.localizedDescription))
             }
             syncFromCurrent()
             throw error
@@ -331,7 +329,7 @@ public final class ACPClient: ObservableObject {
         syncFromCurrent()
     }
 
-    public func send(text: String, sessionID target: String? = nil) async throws {
+    public func send(text: String, sessionID target: String? = nil, kind: QueuedPrompt.Kind = .followUp) async throws {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         try await connectIfNeeded()
@@ -343,19 +341,17 @@ public final class ACPClient: ObservableObject {
             throw ACPError.rpc("No session")
         }
         if workspace.isTurnRunning {
-            workspace.promptQueue.append(trimmed)
+            workspace.promptQueue.append(QueuedPrompt(text: trimmed, kind: kind))
             syncFromCurrent()
             return
         }
 
-        if workspace.items.last.flatMap({ item -> String? in
+        let lastUser = workspace.items.last.flatMap { item -> String? in
             if case .user(_, let existing) = item { return existing }
             return nil
-        }) != trimmed {
-            let userID = UUID().uuidString
-            workspace.items.append(.user(id: userID, text: trimmed))
-            workspace.itemDates[userID] = Date()
-            workspace.itemImages[userID] = PromptMedia.imageURLs(in: trimmed)
+        }
+        if lastUser != trimmed {
+            workspace.fold(SessionFold.userTurn(trimmed))
         }
         workspace.stopRequested = false
         isStopping = false
@@ -386,7 +382,7 @@ public final class ACPClient: ObservableObject {
         } catch {
             if !workspace.stopRequested, !Self.isCancelError(error) {
                 workspace.lastError = error.localizedDescription
-                workspace.items.append(.notice(id: UUID().uuidString, text: error.localizedDescription))
+                workspace.fold(SessionFold.notice(error.localizedDescription))
                 lastError = error.localizedDescription
             }
         }
@@ -399,7 +395,7 @@ public final class ACPClient: ObservableObject {
         }
         if let next = workspace.promptQueue.first {
             workspace.promptQueue.removeFirst()
-            try await send(text: next, sessionID: id)
+            try await send(text: next.text, sessionID: id, kind: next.kind)
         }
     }
 
@@ -415,8 +411,8 @@ public final class ACPClient: ObservableObject {
             throw ACPError.rpc("No session")
         }
         if workspace.isTurnRunning {
-            workspace.promptQueue.removeAll { $0 == trimmed }
-            workspace.promptQueue.insert(trimmed, at: 0)
+            workspace.promptQueue.removeAll { $0.text == trimmed }
+            workspace.promptQueue.insert(QueuedPrompt(text: trimmed, kind: .followUp), at: 0)
             fire(method: "session/cancel", params: ["sessionId": id])
             syncFromCurrent()
             return
@@ -863,17 +859,7 @@ public final class ACPClient: ObservableObject {
         guard let id else { return }
         let workspace = ensureWorkspace(id: id, cwd: workingDirectory, directory: sessionDirectory)
         let previousIDs = Set(workspace.items.map(\.id))
-        TranscriptLoader.apply(
-            update: update,
-            items: &workspace.items,
-            planEntries: &workspace.planEntries,
-            assistantID: &workspace.assistantBufferID,
-            thoughtID: &workspace.thoughtBufferID,
-            itemDates: &workspace.itemDates,
-            itemImages: &workspace.itemImages,
-            todos: &workspace.todos,
-            tasks: &workspace.tasks
-        )
+        workspace.fold(update)
         if workspace.stopRequested {
             workspace.markWorkStopped()
         }
@@ -905,7 +891,9 @@ public final class ACPClient: ObservableObject {
 
     private func syncFromCurrent() {
         if let workspace = currentWorkspace {
-            items = workspace.items
+            if workspace.items != items {
+                items = workspace.items
+            }
             isTurnRunning = workspace.isTurnRunning
             permission = workspace.permission
             userQuestion = workspace.userQuestion

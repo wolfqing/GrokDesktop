@@ -364,7 +364,34 @@ public enum TranscriptLoader {
             }
         case .taskBackgrounded, .taskCompleted:
             PromptTimestamp.applyTask(from: update, into: &tasks)
-        case .turnCompleted, .unknown:
+        case .sessionRecap:
+            assistantID = nil
+            thoughtID = nil
+            let summary = update.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !summary.isEmpty {
+                items.append(.notice(id: UUID().uuidString, text: summary))
+            }
+        case .autoCompactCompleted:
+            assistantID = nil
+            thoughtID = nil
+            items.append(.notice(id: UUID().uuidString, text: "Context compacted"))
+        case .imageCompressed:
+            if let last = items.indices.last, case .user(let id, _) = items[last] {
+                PromptMedia.merge(
+                    update.imageURLs,
+                    displayNumber: update.imageDisplayNumber,
+                    onto: id,
+                    itemImages: &itemImages
+                )
+            }
+        case .notice:
+            assistantID = nil
+            thoughtID = nil
+            let text = update.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty {
+                items.append(.notice(id: UUID().uuidString, text: text))
+            }
+        case .autoCompactStarted, .turnCompleted, .unknown:
             assistantID = nil
             thoughtID = nil
         }

@@ -11,12 +11,18 @@ struct QuestionCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(l10n.t("Grok has a question", "Grok 在问你"))
+            Text(request.isPlanReview
+                 ? l10n.t("Review this plan", "看看这个计划")
+                 : l10n.t("Grok has a question", "Grok 在问你"))
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(palette.secondary)
 
             ForEach(request.questions) { question in
-                questionBlock(question)
+                if case .planReview(let approve) = question.intent {
+                    planBlock(question, approve: approve)
+                } else {
+                    questionBlock(question)
+                }
             }
 
             TextField(l10n.t("Or say something else…", "或者另说一句…"), text: $note, axis: .vertical)
@@ -66,6 +72,13 @@ struct QuestionCard: View {
             if !question.question.isEmpty {
                 Text(question.question)
                     .font(.system(size: 14, weight: .medium))
+            }
+            if !question.detail.isEmpty {
+                Text(question.detail)
+                    .font(.system(size: 12))
+                    .foregroundStyle(palette.secondary)
+                    .textSelection(.enabled)
+                    .lineLimit(12)
             }
             if question.multiSelect {
                 Text(l10n.t("Pick any that apply", "可以多选"))
@@ -117,6 +130,38 @@ struct QuestionCard: View {
         }
     }
 
+    private func planBlock(_ question: UserQuestion, approve: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if !question.question.isEmpty {
+                Text(question.question)
+                    .font(.system(size: 14, weight: .medium))
+            }
+            if !question.detail.isEmpty {
+                Text(question.detail)
+                    .font(.system(size: 12))
+                    .textSelection(.enabled)
+                    .lineLimit(16)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(palette.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+            HStack(spacing: 8) {
+                Button(approve) {
+                    selected[question.id] = [approve]
+                    submit(force: question)
+                }
+                .buttonStyle(GrokPrimaryButtonStyle())
+                ForEach(question.options.filter { $0.label != approve }) { option in
+                    Button(option.label) {
+                        selected[question.id] = [option.label]
+                        submit(force: question)
+                    }
+                    .buttonStyle(GrokSecondaryButtonStyle())
+                }
+            }
+        }
+    }
+
     private func icon(on: Bool, multi: Bool) -> String {
         if multi {
             return on ? "checkmark.square.fill" : "square"
@@ -138,7 +183,7 @@ struct QuestionCard: View {
         selected[question.id] = picks
     }
 
-    private func submit() {
+    private func submit(force _: UserQuestion? = nil) {
         let typed = note.trimmingCharacters(in: .whitespacesAndNewlines)
         if !canSubmit, !typed.isEmpty {
             model.client.answerQuestion(.chatAboutThis(typed))

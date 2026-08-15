@@ -591,9 +591,10 @@ final class AppModel: ObservableObject {
         recordPrompt(text)
         draft = ""
         destination = .chat
+        let aside = SessionFold.isAside(text)
         Task {
             do {
-                try await client.send(text: text)
+                try await client.send(text: text, kind: aside ? .aside : .followUp)
                 if !isPrivateChat {
                     refreshSessions()
                 }
@@ -603,6 +604,21 @@ final class AppModel: ObservableObject {
             }
         }
     }
+
+    func enqueueAside(_ text: String) {
+        destination = .chat
+        draft = ""
+        showPalette = false
+        Task {
+            do {
+                try await client.send(text: text, kind: .aside)
+            } catch {
+                present(error)
+            }
+        }
+    }
+
+
 
     func beginBusySend(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -953,8 +969,14 @@ final class AppModel: ObservableObject {
             flash(copy.t("That command is terminal-only.", "这个命令只在终端 TUI 里有。"))
         case "/memory", "/mem":
             applyMemoryCommand(rest)
-        case "/remember", "/flush", "/dream", "/loop", "/goal", "/deep-research", "/btw":
-            if rest.isEmpty, name == "/remember" || name == "/loop" || name == "/goal" || name == "/deep-research" || name == "/btw" {
+        case "/btw":
+            if rest.isEmpty {
+                insertSlashPrompt("/btw")
+            } else {
+                enqueueAside("/btw \(rest)")
+            }
+        case "/remember", "/flush", "/dream", "/loop", "/goal", "/deep-research":
+            if rest.isEmpty, name == "/remember" || name == "/loop" || name == "/goal" || name == "/deep-research" {
                 insertSlashPrompt(name)
             } else {
                 draft = rest.isEmpty ? name : "\(name) \(rest)"
@@ -1388,7 +1410,7 @@ final class AppModel: ObservableObject {
 
     func exportDiagnostics() {
         let text = DiagnosticExport.make(
-            version: "0.1.6",
+            version: "0.1.7",
             grokVersion: client.grokVersion,
             state: String(describing: client.state),
             lastError: client.lastError,

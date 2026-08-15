@@ -152,10 +152,19 @@ struct ComposerView: View {
             }
 
             if !model.client.promptQueue.isEmpty {
-                Text(l10n.t("Queued \(model.client.promptQueue.count)", "已排队 \(model.client.promptQueue.count) 条"))
-                    .font(.system(size: 11))
-                    .foregroundStyle(palette.secondary)
-                    .padding(.horizontal, 6)
+                let follow = model.client.promptQueue.filter { $0.kind == .followUp }.count
+                let asides = model.client.promptQueue.filter { $0.kind == .aside }.count
+                HStack(spacing: 8) {
+                    if follow > 0 {
+                        Text(l10n.t("Queued \(follow)", "已排队 \(follow) 条"))
+                    }
+                    if asides > 0 {
+                        Text(l10n.t("Aside waiting \(asides)", "旁问等候 \(asides) 条"))
+                    }
+                }
+                .font(.system(size: 11))
+                .foregroundStyle(palette.secondary)
+                .padding(.horizontal, 6)
             }
 
             Button {

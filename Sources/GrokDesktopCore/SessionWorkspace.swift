@@ -9,7 +9,7 @@ public final class SessionWorkspace: Identifiable {
     public var isTurnRunning = false
     public var permission: PermissionRequest?
     public var userQuestion: UserQuestionRequest?
-    public var promptQueue: [String] = []
+    public var promptQueue: [QueuedPrompt] = []
     public var planEntries: [PlanEntry] = []
     public var planMarkdown = ""
     public var hunks: [FileHunk] = []
