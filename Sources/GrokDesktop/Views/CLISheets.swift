@@ -243,3 +243,174 @@ struct ClaudeImportSheet: View {
         }
     }
 }
+
+struct FindSheet: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.palette) private var palette
+    @Environment(\.l10n) private var l10n
+
+    var body: some View {
+        OverlaySheet(width: 560, onDismiss: { model.showFind = false }) {
+            Text(model.findTimeline ? l10n.t("Timeline", "时间线") : l10n.t("Find in conversation", "在对话中查找"))
+                .font(.system(size: 16, weight: .semibold))
+            if !model.findTimeline {
+                TextField(l10n.t("Search this chat", "搜索这条对话"), text: $model.findQuery)
+                    .textFieldStyle(.plain)
+                    .padding(10)
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.hairline))
+            }
+            if model.findHits.isEmpty {
+                Text(l10n.t("No matches.", "没有匹配。"))
+                    .font(.system(size: 13))
+                    .foregroundStyle(palette.secondary)
+                    .padding(.vertical, 16)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(model.findHits) { hit in
+                            Button {
+                                model.jumpToHit(hit)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(hit.title)
+                                        .font(.system(size: 13, weight: .medium))
+                                    Text(hit.snippet)
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(palette.secondary)
+                                        .lineLimit(2)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(8)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .frame(height: 320)
+            }
+        }
+    }
+}
+
+struct RewindSheet: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.palette) private var palette
+    @Environment(\.l10n) private var l10n
+
+    var body: some View {
+        OverlaySheet(width: 560, onDismiss: { model.showRewind = false }) {
+            Text(l10n.t("Rewind to a turn", "回退到某一轮"))
+                .font(.system(size: 16, weight: .semibold))
+            Text(l10n.t("Everything after the turn you pick is discarded.", "选中这一轮之后的内容都会丢掉。"))
+                .font(.system(size: 12))
+                .foregroundStyle(palette.secondary)
+            if model.rewindTurns.isEmpty {
+                Text(l10n.t("No user turns yet.", "还没有用户轮次。"))
+                    .font(.system(size: 13))
+                    .foregroundStyle(palette.secondary)
+                    .padding(.vertical, 16)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(model.rewindTurns.reversed()) { turn in
+                            Button {
+                                model.rewindTo(turn)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    HStack {
+                                        Text(l10n.t("Turn \(turn.promptIndex + 1)", "第 \(turn.promptIndex + 1) 轮"))
+                                            .font(.system(size: 13, weight: .medium))
+                                        Spacer()
+                                        if let date = turn.date {
+                                            Text(PromptTimestamp.format(date))
+                                                .font(.system(size: 11, design: .monospaced))
+                                                .foregroundStyle(palette.secondary)
+                                        }
+                                    }
+                                    Text(turn.text)
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(palette.secondary)
+                                        .lineLimit(3)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(8)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .frame(height: 340)
+            }
+        }
+    }
+}
+
+struct ContextSheet: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.palette) private var palette
+    @Environment(\.l10n) private var l10n
+
+    var body: some View {
+        OverlaySheet(width: 560, onDismiss: { model.showContextSheet = false }) {
+            Text(l10n.t("Context", "上下文"))
+                .font(.system(size: 16, weight: .semibold))
+            HStack {
+                Text("\(model.contextBreakdown.percent)%")
+                    .font(.system(size: 22, weight: .semibold, design: .monospaced))
+                Spacer()
+                Text("\(model.contextBreakdown.used) / \(model.contextBreakdown.window)")
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(palette.secondary)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(model.contextBreakdown.slices) { slice in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text(title(for: slice))
+                            Spacer()
+                            Text("\(slice.tokens)")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(palette.secondary)
+                        }
+                        .font(.system(size: 12))
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(palette.chip)
+                                Capsule()
+                                    .fill(slice.id == "free" ? palette.secondary.opacity(0.35) : Color.orange)
+                                    .frame(width: geo.size.width * fraction(slice.tokens))
+                            }
+                        }
+                        .frame(height: 6)
+                    }
+                }
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text("model: \(model.contextBreakdown.model)")
+                Text("session: \(model.contextBreakdown.sessionID.isEmpty ? "—" : model.contextBreakdown.sessionID)")
+                Text("turns: \(model.contextBreakdown.turnCount)")
+                Text("tool calls: \(model.contextBreakdown.toolCallCount)")
+                Text("skills: \(model.contextBreakdown.skillCount) · mcp: \(model.contextBreakdown.mcpCount)")
+            }
+            .font(.system(size: 12, design: .monospaced))
+            .foregroundStyle(palette.secondary)
+            .textSelection(.enabled)
+        }
+    }
+
+    private func title(for slice: ContextSlice) -> String {
+        switch slice.id {
+        case "messages": return l10n.t("Messages", "消息")
+        case "reasoning": return l10n.t("Reasoning", "推理")
+        case "tools": return l10n.t("Tools", "工具")
+        case "other": return l10n.t("System / overhead", "系统 / 开销")
+        case "free": return l10n.t("Free", "剩余")
+        default: return slice.title
+        }
+    }
+
+    private func fraction(_ tokens: Int) -> CGFloat {
+        let total = max(model.contextBreakdown.window, 1)
+        return CGFloat(min(max(tokens, 0), total)) / CGFloat(total)
+    }
+}

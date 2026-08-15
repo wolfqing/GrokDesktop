@@ -138,6 +138,13 @@ public enum SessionFold {
         SlashBuiltins.name(in: text) == "/btw"
     }
 
+    public static func applyGoal(_ text: String, enabled: Bool) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard enabled, !trimmed.isEmpty else { return trimmed }
+        if trimmed.hasPrefix("/") { return trimmed }
+        return "/goal \(trimmed)"
+    }
+
     public static func apply(_ updates: [SessionUpdate]) -> SessionSnapshot {
         var snapshot = SessionSnapshot()
         for update in updates {

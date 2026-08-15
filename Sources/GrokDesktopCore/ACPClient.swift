@@ -194,7 +194,7 @@ public final class ACPClient: ObservableObject {
                 "protocolVersion": 1,
                 "clientInfo": [
                     "name": "GrokDesktop",
-                    "version": "0.1.8"
+                    "version": "0.1.9"
                 ],
                 "clientCapabilities": [
                     "fs": [
@@ -666,12 +666,26 @@ public final class ACPClient: ObservableObject {
         currentWorkspace?.allowEditsThisSession = enabled
     }
 
-    public func rewind() async {
+    public func rewind(toPromptIndex index: Int? = nil) async {
         guard let sessionID else { return }
         do {
-            _ = try await request(method: "x.ai/rewind", params: ["sessionId": sessionID])
+            var params: [String: Any] = ["sessionId": sessionID]
+            if let index {
+                params["promptIndex"] = index
+                params["prompt_index"] = index
+            }
+            _ = try await request(method: "x.ai/rewind", params: params)
         } catch {
-            try? await send(text: "/rewind")
+            if let index {
+                try? await send(text: "/rewind \(index + 1)")
+            } else {
+                try? await send(text: "/rewind")
+            }
+        }
+        if let directory = sessionDirectory {
+            let transcript = TranscriptLoader.load(sessionDirectory: directory)
+            currentWorkspace?.adopt(transcript)
+            syncFromCurrent()
         }
     }
 

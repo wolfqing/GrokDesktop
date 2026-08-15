@@ -100,6 +100,22 @@ struct RootView: View {
                 addMCPSheet
                     .zIndex(6)
             }
+            if model.showFind {
+                FindSheet()
+                    .zIndex(6)
+            }
+            if model.showRewind {
+                RewindSheet()
+                    .zIndex(6)
+            }
+            if model.showContextSheet {
+                ContextSheet()
+                    .zIndex(6)
+            }
+            if model.showAgents {
+                AgentsSheet()
+                    .zIndex(6)
+            }
             if let toast = model.toast {
                 Text(toast)
                     .font(.system(size: 13, weight: .medium))

@@ -15,15 +15,24 @@ struct AutomationsView: View {
                 PageHeader(
                     title: l10n.automations,
                     subtitle: l10n.t(
-                        "Official Grok Build workflows are `.rhai` scripts in ~/.grok/workflows and the project `.grok/workflows` folder. Run one with /workflow <name>.",
-                        "官方工作流是 ~/.grok/workflows 和项目 .grok/workflows 里的 .rhai 脚本。用 /workflow <name> 运行。"
+                        "Runs are live workflow jobs. Saved scripts live in ~/.grok/workflows and the project .grok/workflows folder.",
+                        "运行是正在进行的工作流。已保存脚本在 ~/.grok/workflows 和项目 .grok/workflows。"
                     )
                 ) {
                     Button(l10n.t("New workflow", "新建工作流")) { model.showAddWorkflow = true }
                         .buttonStyle(GrokPrimaryButtonStyle())
                 }
 
-                if model.officialWorkflows.isEmpty {
+                Picker("", selection: $model.automationsTab) {
+                    Text(l10n.t("Runs", "运行")).tag(0)
+                    Text(l10n.t("Saved", "已保存")).tag(1)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 220)
+
+                if model.automationsTab == 0 {
+                    runsSection
+                } else if model.officialWorkflows.isEmpty {
                     Text(l10n.t("No saved workflows yet.", "还没有已保存的工作流。"))
                         .foregroundStyle(palette.secondary)
                 } else {
@@ -34,7 +43,7 @@ struct AutomationsView: View {
                     }
                 }
 
-                if !model.automations.isEmpty {
+                if model.automationsTab == 1, !model.automations.isEmpty {
                     Text(l10n.t("Local shortcuts", "本地快捷项"))
                         .font(.system(size: 16, weight: .semibold))
                     LazyVGrid(columns: columns, spacing: 16) {
@@ -51,6 +60,45 @@ struct AutomationsView: View {
         .background(palette.canvas)
         .onAppear {
             model.officialWorkflows = model.workflowCatalog.load(cwd: model.client.workingDirectory)
+            model.workflowRuns = model.workflowRunStore.load()
+        }
+    }
+
+    private var runsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if model.workflowRuns.isEmpty {
+                Text(l10n.t("No workflow runs yet. Launch one from Saved.", "还没有运行。到「已保存」里启动一个。"))
+                    .foregroundStyle(palette.secondary)
+            } else {
+                ForEach(model.workflowRuns) { run in
+                    HStack(alignment: .top, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(run.name)
+                                .font(.system(size: 15, weight: .semibold))
+                            Text(run.status)
+                                .font(.system(size: 12))
+                                .foregroundStyle(palette.secondary)
+                            Text(PromptTimestamp.format(run.startedAt))
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(palette.secondary)
+                        }
+                        Spacer()
+                        if run.status == "running" {
+                            Button(l10n.t("Pause", "暂停")) { model.controlWorkflow(name: run.name, verb: "pause") }
+                                .buttonStyle(GrokSecondaryButtonStyle())
+                            Button(l10n.t("Stop", "停止")) { model.controlWorkflow(name: run.name, verb: "stop") }
+                                .buttonStyle(GrokSecondaryButtonStyle())
+                        } else if run.status == "paused" {
+                            Button(l10n.t("Resume", "继续")) { model.controlWorkflow(name: run.name, verb: "resume") }
+                                .buttonStyle(GrokSecondaryButtonStyle())
+                            Button(l10n.t("Stop", "停止")) { model.controlWorkflow(name: run.name, verb: "stop") }
+                                .buttonStyle(GrokSecondaryButtonStyle())
+                        }
+                    }
+                    .padding(16)
+                    .background(palette.input, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                }
+            }
         }
     }
 

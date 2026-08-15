@@ -9,10 +9,7 @@ struct InspectorView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(l10n.inspector)
-                .font(.system(size: 13, weight: .semibold))
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
+            header
 
             Divider().overlay(palette.hairline)
 
@@ -20,27 +17,36 @@ struct InspectorView: View {
                 FilePreviewPane(url: preview)
                     .padding(.horizontal, 14)
                     .padding(.top, 12)
-                    .frame(minHeight: 220, idealHeight: 320, maxHeight: 460)
-                Divider().overlay(palette.hairline).padding(.top, 10)
+                    .padding(.bottom, model.inspectorDetailsVisible ? 10 : 14)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    contextSection
-                    if showsWork {
-                        workSection
-                    }
-                    if showsChanges {
-                        changesSection
-                    }
-                    if !model.officialWorkflows.isEmpty {
-                        workflowsSection
-                    }
-                    if !model.personas.isEmpty {
-                        personasSection
-                    }
+            if showsDetails {
+                if model.previewedFile != nil {
+                    Divider().overlay(palette.hairline)
+                    detailsHeader
                 }
-                .padding(14)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        if model.inspectorPaneVisible(.context) {
+                            contextSection
+                        }
+                        if showsWork, model.inspectorPaneVisible(.work) {
+                            workSection
+                        }
+                        if showsChanges, model.inspectorPaneVisible(.changes) {
+                            changesSection
+                        }
+                        if !model.officialWorkflows.isEmpty, model.inspectorPaneVisible(.workflows) {
+                            workflowsSection
+                        }
+                        if !model.personas.isEmpty, model.inspectorPaneVisible(.personas) {
+                            personasSection
+                        }
+                    }
+                    .padding(14)
+                }
+                .frame(maxHeight: model.previewedFile == nil ? .infinity : 280)
             }
         }
         .background(palette.sidebar)
@@ -49,17 +55,104 @@ struct InspectorView: View {
             model.client.refreshPlanArtifacts()
             Task { await model.client.refreshGit() }
         }
+        .onChange(of: model.client.items.count) { _, _ in
+            model.refreshWorkspace()
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            Text(l10n.inspector)
+                .font(.system(size: 13, weight: .semibold))
+            Spacer(minLength: 4)
+            if !model.hiddenInspectorPaneList.isEmpty {
+                Menu {
+                    ForEach(model.hiddenInspectorPaneList) { pane in
+                        Button(pane.title(chinese: l10n.language == .chinese)) {
+                            model.showInspectorPane(pane)
+                        }
+                    }
+                    Divider()
+                    Button(l10n.t("Show all", "全部显示")) {
+                        model.showAllInspectorPanes()
+                    }
+                } label: {
+                    Text(l10n.t("Sections", "区块"))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(palette.secondary)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+            }
+            if model.previewedFile != nil {
+                Button {
+                    model.inspectorDetailsVisible.toggle()
+                } label: {
+                    Text(model.inspectorDetailsVisible
+                         ? l10n.t("Hide details", "隐藏详情")
+                         : l10n.t("Details", "详情"))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(palette.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+    }
+
+    private var detailsHeader: some View {
+        HStack {
+            Text(l10n.t("Context and tasks", "上下文和任务"))
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(palette.secondary)
+            Spacer()
+            Button {
+                model.inspectorDetailsVisible = false
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(palette.secondary)
+            }
+            .buttonStyle(.plain)
+            .help(l10n.t("Hide details", "隐藏详情"))
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 10)
+        .padding(.bottom, 2)
+    }
+
+    private var showsDetails: Bool {
+        (model.previewedFile == nil || model.inspectorDetailsVisible) && hasVisiblePanes
+    }
+
+    private var hasVisiblePanes: Bool {
+        model.inspectorPaneVisible(.context)
+            || (showsWork && model.inspectorPaneVisible(.work))
+            || (showsChanges && model.inspectorPaneVisible(.changes))
+            || (!model.officialWorkflows.isEmpty && model.inspectorPaneVisible(.workflows))
+            || (!model.personas.isEmpty && model.inspectorPaneVisible(.personas))
     }
 
     private var contextSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionTitle(l10n.t("Context", "上下文"))
-            HStack {
-                Text("\(model.workspace.contextPercent)%")
+            paneHeader(.context, title: l10n.t("Context", "上下文")) {
+                Button {
+                    model.refreshContextBreakdown()
+                    model.showContextSheet = true
+                } label: {
+                    Text(l10n.t("Details", "明细"))
+                        .font(.system(size: 11))
+                        .foregroundStyle(palette.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            HStack(alignment: .firstTextBaseline) {
+                Text("\(model.displayedContextPercent)%")
                     .font(.system(size: 16, weight: .semibold, design: .monospaced))
                 Spacer()
-                Text(l10n.sessionContext)
-                    .font(.system(size: 12))
+                Text("\(compactTokens(model.displayedContextUsed)) / \(compactTokens(model.displayedContextWindow))")
+                    .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(palette.secondary)
             }
             GeometryReader { geo in
@@ -67,7 +160,7 @@ struct InspectorView: View {
                     Capsule().fill(palette.chip)
                     Capsule()
                         .fill(Color.orange)
-                        .frame(width: geo.size.width * CGFloat(min(max(model.workspace.contextPercent, 0), 100)) / 100)
+                        .frame(width: geo.size.width * CGFloat(min(max(model.displayedContextPercent, 0), 100)) / 100)
                 }
             }
             .frame(height: 6)
@@ -131,6 +224,7 @@ struct InspectorView: View {
                     .foregroundStyle(Color.orange)
                     .disabled(model.client.isStopping)
                 }
+                paneClose(.work)
             }
             if checklistProgress.total > 0 {
                 GeometryReader { geo in
@@ -161,9 +255,19 @@ struct InspectorView: View {
                         Text(row.content)
                             .font(.system(size: 12))
                             .strikethrough(row.status == "completed" || row.status == "cancelled")
-                        Text(todoStatusLabel(row.status))
-                            .font(.system(size: 10))
-                            .foregroundStyle(palette.secondary)
+                        HStack(spacing: 6) {
+                            Text(todoStatusLabel(row.status))
+                            if let todo = model.client.todos.first(where: { $0.id == row.id }) {
+                                ElapsedDurationText(
+                                    start: todo.startedAt,
+                                    end: todo.endedAt,
+                                    running: todo.isActive,
+                                    worked: todo.isDone || todo.isCancelled
+                                )
+                            }
+                        }
+                        .font(.system(size: 10))
+                        .foregroundStyle(palette.secondary)
                     }
                 }
             }
@@ -219,9 +323,17 @@ struct InspectorView: View {
                             Text(row.task.title)
                                 .font(.system(size: 12))
                                 .lineLimit(2)
-                            Text(row.title)
-                                .font(.system(size: 10))
-                                .foregroundStyle(palette.secondary)
+                            HStack(spacing: 6) {
+                                Text(row.title)
+                                ElapsedDurationText(
+                                    start: row.task.startedAt,
+                                    end: row.task.endedAt,
+                                    running: row.task.isRunning,
+                                    worked: !row.task.isRunning
+                                )
+                            }
+                            .font(.system(size: 10))
+                            .foregroundStyle(palette.secondary)
                         }
                     }
                     .buttonStyle(.plain)
@@ -245,9 +357,18 @@ struct InspectorView: View {
                             Text(agent.detail.isEmpty ? agent.type : agent.detail)
                                 .font(.system(size: 12))
                                 .lineLimit(2)
-                            Text(agent.isRunning ? l10n.running : l10n.completed)
-                                .font(.system(size: 10))
-                                .foregroundStyle(palette.secondary)
+                            HStack(spacing: 6) {
+                                Text(agent.isRunning ? l10n.running : l10n.completed)
+                                ElapsedDurationText(
+                                    start: agent.startedAt,
+                                    end: nil,
+                                    duration: agent.elapsed,
+                                    running: agent.isRunning,
+                                    worked: !agent.isRunning
+                                )
+                            }
+                            .font(.system(size: 10))
+                            .foregroundStyle(palette.secondary)
                         }
                     }
                 }
@@ -279,9 +400,12 @@ struct InspectorView: View {
                     .lineLimit(2)
                 HStack(spacing: 6) {
                     Text(task.isRunning ? l10n.running : (task.status == "cancelled" ? l10n.t("Cancelled", "已取消") : l10n.completed))
-                    if let elapsed = task.elapsed {
-                        Text(elapsedLabel(elapsed))
-                    }
+                    ElapsedDurationText(
+                        start: task.startedAt,
+                        end: task.endedAt,
+                        running: task.isRunning,
+                        worked: !task.isRunning
+                    )
                     if task.isRunning {
                         Button(l10n.stop) {
                             model.client.killTask(task.id)
@@ -354,12 +478,6 @@ struct InspectorView: View {
         }
     }
 
-    private func elapsedLabel(_ value: TimeInterval) -> String {
-        if value < 60 { return String(format: "%.0fs", value) }
-        if value < 3600 { return String(format: "%.0fm", value / 60) }
-        return String(format: "%.1fh", value / 3600)
-    }
-
     private var showsChanges: Bool {
         !model.client.hunks.isEmpty
             || !model.client.gitDiffText.isEmpty
@@ -368,7 +486,7 @@ struct InspectorView: View {
 
     private var changesSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionTitle(l10n.changes)
+            paneHeader(.changes, title: l10n.changes) { EmptyView() }
             if model.workspace.isRepo {
                 Text("\(model.workspace.branch ?? "HEAD")  +\(model.workspace.insertions) / -\(model.workspace.deletions)")
                     .font(.system(size: 12, design: .monospaced))
@@ -424,7 +542,7 @@ struct InspectorView: View {
 
     private var workflowsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionTitle(l10n.t("Workflows", "工作流"))
+            paneHeader(.workflows, title: l10n.t("Workflows", "工作流")) { EmptyView() }
             if model.officialWorkflows.isEmpty {
                 Button(l10n.t("Open workflows", "打开工作流")) {
                     model.destination = .automations
@@ -445,7 +563,7 @@ struct InspectorView: View {
 
     private var personasSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionTitle(l10n.t("Agents / personas", "Agent / 人设"))
+            paneHeader(.personas, title: l10n.t("Agents / personas", "Agent / 人设")) { EmptyView() }
             if model.personas.isEmpty {
                 Text(l10n.t("None on disk.", "磁盘上没有人设。"))
                     .font(.system(size: 12))
@@ -453,8 +571,8 @@ struct InspectorView: View {
             } else {
                 ForEach(model.personas.prefix(8), id: \.self) { name in
                     Button {
-                        model.destination = .chat
-                        model.draft = "/agents \(name) "
+                        model.agentsTab = 1
+                        model.showAgents = true
                     } label: {
                         Text(name).font(.system(size: 12))
                     }
@@ -472,6 +590,59 @@ struct InspectorView: View {
         Text(title)
             .font(.system(size: 12, weight: .semibold))
             .foregroundStyle(palette.secondary)
+    }
+
+    private func paneHeader<Extra: View>(_ pane: InspectorPane, title: String, @ViewBuilder extra: () -> Extra) -> some View {
+        HStack(spacing: 6) {
+            sectionTitle(title)
+            Spacer(minLength: 4)
+            extra()
+            paneClose(pane)
+        }
+    }
+
+    private func paneClose(_ pane: InspectorPane) -> some View {
+        Button {
+            model.hideInspectorPane(pane)
+        } label: {
+            Image(systemName: "xmark")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(palette.secondary)
+                .frame(width: 16, height: 16)
+        }
+        .buttonStyle(.plain)
+        .help(l10n.t("Hide this section", "关闭这个区块"))
+    }
+
+    private func compactTokens(_ value: Int) -> String {
+        if value >= 1_000_000 {
+            return String(format: "%.1fM", Double(value) / 1_000_000)
+        }
+        if value >= 1000 {
+            return String(format: "%.0fk", Double(value) / 1000)
+        }
+        return "\(value)"
+    }
+}
+
+private struct ElapsedDurationText: View {
+    let start: Date?
+    var end: Date? = nil
+    var duration: TimeInterval? = nil
+    let running: Bool
+    let worked: Bool
+    @Environment(\.l10n) private var l10n
+
+    var body: some View {
+        if running, let start {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                Text(PromptTimestamp.formatElapsed(context.date.timeIntervalSince(start)))
+            }
+        } else if let span = duration ?? PromptTimestamp.elapsed(from: start, to: end), span > 0 || worked {
+            Text(worked
+                 ? l10n.t("worked \(PromptTimestamp.formatElapsed(span))", "用时 \(PromptTimestamp.formatElapsed(span))")
+                 : PromptTimestamp.formatElapsed(span))
+        }
     }
 }
 

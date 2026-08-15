@@ -26,6 +26,9 @@ struct ComposerView: View {
             }
             ZStack(alignment: .topLeading) {
                 VStack(alignment: .leading, spacing: 10) {
+                    if model.goalMode {
+                        goalModeChip
+                    }
                     if !draftImages.isEmpty {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 8) {
@@ -35,7 +38,7 @@ struct ComposerView: View {
                             }
                         }
                     }
-                    TextField(l10n.askAnything, text: $model.draft, axis: .vertical)
+                    TextField(composerPlaceholder, text: $model.draft, axis: .vertical)
                         .textFieldStyle(.plain)
                         .font(.system(size: 16))
                         .lineLimit(1...8)
@@ -280,6 +283,15 @@ struct ComposerView: View {
                 model.mentionQuery = nil
                 model.chooseWorkingDirectory()
             }
+            SuggestRow(
+                icon: model.goalMode ? "flag.fill" : "flag",
+                title: l10n.t("Goal mode", "目标模式"),
+                detail: model.goalMode
+                    ? l10n.t("On — keep going until the goal is done", "已开 — 做到为止")
+                    : l10n.t("Keep working until the goal is done", "做到为止，不达目标不停")
+            ) {
+                model.toggleGoalMode()
+            }
             SuggestSection(title: l10n.t("Files", "文件"))
             if model.mentionMatches.isEmpty {
                 Text(l10n.t("No matching files", "没有匹配的文件"))
@@ -301,6 +313,35 @@ struct ComposerView: View {
         }
     }
 
+    private var composerPlaceholder: String {
+        if model.goalMode {
+            return l10n.t("Describe the goal to keep working toward…", "写一个要做到的目标…")
+        }
+        return l10n.askAnything
+    }
+
+    private var goalModeChip: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "flag.fill")
+                .font(.system(size: 10, weight: .semibold))
+            Text(l10n.t("Goal mode", "目标模式"))
+                .font(.system(size: 12, weight: .medium))
+            Button {
+                model.goalMode = false
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .bold))
+            }
+            .buttonStyle(.plain)
+            .help(l10n.t("Turn off goal mode", "关闭目标模式"))
+        }
+        .foregroundStyle(palette.secondary)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(palette.chip, in: Capsule())
+        .help(l10n.t("This prompt is sent as /goal. The agent keeps going until it’s done.", "这条会按 /goal 发出。做到为止。"))
+    }
+
     private func chip(_ title: String, accent: Color? = nil) -> some View {
         Text(title)
             .font(.system(size: 12, weight: .medium))
@@ -320,6 +361,14 @@ struct ComposerView: View {
             attachItem(l10n.t("Working directory", "工作目录"), systemImage: "folder") {
                 model.showAttachMenu = false
                 model.chooseWorkingDirectory()
+            }
+            attachItem(
+                model.goalMode
+                    ? l10n.t("Goal mode · On", "目标模式 · 开")
+                    : l10n.t("Goal mode", "目标模式"),
+                systemImage: model.goalMode ? "flag.fill" : "flag"
+            ) {
+                model.toggleGoalMode()
             }
         }
         .padding(.vertical, 4)

@@ -340,6 +340,9 @@ PromptTimestamp.applyTask(
 )
 expect(tasks[0].status == "completed", "task completed")
 expect(abs((tasks[0].elapsed ?? 0) - 18) < 0.01, "task elapsed")
+expect(PromptTimestamp.formatElapsed(36) == "36s", "elapsed seconds")
+expect(PromptTimestamp.formatElapsed(72) == "1m 12s", "elapsed minutes")
+expect(PromptTimestamp.formatElapsed(3723) == "1h 2m", "elapsed hours")
 
 let imageURL = FileManager.default.temporaryDirectory.appendingPathComponent("grok-media-test.png")
 try? Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]).write(to: imageURL)
@@ -657,6 +660,10 @@ if case .planReview(let approve) = inferred?.intent {
 
 expect(SessionFold.isAside("/btw also check tests"), "btw is aside")
 expect(!SessionFold.isAside("also check tests"), "plain text is follow-up")
+expect(SessionFold.applyGoal("ship the preview", enabled: true) == "/goal ship the preview", "goal prefixes")
+expect(SessionFold.applyGoal("/goal already", enabled: true) == "/goal already", "goal keeps slash")
+expect(SessionFold.applyGoal("/new", enabled: true) == "/new", "goal leaves commands")
+expect(SessionFold.applyGoal("ship", enabled: false) == "ship", "goal off is plain")
 
 expect(parsedQuestion?.questions.count == 1, "parse ask_user_question")
 expect(parsedQuestion?.questions.first?.options.count == 2, "question options")
@@ -719,6 +726,66 @@ let thumb = imageFolder.appendingPathComponent("shot.png")
 try! Data([0x89, 0x50, 0x4E, 0x47]).write(to: thumb)
 let recents = ImagineLibrary.recent(sessionsRoot: imageRoot, limit: 8)
 expect(recents.contains(where: { $0.url.lastPathComponent == "shot.png" }), "imagine recent thumb")
+
+let searchItems: [ConversationItem] = [
+    .user(id: "u1", text: "Look at App.swift"),
+    .assistant(id: "a1", text: "I opened App.swift", done: true),
+    .tool(id: "t1", title: "read_file", status: "completed", detail: "ok")
+]
+let hits = ChatSearch.hits(in: searchItems, query: "App.swift")
+expect(hits.contains(where: { $0.id == "u1" }), "find user hit")
+expect(ChatSearch.timeline(in: searchItems).count == 1, "timeline one user turn")
+expect(ChatSearch.rewindTurns(in: searchItems).first?.promptIndex == 0, "rewind first turn")
+
+let breakdown = ContextBreakdown.make(
+    items: searchItems,
+    sessionDirectory: nil,
+    skillCount: 2,
+    mcpCount: 1,
+    model: "grok-4.6",
+    sessionID: "s1"
+)
+expect(breakdown.messages > 0, "context messages")
+expect(breakdown.free >= 0, "context free")
+expect(breakdown.slices.count == 5, "context slices")
+
+let persona = AgentCatalog.parsePersona(
+    """
+    description = "Deep investigator."
+    instructions = \"\"\"
+    Cite paths.
+    \"\"\"
+    model = "grok-build"
+    """,
+    url: URL(fileURLWithPath: "/tmp/researcher.toml"),
+    scope: "bundled"
+)
+expect(persona?.slug == "researcher", "persona slug")
+expect(persona?.detail.contains("investigator") == true, "persona detail")
+expect(persona?.instructions.contains("Cite") == true, "persona instructions")
+
+let agentDef = AgentCatalog.parseAgent(
+    """
+    ---
+    name: explore
+    description: >
+      Fast research agent
+    permission_mode: plan
+    ---
+
+    You are read-only.
+    """,
+    url: URL(fileURLWithPath: "/tmp/explore.md"),
+    scope: "bundled"
+)
+expect(agentDef?.slug == "explore", "agent slug")
+expect(agentDef?.permissionMode == "plan", "agent permission")
+expect(agentDef?.detail.contains("research") == true, "agent detail")
+
+let runURL = FileManager.default.temporaryDirectory.appendingPathComponent("gd-runs-\(UUID().uuidString).json")
+let store = WorkflowRunStore(url: runURL)
+store.save([WorkflowRun(name: "review-changes", status: "running")])
+expect(store.load().first?.name == "review-changes", "workflow run persist")
 
 expect(FilePreview.kind(for: URL(fileURLWithPath: "/tmp/note.md")) == .markdown, "md is markdown")
 expect(FilePreview.kind(for: URL(fileURLWithPath: "/tmp/page.HTML")) == .html, "html kind")

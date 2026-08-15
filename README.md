@@ -38,7 +38,7 @@ Release zip (unsigned unless you have a Developer ID):
 
 ```bash
 ./scripts/release.sh
-# ./scripts/release.sh --publish   # also creates GitHub release v0.1.8
+# ./scripts/release.sh --publish   # also creates GitHub release v0.1.9
 ```
 
 Notarization needs a Developer ID Application certificate and a stored notary profile:

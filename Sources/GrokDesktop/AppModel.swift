@@ -70,6 +70,8 @@ final class AppModel: ObservableObject {
     @Published var showInspector = true
     @Published var inspectorWidth: CGFloat = GrokTheme.inspectorWidth
     @Published var previewedFile: URL?
+    @Published var inspectorDetailsVisible = true
+    @Published var hiddenInspectorPanes: Set<String> = []
     @Published var showSearchField = false
     @Published var showAttachMenu = false
     @Published var showCreateProject = false
@@ -120,6 +122,23 @@ final class AppModel: ObservableObject {
     @Published var mcpServers: [MCPServerRecord] = []
     @Published var showAddWorkflow = false
     @Published var showAddMCP = false
+    @Published var showFind = false
+    @Published var findQuery = ""
+    @Published var findTimeline = false
+    @Published var showRewind = false
+    @Published var showAgents = false
+    @Published var agentsTab = 0
+    @Published var showContextSheet = false
+    @Published var contextBreakdown = ContextBreakdown()
+    @Published var workflowRuns: [WorkflowRun] = []
+    @Published var automationsTab = 0
+    @Published var agentDefinitions: [AgentDefinition] = []
+    @Published var personaDefinitions: [PersonaDefinition] = []
+    @Published var newPersonaName = ""
+    @Published var newPersonaDetail = ""
+    @Published var newPersonaBody = ""
+    @Published var newAgentName = ""
+    @Published var newAgentDetail = ""
     @Published var newWorkflowName = ""
     @Published var newWorkflowDetail = ""
     @Published var mcpName = ""
@@ -130,6 +149,7 @@ final class AppModel: ObservableObject {
     @Published var isRefreshingUsage = false
     @Published var pendingBusySend: String?
     @Published var suppressSuggest = false
+    @Published var goalMode = false
 
     @AppStorage("appearancePreference") var appearanceRaw = AppearancePreference.system.rawValue
     @AppStorage("languagePreference") var languageRaw = AppLanguage.system.rawValue
@@ -179,7 +199,9 @@ final class AppModel: ObservableObject {
     let projectStore = ProjectStore()
     let skillCatalog = SkillCatalog()
     let workflowCatalog = WorkflowCatalog()
+    let workflowRunStore = WorkflowRunStore()
     let mcpCatalog = MCPCatalog()
+    let agentCatalog = AgentCatalog()
     private var clientCancellables = Set<AnyCancellable>()
 
     init(
@@ -190,6 +212,7 @@ final class AppModel: ObservableObject {
         self.sessionIndex = sessionIndex
         self.client = ACPClient(locator: locator)
         restoreInspectorWidth()
+        restoreInspectorPanes()
         restoreWorkingDirectory()
         refreshAll()
         firstRunReason = bootstrapReason()
@@ -210,6 +233,7 @@ final class AppModel: ObservableObject {
         }
         previewedFile = standardized
         showInspector = true
+        inspectorDetailsVisible = false
         if inspectorWidth <= GrokTheme.inspectorWidth {
             setInspectorWidth(GrokTheme.inspectorPreviewWidth)
         }
@@ -220,6 +244,7 @@ final class AppModel: ObservableObject {
 
     func clearPreview() {
         previewedFile = nil
+        inspectorDetailsVisible = true
     }
 
     func setInspectorWidth(_ width: CGFloat) {
@@ -231,6 +256,55 @@ final class AppModel: ObservableObject {
 
     func resetInspectorWidth() {
         setInspectorWidth(previewedFile == nil ? GrokTheme.inspectorWidth : GrokTheme.inspectorPreviewWidth)
+    }
+
+    func inspectorPaneVisible(_ pane: InspectorPane) -> Bool {
+        !hiddenInspectorPanes.contains(pane.rawValue)
+    }
+
+    func hideInspectorPane(_ pane: InspectorPane) {
+        hiddenInspectorPanes.insert(pane.rawValue)
+        persistInspectorPanes()
+    }
+
+    func showInspectorPane(_ pane: InspectorPane) {
+        hiddenInspectorPanes.remove(pane.rawValue)
+        inspectorDetailsVisible = true
+        persistInspectorPanes()
+    }
+
+    func showAllInspectorPanes() {
+        hiddenInspectorPanes.removeAll()
+        inspectorDetailsVisible = true
+        persistInspectorPanes()
+    }
+
+    var hiddenInspectorPaneList: [InspectorPane] {
+        InspectorPane.allCases.filter { hiddenInspectorPanes.contains($0.rawValue) }
+    }
+
+    var displayedContextPercent: Int {
+        if workspace.contextPercent > 0 { return workspace.contextPercent }
+        return contextBreakdown.percent
+    }
+
+    var displayedContextUsed: Int {
+        max(workspace.contextUsed, contextBreakdown.used)
+    }
+
+    var displayedContextWindow: Int {
+        let window = workspace.contextWindow > 0 ? workspace.contextWindow : contextBreakdown.window
+        return window > 0 ? window : 200_000
+    }
+
+    private func persistInspectorPanes() {
+        UserDefaults.standard.set(Array(hiddenInspectorPanes), forKey: "hiddenInspectorPanes")
+    }
+
+    private func restoreInspectorPanes() {
+        if let stored = UserDefaults.standard.array(forKey: "hiddenInspectorPanes") as? [String] {
+            hiddenInspectorPanes = Set(stored)
+        }
     }
 
     private func restoreInspectorWidth() {
@@ -283,9 +357,39 @@ final class AppModel: ObservableObject {
         grokConfig = configStore.load()
         showThinkingBlocks = grokConfig.showThinking
         extensions = ExtensionInventory.load(mcpNames: grokConfig.mcpNames)
-        personas = Self.loadPersonas()
         officialWorkflows = workflowCatalog.load(cwd: client.workingDirectory)
         mcpServers = mcpCatalog.load(locator: locator, cwd: client.workingDirectory)
+        workflowRuns = workflowRunStore.load()
+        refreshAgentCatalog()
+    }
+
+    func refreshAgentCatalog() {
+        agentDefinitions = agentCatalog.loadAgents(cwd: client.workingDirectory)
+        personaDefinitions = agentCatalog.loadPersonas(cwd: client.workingDirectory)
+        personas = personaDefinitions.map(\.slug)
+    }
+
+    func refreshContextBreakdown() {
+        refreshWorkspace()
+        contextBreakdown = ContextBreakdown.make(
+            items: client.items,
+            sessionDirectory: client.sessionDirectory,
+            skillCount: skills.count,
+            mcpCount: mcpServers.count,
+            model: client.buildModel.rawValue,
+            sessionID: client.sessionID ?? ""
+        )
+    }
+
+    var findHits: [ChatSearchHit] {
+        if findTimeline {
+            return ChatSearch.timeline(in: client.items)
+        }
+        return ChatSearch.hits(in: client.items, query: findQuery)
+    }
+
+    var rewindTurns: [RewindTurn] {
+        ChatSearch.rewindTurns(in: client.items, dates: client.itemDates)
     }
 
     private func restoreWorkingDirectory() {
@@ -370,8 +474,9 @@ final class AppModel: ObservableObject {
     }
 
     func refreshWorkspace() {
-        let sessionDir = sessions.first(where: { $0.id == client.sessionID })?.directory
+        let sessionDir = sessions.first(where: { $0.id == client.sessionID })?.directory ?? client.sessionDirectory
         workspace = WorkspaceSnapshot.load(cwd: client.workingDirectory, sessionDirectory: sessionDir)
+        refreshContextBreakdown()
     }
 
     func openInFinder() {
@@ -630,8 +735,19 @@ final class AppModel: ObservableObject {
         _ = text
     }
 
+    func applyGoalIfNeeded(_ text: String) -> String {
+        SessionFold.applyGoal(text, enabled: goalMode)
+    }
+
+    func toggleGoalMode() {
+        goalMode.toggle()
+        showAttachMenu = false
+        mentionQuery = nil
+        showPalette = false
+    }
+
     func sendDraft() {
-        let text = draft
+        let text = applyGoalIfNeeded(draft)
         historyCursor = nil
         recordPrompt(text)
         draft = ""
@@ -668,7 +784,7 @@ final class AppModel: ObservableObject {
     func beginBusySend(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        pendingBusySend = trimmed
+        pendingBusySend = applyGoalIfNeeded(trimmed)
         draft = ""
         showAttachMenu = false
         showPalette = false
@@ -753,9 +869,121 @@ final class AppModel: ObservableObject {
     }
 
     func runWorkflow(_ record: WorkflowRecord) {
+        launchWorkflow(named: record.name)
+    }
+
+    func openFind(query: String, timeline: Bool) {
+        findQuery = query
+        findTimeline = timeline
+        showFind = true
         destination = .chat
-        draft = "/workflow \(record.name)"
+    }
+
+    func jumpToHit(_ hit: ChatSearchHit) {
+        jumpTarget = hit.id
+        showFind = false
+        destination = .chat
+    }
+
+    func handleWorkflowCommand(_ rest: String) {
+        let parts = rest.split(whereSeparator: \.isWhitespace).map(String.init)
+        if parts.isEmpty {
+            automationsTab = 0
+            destination = .automations
+            return
+        }
+        let verb = parts[0].lowercased()
+        if ["pause", "resume", "stop", "save"].contains(verb), parts.count >= 2 {
+            controlWorkflow(name: parts[1], verb: verb)
+            return
+        }
+        launchWorkflow(named: parts[0], extra: parts.dropFirst().joined(separator: " "))
+    }
+
+    func launchWorkflow(named name: String, extra: String = "") {
+        let display = uniqueWorkflowName(name)
+        workflowRuns.insert(WorkflowRun(name: display, status: "running", note: extra), at: 0)
+        workflowRunStore.save(workflowRuns)
+        destination = .chat
+        automationsTab = 0
+        let line = extra.isEmpty ? "/workflow \(name)" : "/workflow \(name) \(extra)"
+        draft = line
         sendDraft()
+    }
+
+    func controlWorkflow(name: String, verb: String) {
+        if let index = workflowRuns.firstIndex(where: { $0.name == name || $0.id == name }) {
+            switch verb {
+            case "pause": workflowRuns[index].status = "paused"
+            case "resume": workflowRuns[index].status = "running"
+            case "stop": workflowRuns[index].status = "stopped"
+            default: break
+            }
+            workflowRunStore.save(workflowRuns)
+        }
+        destination = .chat
+        draft = "/workflow \(verb) \(name)"
+        sendDraft()
+    }
+
+    func uniqueWorkflowName(_ name: String) -> String {
+        let existing = Set(workflowRuns.map(\.name))
+        if !existing.contains(name) { return name }
+        var index = 2
+        while existing.contains("\(name)-\(index)") { index += 1 }
+        return "\(name)-\(index)"
+    }
+
+    func rewindTo(_ turn: RewindTurn) {
+        showRewind = false
+        Task {
+            await client.rewind(toPromptIndex: turn.promptIndex)
+            refreshSessions()
+            flash(copy.t("Rewound to turn \(turn.promptIndex + 1)", "已回退到第 \(turn.promptIndex + 1) 轮"))
+        }
+    }
+
+    func createUserPersona() {
+        do {
+            _ = try agentCatalog.createPersona(name: newPersonaName, detail: newPersonaDetail, instructions: newPersonaBody)
+            newPersonaName = ""
+            newPersonaDetail = ""
+            newPersonaBody = ""
+            refreshAgentCatalog()
+            flash(copy.t("Saved persona", "已保存人设"))
+        } catch {
+            flash(error.localizedDescription)
+        }
+    }
+
+    func createUserAgent() {
+        do {
+            _ = try agentCatalog.createAgent(name: newAgentName, detail: newAgentDetail)
+            newAgentName = ""
+            newAgentDetail = ""
+            refreshAgentCatalog()
+            flash(copy.t("Saved agent", "已保存 agent"))
+        } catch {
+            flash(error.localizedDescription)
+        }
+    }
+
+    func deletePersona(_ persona: PersonaDefinition) {
+        do {
+            try agentCatalog.deletePersona(persona)
+            refreshAgentCatalog()
+        } catch {
+            flash(error.localizedDescription)
+        }
+    }
+
+    func deleteAgentDefinition(_ agent: AgentDefinition) {
+        do {
+            try agentCatalog.deleteAgent(agent)
+            refreshAgentCatalog()
+        } catch {
+            flash(error.localizedDescription)
+        }
     }
 
     func createOfficialWorkflow() {
@@ -891,10 +1119,18 @@ final class AppModel: ObservableObject {
             destination = .chat
             showInspector = true
             client.setMode(.plan)
-        case "/jump", "/timeline", "/find":
-            jumpLatest()
+        case "/jump":
+            if rest.isEmpty {
+                jumpLatest()
+            } else {
+                openFind(query: rest, timeline: false)
+            }
+        case "/timeline":
+            openFind(query: "", timeline: true)
+        case "/find":
+            openFind(query: rest, timeline: false)
         case "/rewind", "/undo":
-            Task { await client.rewind() }
+            showRewind = true
         case "/compact":
             Task { await client.compact(note: rest) }
         case "/model", "/m":
@@ -929,9 +1165,8 @@ final class AppModel: ObservableObject {
         case "/login":
             login()
         case "/context", "/session-info", "/status", "/info":
-            destination = .chat
-            showInspector = true
-            presentContextReport()
+            refreshContextBreakdown()
+            showContextSheet = true
         case "/docs", "/howto", "/guides":
             openDocsCommand(rest)
         case "/changelog", "/release-notes":
@@ -987,17 +1222,18 @@ final class AppModel: ObservableObject {
                 showSettings = true
             }
         case "/workflows":
+            automationsTab = 0
             destination = .automations
         case "/workflow":
-            if rest.isEmpty {
-                destination = .automations
-            } else {
-                draft = "/workflow \(rest)"
-                sendDraft()
-            }
-        case "/agents", "/config-agents", "/personas":
-            destination = .chat
-            showInspector = true
+            handleWorkflowCommand(rest)
+        case "/agents", "/config-agents":
+            agentsTab = 0
+            refreshAgentCatalog()
+            showAgents = true
+        case "/personas":
+            agentsTab = 1
+            refreshAgentCatalog()
+            showAgents = true
         case "/doctor":
             runGrokCLI(arguments: rest == "fix" ? ["doctor", "fix"] : ["doctor"], title: "/doctor")
         case "/terminal-setup", "/terminal-check", "/terminal-info":
@@ -1493,7 +1729,7 @@ final class AppModel: ObservableObject {
 
     func exportDiagnostics() {
         let text = DiagnosticExport.make(
-            version: "0.1.8",
+            version: "0.1.9",
             grokVersion: client.grokVersion,
             state: String(describing: client.state),
             lastError: client.lastError,

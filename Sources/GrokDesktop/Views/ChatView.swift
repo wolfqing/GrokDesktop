@@ -203,6 +203,16 @@ struct ChatView: View {
         .background(palette.canvas)
     }
 
+    private func compactContext(_ value: Int) -> String {
+        if value >= 1_000_000 {
+            return String(format: "%.1fM", Double(value) / 1_000_000)
+        }
+        if value >= 1000 {
+            return String(format: "%.0fk", Double(value) / 1000)
+        }
+        return "\(value)"
+    }
+
     private var composerBlock: some View {
         VStack(spacing: 10) {
             ComposerView()
@@ -245,6 +255,19 @@ struct ChatView: View {
             .help(model.client.workingDirectory.path)
 
             Spacer()
+
+            if model.client.sessionID != nil || model.displayedContextUsed > 0 {
+                Button {
+                    model.refreshContextBreakdown()
+                    model.showContextSheet = true
+                } label: {
+                    Text("\(model.displayedContextPercent)% · \(compactContext(model.displayedContextUsed))/\(compactContext(model.displayedContextWindow))")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundStyle(palette.secondary)
+                }
+                .buttonStyle(.plain)
+                .help(l10n.sessionContext)
+            }
 
             Button {
                 model.isPrivateChat.toggle()

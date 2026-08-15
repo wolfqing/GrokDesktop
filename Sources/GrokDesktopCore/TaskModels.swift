@@ -5,17 +5,32 @@ public struct AgentTodo: Identifiable, Hashable, Sendable {
     public var content: String
     public var status: String
     public var priority: String
+    public var startedAt: Date?
+    public var endedAt: Date?
 
-    public init(id: String, content: String, status: String = "pending", priority: String = "medium") {
+    public init(
+        id: String,
+        content: String,
+        status: String = "pending",
+        priority: String = "medium",
+        startedAt: Date? = nil,
+        endedAt: Date? = nil
+    ) {
         self.id = id
         self.content = content
         self.status = status
         self.priority = priority
+        self.startedAt = startedAt
+        self.endedAt = endedAt
     }
 
     public var isCancelled: Bool { status == "cancelled" }
     public var isDone: Bool { status == "completed" }
     public var isActive: Bool { status == "in_progress" }
+
+    public var elapsed: TimeInterval? {
+        PromptTimestamp.elapsed(from: startedAt, to: endedAt)
+    }
 }
 
 public struct AgentTask: Identifiable, Hashable, Sendable {
@@ -45,8 +60,7 @@ public struct AgentTask: Identifiable, Hashable, Sendable {
     public var isRunning: Bool { status == "running" || status == "in_progress" }
 
     public var elapsed: TimeInterval? {
-        guard let start = startedAt else { return nil }
-        return (endedAt ?? Date()).timeIntervalSince(start)
+        PromptTimestamp.elapsed(from: startedAt, to: endedAt)
     }
 }
 
@@ -60,6 +74,7 @@ public struct AgentSubagent: Identifiable, Hashable, Sendable {
     public var turns: Int
     public var durationMs: Int
     public var output: String
+    public var startedAt: Date?
 
     public init(
         id: String,
@@ -70,7 +85,8 @@ public struct AgentSubagent: Identifiable, Hashable, Sendable {
         toolCalls: Int = 0,
         turns: Int = 0,
         durationMs: Int = 0,
-        output: String = ""
+        output: String = "",
+        startedAt: Date? = nil
     ) {
         self.id = id
         self.childSessionId = childSessionId
@@ -81,9 +97,15 @@ public struct AgentSubagent: Identifiable, Hashable, Sendable {
         self.turns = turns
         self.durationMs = durationMs
         self.output = output
+        self.startedAt = startedAt
     }
 
     public var isRunning: Bool { status == "running" || status == "in_progress" }
+
+    public var elapsed: TimeInterval? {
+        if durationMs > 0 { return Double(durationMs) / 1000 }
+        return PromptTimestamp.elapsed(from: startedAt, to: nil)
+    }
 }
 
 public enum PromptTimestamp {
@@ -127,20 +149,43 @@ public enum PromptTimestamp {
         return formatter.string(from: date)
     }
 
+    public static func elapsed(from start: Date?, to end: Date?) -> TimeInterval? {
+        guard let start else { return nil }
+        return max((end ?? Date()).timeIntervalSince(start), 0)
+    }
+
+    public static func formatElapsed(_ value: TimeInterval) -> String {
+        let total = max(Int(value.rounded()), 0)
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        let seconds = total % 60
+        if hours > 0 { return "\(hours)h \(minutes)m" }
+        if minutes > 0 { return "\(minutes)m \(seconds)s" }
+        return "\(seconds)s"
+    }
+
     public static func applyTodos(from update: SessionUpdate, into todos: inout [AgentTodo]) {
         if let output = update.raw["rawOutput"] as? [String: Any],
            let updated = output["TodosUpdated"] as? [String: Any] {
             if let state = updated["state"] as? [String: Any],
                let map = state["todos"] as? [String: Any] {
                 let order = (updated["todos"] as? [[String: Any]])?.compactMap { $0["content"] as? String }
+                let previous = todos
+                let stamp = update.timestamp ?? Date()
                 todos = map.compactMap { key, value in
                     guard let dict = value as? [String: Any] else { return nil }
-                    return AgentTodo(
+                    var todo = previous.first(where: { $0.id == key }) ?? AgentTodo(
                         id: key,
                         content: dict["content"] as? String ?? "",
                         status: dict["status"] as? String ?? "pending",
                         priority: dict["priority"] as? String ?? "medium"
                     )
+                    todo.content = dict["content"] as? String ?? todo.content
+                    todo.priority = dict["priority"] as? String ?? todo.priority
+                    let status = dict["status"] as? String ?? "pending"
+                    stampTodo(&todo, status: status, at: stamp)
+                    todo.status = status
+                    return todo
                 }
                 if let order {
                     todos.sort { lhs, rhs in
@@ -155,7 +200,7 @@ public enum PromptTimestamp {
                 return
             }
             if let rows = updated["todos"] as? [[String: Any]] {
-                mergeTodos(rows, merge: false, into: &todos)
+                mergeTodos(rows, merge: false, at: update.timestamp ?? Date(), into: &todos)
                 return
             }
         }
@@ -166,7 +211,7 @@ public enum PromptTimestamp {
             || tool == "todo_write"
             || input?["todos"] != nil
         guard isTodo, let rows = input?["todos"] as? [[String: Any]] else { return }
-        mergeTodos(rows, merge: input?["merge"] as? Bool ?? false, into: &todos)
+        mergeTodos(rows, merge: input?["merge"] as? Bool ?? false, at: update.timestamp ?? Date(), into: &todos)
     }
 
     public static func applyTask(from update: SessionUpdate, into tasks: inout [AgentTask]) {
@@ -217,7 +262,8 @@ public enum PromptTimestamp {
                     childSessionId: child,
                     type: type,
                     detail: detail,
-                    status: "running"
+                    status: "running",
+                    startedAt: update.timestamp ?? Date()
                 ),
                 into: &subagents
             )
@@ -232,7 +278,8 @@ public enum PromptTimestamp {
                     toolCalls: raw["tool_calls"] as? Int ?? 0,
                     turns: raw["turns"] as? Int ?? 0,
                     durationMs: raw["duration_ms"] as? Int ?? 0,
-                    output: raw["output"] as? String ?? ""
+                    output: raw["output"] as? String ?? "",
+                    startedAt: update.timestamp
                 ),
                 into: &subagents
             )
@@ -246,7 +293,8 @@ public enum PromptTimestamp {
         return (visible.filter(\.isDone).count, visible.count)
     }
 
-    private static func mergeTodos(_ rows: [[String: Any]], merge: Bool, into todos: inout [AgentTodo]) {
+    private static func mergeTodos(_ rows: [[String: Any]], merge: Bool, at date: Date, into todos: inout [AgentTodo]) {
+        let previous = todos
         if !merge { todos = [] }
         for (index, row) in rows.enumerated() {
             let id = row["id"] as? String ?? row["content"] as? String ?? String(index + 1)
@@ -254,6 +302,7 @@ public enum PromptTimestamp {
             let status = row["status"] as? String ?? "pending"
             let priority = row["priority"] as? String ?? "medium"
             if let existing = todos.firstIndex(where: { $0.id == id }) {
+                stampTodo(&todos[existing], status: status, at: date)
                 if let content, !content.isEmpty {
                     todos[existing].content = content
                 }
@@ -262,8 +311,23 @@ public enum PromptTimestamp {
                     todos[existing].priority = priority
                 }
             } else {
-                todos.append(AgentTodo(id: id, content: content ?? "", status: status, priority: priority))
+                var todo = previous.first(where: { $0.id == id }) ?? AgentTodo(id: id, content: content ?? "", status: status, priority: priority)
+                if let content, !content.isEmpty { todo.content = content }
+                stampTodo(&todo, status: status, at: date)
+                todo.status = status
+                todo.priority = priority
+                todos.append(todo)
             }
+        }
+    }
+
+    private static func stampTodo(_ todo: inout AgentTodo, status: String, at date: Date) {
+        if status == "in_progress" || status == "running" {
+            if todo.startedAt == nil { todo.startedAt = date }
+            todo.endedAt = nil
+        } else if status == "completed" || status == "cancelled" {
+            if todo.startedAt == nil { todo.startedAt = date }
+            if todo.endedAt == nil { todo.endedAt = date }
         }
     }
 
@@ -273,7 +337,11 @@ public enum PromptTimestamp {
             if !task.title.isEmpty { next.title = task.title }
             if !task.command.isEmpty { next.command = task.command }
             next.status = task.status
-            if task.startedAt != nil { next.startedAt = task.startedAt }
+            if next.startedAt == nil {
+                next.startedAt = task.startedAt
+            } else if let incoming = task.startedAt, incoming < next.startedAt! {
+                next.startedAt = incoming
+            }
             if task.endedAt != nil { next.endedAt = task.endedAt }
             tasks[index] = next
         } else {
@@ -295,6 +363,7 @@ public enum PromptTimestamp {
             if subagent.turns > 0 { next.turns = subagent.turns }
             if subagent.durationMs > 0 { next.durationMs = subagent.durationMs }
             if !subagent.output.isEmpty { next.output = subagent.output }
+            if next.startedAt == nil { next.startedAt = subagent.startedAt }
             subagents[index] = next
         } else {
             subagents.append(subagent)

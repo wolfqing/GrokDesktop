@@ -68,6 +68,7 @@ struct FilePreviewPane: View {
                     .foregroundStyle(palette.secondary)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear { document = FilePreview.load(url) }
         .onChange(of: url) { _, next in
             document = FilePreview.load(next)
