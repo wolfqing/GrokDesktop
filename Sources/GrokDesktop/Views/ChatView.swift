@@ -2,22 +2,36 @@ import AppKit
 import GrokDesktopCore
 import SwiftUI
 
+private struct ChatScrollMetrics: Equatable {
+    var offset: CGFloat = 0
+    var visible: CGFloat = 0
+    var content: CGFloat = 0
+
+    var canScroll: Bool { content > visible + 12 }
+    var travel: CGFloat { max(content - visible, 1) }
+    var progress: CGFloat { min(max(offset / travel, 0), 1) }
+    var isNearBottom: Bool { content - (offset + visible) <= 56 }
+}
+
 private struct ChatScrollBottomMonitor: NSViewRepresentable {
     var ignoreUntil: Date
     var slack: CGFloat = 56
     var isDark = false
     var onNearBottomChange: (Bool) -> Void
+    var onMetrics: (ChatScrollMetrics) -> Void = { _ in }
 
     @MainActor
     final class Coordinator {
         var clip: NSClipView?
         weak var scroll: NSScrollView?
         nonisolated(unsafe) var token: NSObjectProtocol?
+        nonisolated(unsafe) var frameToken: NSObjectProtocol?
         var lastNear: Bool?
         var ignoreUntil = Date.distantPast
         var slack: CGFloat = 56
         var isDark = false
         var onChange: (Bool) -> Void = { _ in }
+        var onMetrics: (ChatScrollMetrics) -> Void = { _ in }
         private var attachAttempts = 0
 
         func attach(from view: NSView) {
@@ -41,15 +55,25 @@ private struct ChatScrollBottomMonitor: NSViewRepresentable {
 
         func styleScroller() {
             guard let scroll else { return }
-            ThinChatScroller.install(on: scroll, isDark: isDark)
+            ThinChatScroller.hideSystemScrollers(on: scroll)
         }
 
         func observe(_ clip: NSClipView) {
             self.clip = clip
             clip.postsBoundsChangedNotifications = true
+            clip.documentView?.postsFrameChangedNotifications = true
             token = NotificationCenter.default.addObserver(
                 forName: NSView.boundsDidChangeNotification,
                 object: clip,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    self?.emit()
+                }
+            }
+            frameToken = NotificationCenter.default.addObserver(
+                forName: NSView.frameDidChangeNotification,
+                object: clip.documentView,
                 queue: .main
             ) { [weak self] _ in
                 Task { @MainActor in
@@ -60,9 +84,17 @@ private struct ChatScrollBottomMonitor: NSViewRepresentable {
         }
 
         func emit() {
-            guard Date() >= ignoreUntil, let clip else { return }
+            guard let clip else { return }
             let visible = clip.documentVisibleRect
             let documentHeight = clip.documentView?.bounds.height ?? visible.maxY
+            onMetrics(
+                ChatScrollMetrics(
+                    offset: visible.minY,
+                    visible: visible.height,
+                    content: documentHeight
+                )
+            )
+            guard Date() >= ignoreUntil else { return }
             let near = documentHeight - visible.maxY <= slack
             if lastNear != near {
                 lastNear = near
@@ -93,6 +125,7 @@ private struct ChatScrollBottomMonitor: NSViewRepresentable {
 
         deinit {
             if let token { NotificationCenter.default.removeObserver(token) }
+            if let frameToken { NotificationCenter.default.removeObserver(frameToken) }
         }
     }
 
@@ -102,6 +135,7 @@ private struct ChatScrollBottomMonitor: NSViewRepresentable {
         coordinator.slack = slack
         coordinator.isDark = isDark
         coordinator.onChange = onNearBottomChange
+        coordinator.onMetrics = onMetrics
         return coordinator
     }
 
@@ -119,30 +153,13 @@ private struct ChatScrollBottomMonitor: NSViewRepresentable {
         context.coordinator.slack = slack
         context.coordinator.isDark = isDark
         context.coordinator.onChange = onNearBottomChange
+        context.coordinator.onMetrics = onMetrics
         if context.coordinator.clip == nil {
             context.coordinator.attach(from: nsView)
         } else {
             context.coordinator.styleScroller()
             context.coordinator.emit()
         }
-    }
-}
-
-private struct StickyPrompt: Equatable {
-    var id: String
-    var text: String
-}
-
-private struct VisibleRowFrame: Equatable {
-    var id: String
-    var minY: CGFloat
-}
-
-private struct VisibleRowsKey: PreferenceKey {
-    static let defaultValue: [VisibleRowFrame] = []
-
-    static func reduce(value: inout [VisibleRowFrame], nextValue: () -> [VisibleRowFrame]) {
-        value.append(contentsOf: nextValue())
     }
 }
 
@@ -153,7 +170,7 @@ struct ChatView: View {
     @State private var stickToLatest = true
     @State private var copiedPromptID: String?
     @State private var ignoreScrollUntil = Date.distantPast
-    @State private var stickyPrompt: StickyPrompt?
+    @State private var scrollMetrics = ChatScrollMetrics()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -222,11 +239,26 @@ struct ChatView: View {
                 ScrollViewReader { proxy in
                     ZStack(alignment: .bottomTrailing) {
                         ScrollView {
-                            LazyVStack(alignment: .leading, spacing: GrokTheme.chatRowSpacing(compact: model.compactChat)) {
-                                ForEach(displayedRows) { row in
-                                    displayRow(row)
-                                        .id(row.id)
-                                        .background(rowProbe(row))
+                            LazyVStack(
+                                alignment: .leading,
+                                spacing: GrokTheme.chatRowSpacing(compact: model.compactChat),
+                                pinnedViews: [.sectionHeaders]
+                            ) {
+                                ForEach(chatTurns) { turn in
+                                    Section {
+                                        ForEach(turn.body) { row in
+                                            displayRow(row)
+                                                .id(row.id)
+                                        }
+                                    } header: {
+                                        if let user = turn.user {
+                                            messageRow(user)
+                                                .id(user.id)
+                                                .frame(maxWidth: .infinity)
+                                                .padding(.bottom, 2)
+                                                .background(palette.canvas)
+                                        }
+                                    }
                                 }
                                 Color.clear
                                     .frame(height: 1)
@@ -236,29 +268,29 @@ struct ChatView: View {
                             .padding(.vertical, model.compactChat ? 16 : 32)
                             .frame(maxWidth: .infinity)
                         }
-                        .coordinateSpace(name: "chatScroll")
-                        .onPreferenceChange(VisibleRowsKey.self) { frames in
-                            DispatchQueue.main.async {
-                                updateStickyPrompt(from: frames)
-                            }
-                        }
-                        .overlay(alignment: .top) {
-                            if let sticky = stickyPrompt {
-                                stickyPromptBar(sticky, proxy: proxy)
-                                    .padding(.top, 8)
-                                    .transition(.opacity)
-                            }
-                        }
+                        .scrollIndicators(.hidden)
                         .background(
                             ChatScrollBottomMonitor(
                                 ignoreUntil: ignoreScrollUntil,
-                                isDark: palette.isDark
-                            ) { nearBottom in
-                                if stickToLatest != nearBottom {
-                                    stickToLatest = nearBottom
+                                isDark: palette.isDark,
+                                onNearBottomChange: { nearBottom in
+                                    if stickToLatest != nearBottom {
+                                        stickToLatest = nearBottom
+                                    }
+                                },
+                                onMetrics: { metrics in
+                                    if scrollMetrics != metrics {
+                                        scrollMetrics = metrics
+                                    }
+                                    if Date() >= ignoreScrollUntil, stickToLatest != metrics.isNearBottom {
+                                        stickToLatest = metrics.isNearBottom
+                                    }
                                 }
-                            }
+                            )
                         )
+                        .overlay(alignment: .trailing) {
+                            chatThumb
+                        }
                         .simultaneousGesture(
                             TapGesture().onEnded {
                                 if model.mentionQuery != nil || model.showPalette {
@@ -289,7 +321,6 @@ struct ChatView: View {
                     .id(model.client.sessionID ?? "none")
                     .onAppear { pinToBottom(proxy) }
                     .onChange(of: model.client.sessionID) { _, _ in
-                        stickyPrompt = nil
                         pinToBottom(proxy)
                     }
                     .onChange(of: followToken) { _, _ in
@@ -341,7 +372,7 @@ struct ChatView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(palette.canvas)
-        .animation(.easeOut(duration: 0.16), value: stickyPrompt?.id)
+        .animation(.easeOut(duration: 0.16), value: stickToLatest)
     }
 
     private func compactContext(_ value: Int) -> String {
@@ -549,14 +580,6 @@ struct ChatView: View {
             }
         }
 
-        var contentIDs: [String] {
-            switch self {
-            case .message(let item):
-                return [item.id]
-            case .tools(let id, let items):
-                return [id] + items.map(\.id)
-            }
-        }
     }
 
     private var displayedRows: [DisplayRow] {
@@ -587,6 +610,58 @@ struct ChatView: View {
         }
         flushTools()
         return rows
+    }
+
+    private struct ChatTurn: Identifiable {
+        var id: String
+        var user: ConversationItem?
+        var body: [DisplayRow]
+    }
+
+    private var chatTurns: [ChatTurn] {
+        var turns: [ChatTurn] = []
+        var currentUser: ConversationItem?
+        var body: [DisplayRow] = []
+
+        func flush() {
+            guard currentUser != nil || !body.isEmpty else { return }
+            turns.append(
+                ChatTurn(
+                    id: currentUser?.id ?? body.first?.id ?? "turn-\(turns.count)",
+                    user: currentUser,
+                    body: body
+                )
+            )
+            currentUser = nil
+            body = []
+        }
+
+        for row in displayedRows {
+            if case .message(let item) = row, case .user = item {
+                flush()
+                currentUser = item
+            } else {
+                body.append(row)
+            }
+        }
+        flush()
+        return turns
+    }
+
+    private var chatThumb: some View {
+        GeometryReader { geo in
+            if scrollMetrics.canScroll {
+                let inset: CGFloat = 10
+                let track = max(geo.size.height - inset * 2, 1)
+                let height = min(max(scrollMetrics.visible / scrollMetrics.content * track, 24), track)
+                let y = inset + scrollMetrics.progress * (track - height)
+                Capsule()
+                    .fill(palette.text.opacity(0.28))
+                    .frame(width: 3, height: height)
+                    .position(x: geo.size.width - 5, y: y + height / 2)
+            }
+        }
+        .allowsHitTesting(false)
     }
 
     private var lastDisplayID: String? {
@@ -672,85 +747,6 @@ struct ChatView: View {
     private func isTodoTool(_ item: ConversationItem) -> Bool {
         guard case .tool(_, let title, _, _) = item else { return false }
         return ToolVoice.kind(title) == .todo
-    }
-
-    private var userTurns: [(id: String, text: String)] {
-        model.client.items.compactMap { item in
-            guard case .user(let id, let text) = item else { return nil }
-            let shown = PromptMedia.displayText(text)
-            return (id, shown.isEmpty ? text : shown)
-        }
-    }
-
-    private func rowProbe(_ row: DisplayRow) -> some View {
-        GeometryReader { geo in
-            Color.clear.preference(
-                key: VisibleRowsKey.self,
-                value: [
-                    VisibleRowFrame(
-                        id: row.id,
-                        minY: geo.frame(in: .named("chatScroll")).minY
-                    )
-                ]
-            )
-        }
-    }
-
-    private func updateStickyPrompt(from frames: [VisibleRowFrame]) {
-        let turns = userTurns
-        guard !turns.isEmpty else {
-            if stickyPrompt != nil { stickyPrompt = nil }
-            return
-        }
-        let visible = frames.sorted { $0.minY < $1.minY }
-        guard let first = visible.first else { return }
-        let sequence = displayedRows.flatMap(\.contentIDs)
-        let firstIndex = sequence.firstIndex(of: first.id) ?? 0
-        let owning = turns.last { turn in
-            guard let index = sequence.firstIndex(of: turn.id) else { return false }
-            return index <= firstIndex
-        } ?? turns.first
-        guard let owning else {
-            if stickyPrompt != nil { stickyPrompt = nil }
-            return
-        }
-        if let original = visible.first(where: { $0.id == owning.id }), original.minY >= 6, original.minY < 140 {
-            if stickyPrompt != nil { stickyPrompt = nil }
-            return
-        }
-        let next = StickyPrompt(id: owning.id, text: owning.text)
-        if stickyPrompt != next {
-            stickyPrompt = next
-        }
-    }
-
-    private func stickyPromptBar(_ prompt: StickyPrompt, proxy: ScrollViewProxy) -> some View {
-        HStack {
-            Spacer(minLength: 80)
-            Button {
-                stickToLatest = false
-                proxy.scrollTo(prompt.id, anchor: .top)
-            } label: {
-                Text(prompt.text)
-                    .font(.system(size: GrokTheme.chatMetaSize(compact: false) + 1))
-                    .foregroundStyle(palette.text)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.trailing)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(palette.selected, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .stroke(palette.hairline)
-                    )
-                    .shadow(color: Color.black.opacity(0.10), radius: 8, y: 3)
-            }
-            .buttonStyle(.plain)
-            .help(prompt.text)
-        }
-        .padding(.horizontal, model.compactChat ? 16 : 28)
-        .frame(maxWidth: GrokTheme.contentWidth)
-        .frame(maxWidth: .infinity)
     }
 
     @ViewBuilder
