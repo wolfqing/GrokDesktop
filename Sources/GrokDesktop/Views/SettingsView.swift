@@ -588,7 +588,7 @@ struct SettingsView: View {
             ))
             .foregroundStyle(palette.secondary)
             HStack {
-                Text("Grok Desktop 0.1.7")
+                Text("Grok Desktop 0.1.8")
                 Spacer()
                 Text(model.client.grokVersion ?? "grok ?")
                     .foregroundStyle(palette.secondary)
@@ -761,7 +761,7 @@ struct SettingsView: View {
             HStack {
                 Text("App")
                 Spacer()
-                Text("0.1.7")
+                Text("0.1.8")
             }
             HStack {
                 Text("grok")
@@ -770,6 +770,15 @@ struct SettingsView: View {
             }
             if let error = model.client.lastError {
                 Text(error).foregroundStyle(.red)
+            }
+            if !model.client.events.isEmpty {
+                Text(l10n.t("ACP events", "ACP 事件"))
+                    .font(.system(size: 12, weight: .medium))
+                Text(model.client.events.suffix(16).map(\.line).joined(separator: "\n"))
+                    .font(.system(size: 11, design: .monospaced))
+                    .textSelection(.enabled)
+                    .padding(10)
+                    .background(palette.chip, in: RoundedRectangle(cornerRadius: 8))
             }
             if !model.client.stderrLines.isEmpty {
                 Text(model.client.stderrLines.suffix(12).joined(separator: "\n"))

@@ -187,48 +187,113 @@ struct InspectorView: View {
                     .buttonStyle(GrokSecondaryButtonStyle())
                 }
             }
-            if !model.client.tasks.isEmpty {
-                Text(l10n.backgroundTasks)
+            let liveTasks = model.client.tasks.filter(\.isRunning)
+            let finishedTasks = model.client.tasks.filter { !$0.isRunning }
+            if !liveTasks.isEmpty {
+                Text(l10n.t("Live tasks", "进行中的任务"))
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(palette.secondary)
                     .padding(.top, 4)
-                ForEach(Array(model.client.tasks.suffix(12))) { task in
+                ForEach(liveTasks) { task in
+                    taskRow(task)
+                }
+            }
+            if !model.client.backgroundLiveTasks.isEmpty {
+                Text(l10n.t("Other sessions", "其他会话"))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(palette.secondary)
+                    .padding(.top, 4)
+                ForEach(model.client.backgroundLiveTasks, id: \.task.id) { row in
+                    Button {
+                        _ = model.client.focusIfLoaded(row.sessionID)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(row.task.title)
+                                .font(.system(size: 12))
+                                .lineLimit(2)
+                            Text(row.title)
+                                .font(.system(size: 10))
+                                .foregroundStyle(palette.secondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            if !model.client.subagents.isEmpty {
+                Text(l10n.subagents)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(palette.secondary)
+                    .padding(.top, 4)
+                ForEach(model.client.subagents) { agent in
                     HStack(alignment: .top, spacing: 6) {
                         RunningStatusIcon(
-                            active: task.isRunning,
-                            idleSystemImage: task.status == "cancelled" ? "xmark.circle" : "checkmark.circle",
-                            color: task.isRunning ? Color.orange : palette.secondary,
+                            active: agent.isRunning,
+                            idleSystemImage: agent.status == "cancelled" ? "xmark.circle" : "checkmark.circle",
+                            color: agent.isRunning ? Color.orange : palette.secondary,
                             size: 12
                         )
                         .padding(.top, 2)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(task.title)
+                            Text(agent.detail.isEmpty ? agent.type : agent.detail)
                                 .font(.system(size: 12))
                                 .lineLimit(2)
-                            HStack(spacing: 6) {
-                                Text(task.isRunning ? l10n.running : (task.status == "cancelled" ? l10n.t("Cancelled", "已取消") : l10n.completed))
-                                if let elapsed = task.elapsed {
-                                    Text(elapsedLabel(elapsed))
-                                }
-                                if task.isRunning {
-                                    Button(l10n.stop) {
-                                        model.client.killTask(task.id)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .foregroundStyle(Color.orange)
-                                }
-                            }
-                            .font(.system(size: 10))
-                            .foregroundStyle(palette.secondary)
+                            Text(agent.isRunning ? l10n.running : l10n.completed)
+                                .font(.system(size: 10))
+                                .foregroundStyle(palette.secondary)
                         }
                     }
+                }
+            }
+            if !finishedTasks.isEmpty {
+                Text(l10n.backgroundTasks)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(palette.secondary)
+                    .padding(.top, 4)
+                ForEach(Array(finishedTasks.suffix(8))) { task in
+                    taskRow(task)
                 }
             }
         }
     }
 
+    private func taskRow(_ task: AgentTask) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            RunningStatusIcon(
+                active: task.isRunning,
+                idleSystemImage: task.status == "cancelled" ? "xmark.circle" : "checkmark.circle",
+                color: task.isRunning ? Color.orange : palette.secondary,
+                size: 12
+            )
+            .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(task.title)
+                    .font(.system(size: 12))
+                    .lineLimit(2)
+                HStack(spacing: 6) {
+                    Text(task.isRunning ? l10n.running : (task.status == "cancelled" ? l10n.t("Cancelled", "已取消") : l10n.completed))
+                    if let elapsed = task.elapsed {
+                        Text(elapsedLabel(elapsed))
+                    }
+                    if task.isRunning {
+                        Button(l10n.stop) {
+                            model.client.killTask(task.id)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Color.orange)
+                    }
+                }
+                .font(.system(size: 10))
+                .foregroundStyle(palette.secondary)
+            }
+        }
+    }
+
     private var showsWork: Bool {
-        !checklist.isEmpty || !model.client.tasks.isEmpty || model.client.mode == .plan
+        !checklist.isEmpty
+            || !model.client.tasks.isEmpty
+            || !model.client.subagents.isEmpty
+            || !model.client.backgroundLiveTasks.isEmpty
+            || model.client.mode == .plan
     }
 
     private var checklist: [(id: String, content: String, status: String)] {

@@ -35,6 +35,28 @@ struct ChatView: View {
                         .padding(.top, 8)
                 }
 
+                if model.client.compacted || !model.client.recap.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        if model.client.compacted {
+                            Text(l10n.t("Context compacted", "上下文已压缩"))
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(Color.orange)
+                        }
+                        if !model.client.recap.isEmpty {
+                            Text(model.client.recap)
+                                .font(.system(size: 12))
+                                .foregroundStyle(palette.secondary)
+                                .lineLimit(3)
+                                .textSelection(.enabled)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                    .background(palette.chip, in: RoundedRectangle(cornerRadius: 10))
+                    .padding(.horizontal, 24)
+                    .padding(.top, 8)
+                }
+
                 if let other = model.client.backgroundQuestions.first ?? model.client.backgroundPermissions.first {
                     Button {
                         _ = model.client.focusIfLoaded(other.id)

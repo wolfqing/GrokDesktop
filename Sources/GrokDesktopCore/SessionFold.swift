@@ -28,8 +28,33 @@ public struct SessionSnapshot: Equatable, Sendable {
     public var thoughtID: String?
     public var recap: String = ""
     public var compacted: Bool = false
+    public var subagents: [AgentSubagent] = []
 
-    public init() {}
+    public init(
+        items: [ConversationItem] = [],
+        planEntries: [PlanEntry] = [],
+        itemDates: [String: Date] = [:],
+        itemImages: [String: [URL]] = [:],
+        todos: [AgentTodo] = [],
+        tasks: [AgentTask] = [],
+        assistantID: String? = nil,
+        thoughtID: String? = nil,
+        recap: String = "",
+        compacted: Bool = false,
+        subagents: [AgentSubagent] = []
+    ) {
+        self.items = items
+        self.planEntries = planEntries
+        self.itemDates = itemDates
+        self.itemImages = itemImages
+        self.todos = todos
+        self.tasks = tasks
+        self.assistantID = assistantID
+        self.thoughtID = thoughtID
+        self.recap = recap
+        self.compacted = compacted
+        self.subagents = subagents
+    }
 
     public var lastUserPreview: String {
         items.reversed().compactMap { item -> String? in
@@ -38,6 +63,10 @@ public struct SessionSnapshot: Equatable, Sendable {
             return shown.isEmpty ? nil : shown
         }.first ?? ""
     }
+
+    public var liveTasks: [AgentTask] { tasks.filter(\.isRunning) }
+    public var finishedTasks: [AgentTask] { tasks.filter { !$0.isRunning } }
+    public var liveSubagents: [AgentSubagent] { subagents.filter(\.isRunning) }
 }
 
 public enum SessionFold {
@@ -72,8 +101,36 @@ public enum SessionFold {
             if !summary.isEmpty { snapshot.recap = summary }
         case .autoCompactCompleted:
             snapshot.compacted = true
+        case .subagentSpawned, .subagentFinished:
+            PromptTimestamp.applySubagent(from: update, into: &snapshot.subagents)
+        case .retryState:
+            appendNotice(retryText(update), onto: &snapshot, at: update.timestamp)
+        case .scheduledTaskCreated:
+            let prompt = update.raw["prompt"] as? String ?? update.text
+            let schedule = update.raw["human_schedule"] as? String ?? ""
+            let label = schedule.isEmpty ? prompt : "\(schedule): \(prompt)"
+            appendNotice(String(label.prefix(180)), onto: &snapshot, at: update.timestamp)
         default:
             break
+        }
+    }
+
+    public static func cancelActiveWork(onto snapshot: inout SessionSnapshot, at date: Date = Date()) {
+        for index in snapshot.items.indices {
+            if case .tool(let id, let title, let status, let detail) = snapshot.items[index],
+               status == "running" || status == "pending" || status == "in_progress" {
+                snapshot.items[index] = .tool(id: id, title: title, status: "cancelled", detail: detail)
+            }
+        }
+        for index in snapshot.todos.indices where snapshot.todos[index].isActive {
+            snapshot.todos[index].status = "cancelled"
+        }
+        for index in snapshot.tasks.indices where snapshot.tasks[index].isRunning {
+            snapshot.tasks[index].status = "cancelled"
+            snapshot.tasks[index].endedAt = date
+        }
+        for index in snapshot.subagents.indices where snapshot.subagents[index].isRunning {
+            snapshot.subagents[index].status = "cancelled"
         }
     }
 
@@ -88,20 +145,78 @@ public enum SessionFold {
         }
         return snapshot
     }
+
+    private static func appendNotice(_ text: String, onto snapshot: inout SessionSnapshot, at date: Date?) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        if snapshot.items.last.map({
+            if case .notice(_, let existing) = $0 { return existing == trimmed }
+            return false
+        }) == true {
+            return
+        }
+        let id = UUID().uuidString
+        snapshot.items.append(.notice(id: id, text: trimmed))
+        if let date { snapshot.itemDates[id] = date }
+    }
+
+    private static func retryText(_ update: SessionUpdate) -> String {
+        let type = update.raw["type"] as? String ?? ""
+        guard type == "retrying" || type.isEmpty else { return "" }
+        let attempt = update.raw["attempt"] as? Int ?? 0
+        let max = update.raw["max_retries"] as? Int ?? 0
+        let reason = update.raw["reason"] as? String ?? update.text
+        if attempt > 0, max > 0 {
+            return "Retrying (\(attempt)/\(max)): \(reason)"
+        }
+        return reason.isEmpty ? "" : "Retrying: \(reason)"
+    }
 }
 
 public extension SessionWorkspace {
-    func fold(_ update: SessionUpdate) {
-        TranscriptLoader.apply(
-            update: update,
-            items: &items,
-            planEntries: &planEntries,
-            assistantID: &assistantBufferID,
-            thoughtID: &thoughtBufferID,
-            itemDates: &itemDates,
-            itemImages: &itemImages,
-            todos: &todos,
-            tasks: &tasks
+    func snapshot() -> SessionSnapshot {
+        SessionSnapshot(
+            items: items,
+            planEntries: planEntries,
+            itemDates: itemDates,
+            itemImages: itemImages,
+            todos: todos,
+            tasks: tasks,
+            assistantID: assistantBufferID,
+            thoughtID: thoughtBufferID,
+            recap: recap,
+            compacted: compacted,
+            subagents: subagents
         )
+    }
+
+    func adopt(_ snapshot: SessionSnapshot) {
+        items = snapshot.items
+        planEntries = snapshot.planEntries
+        itemDates = snapshot.itemDates
+        itemImages = snapshot.itemImages
+        todos = snapshot.todos
+        tasks = snapshot.tasks
+        assistantBufferID = snapshot.assistantID
+        thoughtBufferID = snapshot.thoughtID
+        recap = snapshot.recap
+        compacted = snapshot.compacted
+        subagents = snapshot.subagents
+    }
+
+    func adopt(_ transcript: Transcript) {
+        adopt(transcript.snapshot)
+        if !transcript.planMarkdown.isEmpty {
+            planMarkdown = transcript.planMarkdown
+        }
+        if !transcript.hunks.isEmpty {
+            hunks = transcript.hunks
+        }
+    }
+
+    func fold(_ update: SessionUpdate) {
+        var next = snapshot()
+        SessionFold.apply(update, onto: &next)
+        adopt(next)
     }
 }

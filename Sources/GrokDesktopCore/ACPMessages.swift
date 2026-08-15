@@ -24,7 +24,7 @@ public enum JSONRPCID: Hashable, Sendable {
     }
 }
 
-public struct JSONRPCEnvelope {
+public struct JSONRPCEnvelope: @unchecked Sendable {
     public var id: JSONRPCID?
     public var method: String?
     public var params: [String: Any]
@@ -109,6 +109,15 @@ public enum SessionUpdateKind: String, Sendable {
     case autoCompactStarted = "auto_compact_started"
     case autoCompactCompleted = "auto_compact_completed"
     case imageCompressed = "image_compressed"
+    case hookExecution = "hook_execution"
+    case compactionCheckpoint = "compaction_checkpoint"
+    case retryState = "retry_state"
+    case hooksChanged = "hooks_changed"
+    case pluginsChanged = "plugins_changed"
+    case scheduledTaskCreated = "scheduled_task_created"
+    case scheduledTaskDeleted = "scheduled_task_deleted"
+    case subagentSpawned = "subagent_spawned"
+    case subagentFinished = "subagent_finished"
     case notice
     case unknown
 }

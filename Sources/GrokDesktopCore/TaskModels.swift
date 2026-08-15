@@ -50,6 +50,42 @@ public struct AgentTask: Identifiable, Hashable, Sendable {
     }
 }
 
+public struct AgentSubagent: Identifiable, Hashable, Sendable {
+    public var id: String
+    public var childSessionId: String
+    public var type: String
+    public var detail: String
+    public var status: String
+    public var toolCalls: Int
+    public var turns: Int
+    public var durationMs: Int
+    public var output: String
+
+    public init(
+        id: String,
+        childSessionId: String = "",
+        type: String = "",
+        detail: String = "",
+        status: String = "running",
+        toolCalls: Int = 0,
+        turns: Int = 0,
+        durationMs: Int = 0,
+        output: String = ""
+    ) {
+        self.id = id
+        self.childSessionId = childSessionId
+        self.type = type
+        self.detail = detail
+        self.status = status
+        self.toolCalls = toolCalls
+        self.turns = turns
+        self.durationMs = durationMs
+        self.output = output
+    }
+
+    public var isRunning: Bool { status == "running" || status == "in_progress" }
+}
+
 public enum PromptTimestamp {
     public static func parse(_ value: Any?) -> Date? {
         if let date = value as? Date { return date }
@@ -164,6 +200,47 @@ public enum PromptTimestamp {
         }
     }
 
+    public static func applySubagent(from update: SessionUpdate, into subagents: inout [AgentSubagent]) {
+        let raw = update.raw
+        let id = raw["subagent_id"] as? String
+            ?? raw["child_session_id"] as? String
+            ?? update.toolCallId
+            ?? UUID().uuidString
+        let child = raw["child_session_id"] as? String ?? id
+        let type = raw["subagent_type"] as? String ?? ""
+        let detail = raw["description"] as? String ?? raw["output"] as? String ?? ""
+        switch update.kind {
+        case .subagentSpawned:
+            upsertSubagent(
+                AgentSubagent(
+                    id: id,
+                    childSessionId: child,
+                    type: type,
+                    detail: detail,
+                    status: "running"
+                ),
+                into: &subagents
+            )
+        case .subagentFinished:
+            upsertSubagent(
+                AgentSubagent(
+                    id: id,
+                    childSessionId: child,
+                    type: type,
+                    detail: detail,
+                    status: raw["status"] as? String ?? "completed",
+                    toolCalls: raw["tool_calls"] as? Int ?? 0,
+                    turns: raw["turns"] as? Int ?? 0,
+                    durationMs: raw["duration_ms"] as? Int ?? 0,
+                    output: raw["output"] as? String ?? ""
+                ),
+                into: &subagents
+            )
+        default:
+            break
+        }
+    }
+
     public static func progress(for todos: [AgentTodo]) -> (done: Int, total: Int) {
         let visible = todos.filter { !$0.isCancelled }
         return (visible.filter(\.isDone).count, visible.count)
@@ -204,6 +281,26 @@ public enum PromptTimestamp {
         }
         if tasks.count > 40 {
             tasks = Array(tasks.suffix(40))
+        }
+    }
+
+    private static func upsertSubagent(_ subagent: AgentSubagent, into subagents: inout [AgentSubagent]) {
+        if let index = subagents.firstIndex(where: { $0.id == subagent.id || $0.childSessionId == subagent.childSessionId }) {
+            var next = subagents[index]
+            if !subagent.childSessionId.isEmpty { next.childSessionId = subagent.childSessionId }
+            if !subagent.type.isEmpty { next.type = subagent.type }
+            if !subagent.detail.isEmpty { next.detail = subagent.detail }
+            next.status = subagent.status
+            if subagent.toolCalls > 0 { next.toolCalls = subagent.toolCalls }
+            if subagent.turns > 0 { next.turns = subagent.turns }
+            if subagent.durationMs > 0 { next.durationMs = subagent.durationMs }
+            if !subagent.output.isEmpty { next.output = subagent.output }
+            subagents[index] = next
+        } else {
+            subagents.append(subagent)
+        }
+        if subagents.count > 20 {
+            subagents = Array(subagents.suffix(20))
         }
     }
 

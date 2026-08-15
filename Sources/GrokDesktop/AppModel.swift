@@ -953,10 +953,12 @@ final class AppModel: ObservableObject {
         case "/agents", "/config-agents", "/personas":
             destination = .chat
             showInspector = true
-        case "/doctor", "/terminal-setup", "/terminal-check", "/terminal-info":
+        case "/doctor":
             runGrokCLI(arguments: rest == "fix" ? ["doctor", "fix"] : ["doctor"], title: "/doctor")
+        case "/terminal-setup", "/terminal-check", "/terminal-info":
+            presentTerminalReport()
         case "/inspect":
-            runGrokCLI(arguments: ["inspect"], title: "/inspect")
+            presentInspectReport()
         case "/du", "/disk-usage":
             runGrokCLI(arguments: ["du"], title: "/du")
         case "/models":
@@ -1150,10 +1152,46 @@ final class AppModel: ObservableObject {
             "messages: \(client.items.count)",
             "context: \(workspace.contextPercent)% (\(used)/\(window), free \(free))",
             "todos: \(done)/\(todos.count)",
+            "tasks: \(client.tasks.filter(\.isRunning).count)/\(client.tasks.count)",
+            "subagents: \(client.subagents.filter(\.isRunning).count)/\(client.subagents.count)",
+            "compacted: \(client.compacted)",
+            "loaded: \(client.liveWorkspaces.count) live",
             "skills: \(skills.count)",
             "mcp: \(mcpServers.count)",
             "branch: \(workspace.branch ?? "—")"
         ].joined(separator: "\n")
+        showCLIReport = true
+    }
+
+    func presentInspectReport() {
+        cliReportTitle = "/inspect"
+        if client.events.isEmpty {
+            cliReportBody = copy.t("No ACP events yet. Send a prompt first.", "还没有 ACP 事件。先发一条提示词。")
+        } else {
+            cliReportBody = client.events.suffix(40).map { event in
+                "\(event.directionLabel) \(event.method)  \(event.preview)"
+            }.joined(separator: "\n")
+        }
+        showCLIReport = true
+    }
+
+    func presentTerminalReport() {
+        cliReportTitle = "/terminal-info"
+        let rows = client.terminals
+        var lines = [
+            copy.t("This window hosts ACP terminals.", "这个窗口可以托管 ACP 终端。"),
+            "capability: terminal + fs.readTextFile + fs.writeTextFile",
+            "running: \(rows.filter(\.running).count)/\(rows.count)"
+        ]
+        if rows.isEmpty {
+            lines.append(copy.t("No client terminals right now.", "现在没有客户端终端。"))
+        } else {
+            lines.append(contentsOf: rows.map { term in
+                let state = term.running ? "running" : "exit \(term.exitCode.map(String.init) ?? "?")"
+                return "\(term.id.prefix(8))  \(state)  \(term.command)"
+            })
+        }
+        cliReportBody = lines.joined(separator: "\n")
         showCLIReport = true
     }
 
@@ -1410,13 +1448,14 @@ final class AppModel: ObservableObject {
 
     func exportDiagnostics() {
         let text = DiagnosticExport.make(
-            version: "0.1.7",
+            version: "0.1.8",
             grokVersion: client.grokVersion,
             state: String(describing: client.state),
             lastError: client.lastError,
             sessionID: client.sessionID,
             cwd: client.workingDirectory.path,
-            stderr: client.stderrLines
+            stderr: client.stderrLines,
+            events: client.events.map(\.line)
         )
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.plainText]

@@ -40,6 +40,11 @@ public final class ACPClient: ObservableObject {
     @Published public private(set) var itemImages: [String: [URL]] = [:]
     @Published public private(set) var todos: [AgentTodo] = []
     @Published public private(set) var tasks: [AgentTask] = []
+    @Published public private(set) var recap = ""
+    @Published public private(set) var compacted = false
+    @Published public private(set) var subagents: [AgentSubagent] = []
+    @Published public private(set) var events: [ACPEvent] = []
+    @Published public private(set) var terminals: [TerminalSnapshot] = []
     @Published public var allowEditsThisSession = false
     @Published public private(set) var capabilities = AgentCapabilities()
     @Published public var gitStatusText = ""
@@ -66,6 +71,20 @@ public final class ACPClient: ObservableObject {
         liveWorkspaces.filter { $0.id != sessionID && $0.userQuestion != nil }
     }
 
+    public var hasBackgroundWork: Bool {
+        liveWorkspaces.contains { $0.id != sessionID && $0.isLive }
+    }
+
+    public var backgroundLiveTasks: [(sessionID: String, title: String, task: AgentTask)] {
+        workspaceByID.values
+            .filter { $0.id != sessionID }
+            .flatMap { workspace in
+                workspace.tasks.filter(\.isRunning).map {
+                    (workspace.id, workspace.title.isEmpty ? String(workspace.id.prefix(8)) : workspace.title, $0)
+                }
+            }
+    }
+
     public var config: GrokConfig { configStore.load() }
 
     private let configStore: ConfigStore
@@ -83,6 +102,8 @@ public final class ACPClient: ObservableObject {
     private var reconnectTask: Task<Void, Never>?
     private var reconnectAttempt = 0
     private var workspaceByID: [String: SessionWorkspace] = [:]
+    private var retainedSessionIDs: [String] = []
+    private let terminalsHost = TerminalHost()
 
     public init(
         locator: GrokBinaryLocator = GrokBinaryLocator(),
@@ -173,7 +194,7 @@ public final class ACPClient: ObservableObject {
                 "protocolVersion": 1,
                 "clientInfo": [
                     "name": "GrokDesktop",
-                    "version": "0.1.7"
+                    "version": "0.1.8"
                 ],
                 "clientCapabilities": [
                     "fs": [
@@ -244,8 +265,12 @@ public final class ACPClient: ObservableObject {
         workspace.itemImages = [:]
         workspace.todos = []
         workspace.tasks = []
+        workspace.recap = ""
+        workspace.compacted = false
+        workspace.subagents = []
         workspace.stopRequested = false
         workspace.isTurnRunning = false
+        rememberLoaded(sessionID)
         lastError = nil
         state = .ready
         syncFromCurrent()
@@ -254,7 +279,7 @@ public final class ACPClient: ObservableObject {
 
     @discardableResult
     public func focusIfLoaded(_ id: String) -> Bool {
-        guard let workspace = workspaceByID[id], workspace.loadedOnAgent || workspace.isLive else {
+        guard let workspace = workspaceByID[id], workspace.loadedOnAgent else {
             return false
         }
         sessionID = workspace.id
@@ -276,14 +301,7 @@ public final class ACPClient: ObservableObject {
         workspace.refreshArtifacts()
         let transcript = sessionDirectory.map { TranscriptLoader.load(sessionDirectory: $0) }
         if let transcript {
-            workspace.items = transcript.items
-            workspace.planEntries = transcript.planEntries
-            workspace.planMarkdown = transcript.planMarkdown
-            workspace.hunks = transcript.hunks
-            workspace.itemDates = transcript.itemDates
-            workspace.itemImages = transcript.itemImages
-            workspace.todos = transcript.todos
-            workspace.tasks = transcript.tasks
+            workspace.adopt(transcript)
         }
         workspace.assistantBufferID = nil
         workspace.thoughtBufferID = nil
@@ -304,6 +322,7 @@ public final class ACPClient: ObservableObject {
                 ]
             )
             workspace.loadedOnAgent = true
+            rememberLoaded(id)
             workspace.lastError = nil
             lastError = nil
             isReconnecting = false
@@ -565,6 +584,7 @@ public final class ACPClient: ObservableObject {
 
     public func dropWorkspace(_ id: String) {
         workspaceByID[id] = nil
+        retainedSessionIDs.removeAll { $0 == id }
         if sessionID == id {
             resetConversation()
         } else {
@@ -594,6 +614,9 @@ public final class ACPClient: ObservableObject {
         itemImages = [:]
         todos = []
         tasks = []
+        recap = ""
+        compacted = false
+        subagents = []
         if process?.isRunning == true {
             state = .initialized
         }
@@ -717,6 +740,8 @@ public final class ACPClient: ObservableObject {
             state = .idle
             isReconnecting = false
             reconnectAttempt = 0
+            terminalsHost.releaseAll()
+            terminals = []
         }
         isTurnRunning = false
     }
@@ -763,9 +788,7 @@ public final class ACPClient: ObservableObject {
             guard !Task.isCancelled, self.shouldReconnect else { return }
             do {
                 try await self.start()
-                if let id = self.lastSessionID {
-                    try await self.loadSession(id: id, cwd: self.workingDirectory, directory: self.sessionDirectory)
-                }
+                await self.reloadRetainedSessions(focus: self.lastSessionID)
                 self.isReconnecting = false
             } catch {
                 self.scheduleReconnect()
@@ -794,19 +817,23 @@ public final class ACPClient: ObservableObject {
             return
         }
 
+        if let method = envelope.method {
+            recordEvent(inbound: true, method: method, params: envelope.params)
+        }
+
         if let method = envelope.method, let id = envelope.id, UserQuestionRequest.isMethod(method) {
             present(questionID: id, params: envelope.params)
+            return
+        }
+
+        if let method = envelope.method, let id = envelope.id, handleClientRequest(id: id, method: method, params: envelope.params) {
             return
         }
 
         if let method = envelope.method, envelope.id != nil, method == "session/request_permission" {
             if let id = envelope.id {
                 let request = PermissionRequest.parse(id: id, params: envelope.params)
-                let workspace = ensureWorkspace(
-                    id: request.sessionId ?? sessionID ?? UUID().uuidString,
-                    cwd: workingDirectory,
-                    directory: sessionDirectory
-                )
+                let workspace = workspaceForSession(request.sessionId ?? sessionID ?? UUID().uuidString)
                 if workspace.allowEditsThisSession, isEditPermission(request),
                    let allow = request.options.first(where: { !$0.kind.contains("reject") }) {
                     respond(
@@ -857,17 +884,10 @@ public final class ACPClient: ObservableObject {
     private func apply(update: SessionUpdate) {
         let id = update.sessionId ?? sessionID
         guard let id else { return }
-        let workspace = ensureWorkspace(id: id, cwd: workingDirectory, directory: sessionDirectory)
-        let previousIDs = Set(workspace.items.map(\.id))
+        let workspace = workspaceForSession(id)
         workspace.fold(update)
         if workspace.stopRequested {
             workspace.markWorkStopped()
-        }
-        let stamp = update.timestamp ?? Date()
-        for item in workspace.items where previousIDs.contains(item.id) == false {
-            if workspace.itemDates[item.id] == nil {
-                workspace.itemDates[item.id] = stamp
-            }
         }
         if update.kind == .plan {
             workspace.refreshArtifacts()
@@ -875,18 +895,47 @@ public final class ACPClient: ObservableObject {
         syncFromCurrent()
     }
 
+    private func workspaceForSession(_ id: String) -> SessionWorkspace {
+        if let existing = workspaceByID[id] {
+            return existing
+        }
+        let directory = SessionIndex().directory(cwd: workingDirectory.path, id: id)
+        return ensureWorkspace(id: id, cwd: workingDirectory, directory: directory)
+    }
+
     @discardableResult
     private func ensureWorkspace(id: String, cwd: URL, directory: URL?) -> SessionWorkspace {
         if let existing = workspaceByID[id] {
-            // A session's cwd is fixed at create/load. Never clobber it with the
-            // currently displayed folder (that races when switching projects).
-            if let directory { existing.directory = directory }
+            if existing.directory == nil, let directory {
+                existing.directory = directory
+            }
             return existing
         }
         let workspace = SessionWorkspace(id: id, cwd: cwd, directory: directory)
         workspace.mode = mode
         workspaceByID[id] = workspace
         return workspace
+    }
+
+    private func rememberLoaded(_ id: String) {
+        if !retainedSessionIDs.contains(id) {
+            retainedSessionIDs.append(id)
+        }
+    }
+
+    private func reloadRetainedSessions(focus: String?) async {
+        let ids = retainedSessionIDs
+        for id in ids {
+            guard let workspace = workspaceByID[id] else { continue }
+            do {
+                try await loadSession(id: id, cwd: workspace.cwd, directory: workspace.directory)
+            } catch {
+                workspace.loadedOnAgent = false
+            }
+        }
+        if let focus, workspaceByID[focus]?.loadedOnAgent == true {
+            _ = focusIfLoaded(focus)
+        }
     }
 
     private func syncFromCurrent() {
@@ -912,7 +961,11 @@ public final class ACPClient: ObservableObject {
             itemImages = workspace.itemImages
             todos = workspace.todos
             tasks = workspace.tasks
+            recap = workspace.recap
+            compacted = workspace.compacted
+            subagents = workspace.subagents
         }
+        terminals = terminalsHost.snapshots
         refreshLive()
     }
 
@@ -930,11 +983,7 @@ public final class ACPClient: ObservableObject {
     }
 
     private func present(question: UserQuestionRequest) {
-        let workspace = ensureWorkspace(
-            id: question.sessionId ?? sessionID ?? UUID().uuidString,
-            cwd: workingDirectory,
-            directory: sessionDirectory
-        )
+        let workspace = workspaceForSession(question.sessionId ?? sessionID ?? UUID().uuidString)
         if let existing = workspace.userQuestion, existing.rpcID != question.rpcID {
             respond(id: existing.rpcID, result: UserQuestionOutcome.skipInterview.json)
         }
@@ -957,6 +1006,162 @@ public final class ACPClient: ObservableObject {
         if stderrLines.count > 200 {
             stderrLines.removeFirst(stderrLines.count - 200)
         }
+    }
+
+    private func recordEvent(inbound: Bool, method: String, params: [String: Any], extra: String = "") {
+        let preview = DiagnosticExport.redact(ACPEvent.preview(method: method, params: params, extra: extra))
+        events.append(ACPEvent(inbound: inbound, method: method, preview: preview))
+        if events.count > 80 {
+            events.removeFirst(events.count - 80)
+        }
+    }
+
+    @discardableResult
+    private func handleClientRequest(id: JSONRPCID, method: String, params: [String: Any]) -> Bool {
+        switch method {
+        case "fs/read_text_file", "fs/readTextFile":
+            handleReadTextFile(id: id, params: params)
+            return true
+        case "fs/write_text_file", "fs/writeTextFile":
+            handleWriteTextFile(id: id, params: params)
+            return true
+        case "terminal/create":
+            handleTerminalCreate(id: id, params: params)
+            return true
+        case "terminal/output":
+            handleTerminalOutput(id: id, params: params)
+            return true
+        case "terminal/wait_for_exit", "terminal/waitForExit":
+            handleTerminalWait(id: id, params: params)
+            return true
+        case "terminal/kill":
+            handleTerminalKill(id: id, params: params)
+            return true
+        case "terminal/release":
+            handleTerminalRelease(id: id, params: params)
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func handleReadTextFile(id: JSONRPCID, params: [String: Any]) {
+        guard let path = params["path"] as? String, !path.isEmpty else {
+            respondError(id: id, message: "Missing path")
+            return
+        }
+        do {
+            let text = try String(contentsOf: URL(fileURLWithPath: path), encoding: .utf8)
+            let sliced = sliceFile(text, line: params["line"] as? Int, limit: params["limit"] as? Int)
+            respond(id: id, result: ["content": sliced])
+        } catch {
+            respondError(id: id, message: error.localizedDescription)
+        }
+    }
+
+    private func handleWriteTextFile(id: JSONRPCID, params: [String: Any]) {
+        guard let path = params["path"] as? String, !path.isEmpty else {
+            respondError(id: id, message: "Missing path")
+            return
+        }
+        let content = params["content"] as? String ?? ""
+        let url = URL(fileURLWithPath: path)
+        do {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try content.write(to: url, atomically: true, encoding: .utf8)
+            respond(id: id, result: [:] as [String: Any])
+        } catch {
+            respondError(id: id, message: error.localizedDescription)
+        }
+    }
+
+    private func handleTerminalCreate(id: JSONRPCID, params: [String: Any]) {
+        let command = params["command"] as? String ?? ""
+        let args = params["args"] as? [String] ?? []
+        let cwdPath = params["cwd"] as? String
+        let cwd = cwdPath.map(URL.init(fileURLWithPath:)) ?? currentWorkspace?.cwd ?? workingDirectory
+        var env: [String: String] = [:]
+        if let rows = params["env"] as? [[String: Any]] {
+            for row in rows {
+                if let name = row["name"] as? String, let value = row["value"] as? String {
+                    env[name] = value
+                }
+            }
+        } else if let dict = params["env"] as? [String: String] {
+            env = dict
+        }
+        let limit = params["outputByteLimit"] as? Int ?? params["output_byte_limit"] as? Int ?? TerminalHost.defaultByteLimit
+        do {
+            let terminalID = try terminalsHost.create(
+                command: command,
+                args: args,
+                cwd: cwd,
+                env: env,
+                outputByteLimit: limit
+            )
+            terminals = terminalsHost.snapshots
+            respond(id: id, result: ["terminalId": terminalID])
+        } catch {
+            respondError(id: id, message: error.localizedDescription)
+        }
+    }
+
+    private func handleTerminalOutput(id: JSONRPCID, params: [String: Any]) {
+        guard let terminalID = params["terminalId"] as? String ?? params["terminal_id"] as? String,
+              let output = terminalsHost.output(id: terminalID)
+        else {
+            respondError(id: id, message: "Unknown terminal")
+            return
+        }
+        respond(id: id, result: output.json)
+    }
+
+    private func handleTerminalWait(id: JSONRPCID, params: [String: Any]) {
+        guard let terminalID = params["terminalId"] as? String ?? params["terminal_id"] as? String else {
+            respondError(id: id, message: "Missing terminalId")
+            return
+        }
+        Task { @MainActor in
+            let status = await terminalsHost.waitForExit(id: terminalID)
+            var body: [String: Any] = [:]
+            if let code = status.exitCode { body["exitCode"] = Int(code) }
+            if let signal = status.signal { body["signal"] = signal }
+            self.respond(id: id, result: body)
+            self.terminals = self.terminalsHost.snapshots
+        }
+    }
+
+    private func handleTerminalKill(id: JSONRPCID, params: [String: Any]) {
+        guard let terminalID = params["terminalId"] as? String ?? params["terminal_id"] as? String else {
+            respondError(id: id, message: "Missing terminalId")
+            return
+        }
+        terminalsHost.kill(id: terminalID)
+        terminals = terminalsHost.snapshots
+        respond(id: id, result: [:] as [String: Any])
+    }
+
+    private func handleTerminalRelease(id: JSONRPCID, params: [String: Any]) {
+        guard let terminalID = params["terminalId"] as? String ?? params["terminal_id"] as? String else {
+            respondError(id: id, message: "Missing terminalId")
+            return
+        }
+        terminalsHost.release(id: terminalID)
+        terminals = terminalsHost.snapshots
+        respond(id: id, result: [:] as [String: Any])
+    }
+
+    private func sliceFile(_ text: String, line: Int?, limit: Int?) -> String {
+        guard line != nil || limit != nil else { return text }
+        let rows = text.split(separator: "\n", omittingEmptySubsequences: false)
+        let start = max((line ?? 1) - 1, 0)
+        let end = min(rows.count, start + max(limit ?? (rows.count - start), 0))
+        guard start < rows.count else { return "" }
+        return rows[start..<end].joined(separator: "\n")
+    }
+
+    private func respondError(id: JSONRPCID, message: String) {
+        try? write(JSONRPCEnvelope(id: id, error: ["code": -32000, "message": message]))
     }
 
     @discardableResult
@@ -991,6 +1196,9 @@ public final class ACPClient: ObservableObject {
         guard let stdinHandle else {
             scheduleReconnect()
             throw ACPError.rpc("Agent stdin is closed")
+        }
+        if let method = envelope.method {
+            recordEvent(inbound: false, method: method, params: envelope.params)
         }
         var data = try envelope.encoded()
         data.append(0x0A)

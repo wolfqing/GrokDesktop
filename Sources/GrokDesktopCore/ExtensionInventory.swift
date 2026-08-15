@@ -45,7 +45,8 @@ public enum DiagnosticExport {
         lastError: String?,
         sessionID: String?,
         cwd: String,
-        stderr: [String]
+        stderr: [String],
+        events: [String] = []
     ) -> String {
         var lines = [
             "Grok Desktop diagnostic",
@@ -56,8 +57,11 @@ public enum DiagnosticExport {
             "cwd: \(redact(cwd))",
             "error: \(redact(lastError ?? "none"))",
             "",
-            "stderr:"
+            "events:"
         ]
+        lines.append(contentsOf: events.suffix(80).map(redact))
+        lines.append("")
+        lines.append("stderr:")
         lines.append(contentsOf: stderr.suffix(80).map(redact))
         return lines.joined(separator: "\n")
     }

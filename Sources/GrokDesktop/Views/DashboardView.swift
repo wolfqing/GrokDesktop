@@ -59,6 +59,11 @@ struct DashboardView: View {
                 .font(.system(size: 12))
                 .foregroundStyle(palette.secondary)
                 .help(workspace.cwd.path)
+            if !workspace.subagents.isEmpty {
+                Text("\(workspace.subagents.filter(\.isRunning).count)/\(workspace.subagents.count) \(l10n.subagents)")
+                    .font(.system(size: 11))
+                    .foregroundStyle(palette.secondary)
+            }
             HStack {
                 Text("\(workspace.runningTools) \(l10n.running)")
                 Text("\(workspace.finishedTools) \(l10n.completed)")
@@ -82,7 +87,11 @@ struct DashboardView: View {
 
     private func statusText(_ workspace: SessionWorkspace) -> String {
         if workspace.permission != nil { return l10n.t("Needs approval", "等待批准") }
+        if workspace.userQuestion != nil { return l10n.t("Waiting for an answer", "等待回答") }
         if workspace.isTurnRunning { return l10n.running }
+        if workspace.tasks.contains(where: \.isRunning) || workspace.subagents.contains(where: \.isRunning) {
+            return l10n.t("Background work", "后台还在跑")
+        }
         if !workspace.promptQueue.isEmpty { return l10n.t("Queued", "排队中") }
         return l10n.t("Awaiting input", "等待输入")
     }

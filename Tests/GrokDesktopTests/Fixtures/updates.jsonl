@@ -2,3 +2,18 @@
 {"method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Hi there"}}}}
 {"method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"plan","entries":[{"content":"Step one","priority":"medium","status":"pending"}]}}}
 {"method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"tool_call","toolCallId":"t1","title":"read_file","status":"completed","content":[{"type":"content","content":{"type":"text","text":"diff --git a/a.txt"}}]}}}
+{"method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"I will inspect the file first."}}}}
+{"method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"tool_call","toolCallId":"todo1","title":"todo_write","status":"completed","rawInput":{"todos":[{"id":"1","content":"Read App.swift","status":"completed"},{"id":"2","content":"Summarize","status":"in_progress"}]}}}}
+{"method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"task_backgrounded","task_id":"bg1","command":"swift build","description":"Compile"}}}
+{"method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"task_completed","task_snapshot":{"task_id":"bg1","command":"swift build","description":"Compile","start_time":{"secs_since_epoch":100,"nanos_since_epoch":0},"end_time":{"secs_since_epoch":118,"nanos_since_epoch":0}}}}}
+{"method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"subagent_spawned","subagent_id":"child-1","child_session_id":"child-1","subagent_type":"explore","description":"Scan sources"}}}
+{"method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"subagent_finished","subagent_id":"child-1","child_session_id":"child-1","status":"completed","tool_calls":4,"turns":1,"duration_ms":1200,"output":"done"}}}
+{"method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"retry_state","type":"retrying","attempt":1,"max_retries":3,"reason":"timeout"}}}
+{"method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"scheduled_task_created","task_id":"loop1","prompt":"Check CI","human_schedule":"1h"}}}
+{"method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"session_recap","summary":"We opened App.swift and compiled."}}}
+{"method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"auto_compact_started","percentage":80}}}
+{"method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"compaction_checkpoint","checkpoint_id":"cp1"}}}
+{"method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"auto_compact_completed","tokens_before":100,"tokens_after":20}}}
+{"method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"image_compressed","images":[{"index":1,"original_bytes":1000,"compressed_bytes":400}]}}}
+{"method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"turn_completed","stop_reason":"end_turn"}}}
+{"method":"_x.ai/session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"hook_execution","event_name":"stop"}}}

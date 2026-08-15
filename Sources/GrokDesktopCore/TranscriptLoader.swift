@@ -38,6 +38,9 @@ public struct Transcript: Sendable {
     public var itemImages: [String: [URL]]
     public var todos: [AgentTodo]
     public var tasks: [AgentTask]
+    public var recap: String
+    public var compacted: Bool
+    public var subagents: [AgentSubagent]
 
     public init(
         items: [ConversationItem] = [],
@@ -47,7 +50,10 @@ public struct Transcript: Sendable {
         itemDates: [String: Date] = [:],
         itemImages: [String: [URL]] = [:],
         todos: [AgentTodo] = [],
-        tasks: [AgentTask] = []
+        tasks: [AgentTask] = [],
+        recap: String = "",
+        compacted: Bool = false,
+        subagents: [AgentSubagent] = []
     ) {
         self.items = items
         self.planEntries = planEntries
@@ -57,96 +63,51 @@ public struct Transcript: Sendable {
         self.itemImages = itemImages
         self.todos = todos
         self.tasks = tasks
+        self.recap = recap
+        self.compacted = compacted
+        self.subagents = subagents
+    }
+
+    public var snapshot: SessionSnapshot {
+        SessionSnapshot(
+            items: items,
+            planEntries: planEntries,
+            itemDates: itemDates,
+            itemImages: itemImages,
+            todos: todos,
+            tasks: tasks,
+            recap: recap,
+            compacted: compacted,
+            subagents: subagents
+        )
     }
 }
 
 public enum TranscriptLoader {
     public static func load(sessionDirectory: URL, limit: Int = 400) -> Transcript {
-        var items: [ConversationItem] = []
-        var planEntries: [PlanEntry] = []
-        var itemDates: [String: Date] = [:]
-        var itemImages: [String: [URL]] = [:]
-        var todos: [AgentTodo] = []
-        var tasks: [AgentTask] = []
-        var assistantID: String?
-        var thoughtID: String?
+        var snapshot = SessionReplay.replay(sessionDirectory: sessionDirectory).snapshot
 
-        applyJSONL(
-            sessionDirectory.appendingPathComponent("updates.jsonl"),
-            items: &items,
-            planEntries: &planEntries,
-            assistantID: &assistantID,
-            thoughtID: &thoughtID,
-            itemDates: &itemDates,
-            itemImages: &itemImages,
-            todos: &todos,
-            tasks: &tasks
-        )
+        attachDiskImages(sessionDirectory: sessionDirectory, items: snapshot.items, itemImages: &snapshot.itemImages)
 
-        let hasUser = items.contains {
-            if case .user = $0 { return true }
-            return false
-        }
-        if !hasUser {
-            let fallback = loadChatHistory(sessionDirectory.appendingPathComponent("chat_history.jsonl"))
-            if !fallback.items.isEmpty {
-                items = fallback.items
-                itemDates.merge(fallback.itemDates) { current, _ in current }
-            }
-        }
-
-        attachDiskImages(sessionDirectory: sessionDirectory, items: items, itemImages: &itemImages)
-
-        if items.count > limit {
-            items = Array(items.suffix(limit))
+        if snapshot.items.count > limit {
+            snapshot.items = Array(snapshot.items.suffix(limit))
         }
 
         let planURL = sessionDirectory.appendingPathComponent("plan.md")
         let planMarkdown = (try? String(contentsOf: planURL, encoding: .utf8)) ?? ""
         return Transcript(
-            items: items,
-            planEntries: planEntries,
+            items: snapshot.items,
+            planEntries: snapshot.planEntries,
             planMarkdown: planMarkdown,
             hunks: loadHunks(sessionDirectory: sessionDirectory),
-            itemDates: itemDates,
-            itemImages: itemImages,
-            todos: todos,
-            tasks: tasks
+            itemDates: snapshot.itemDates,
+            itemImages: snapshot.itemImages,
+            todos: snapshot.todos,
+            tasks: snapshot.tasks,
+            recap: snapshot.recap,
+            compacted: snapshot.compacted,
+            subagents: snapshot.subagents
         )
-    }
-
-    public static func applyJSONL(
-        _ url: URL,
-        items: inout [ConversationItem],
-        planEntries: inout [PlanEntry],
-        assistantID: inout String?,
-        thoughtID: inout String?,
-        itemDates: inout [String: Date],
-        itemImages: inout [String: [URL]],
-        todos: inout [AgentTodo],
-        tasks: inout [AgentTask]
-    ) {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return }
-        defer { try? handle.close() }
-        let text = String(data: handle.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
-            guard let payload = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any] else {
-                continue
-            }
-            let params = payload["params"] as? [String: Any] ?? payload
-            let update = SessionUpdate.parse(params: params, envelopeTimestamp: payload["timestamp"])
-            apply(
-                update: update,
-                items: &items,
-                planEntries: &planEntries,
-                assistantID: &assistantID,
-                thoughtID: &thoughtID,
-                itemDates: &itemDates,
-                itemImages: &itemImages,
-                todos: &todos,
-                tasks: &tasks
-            )
-        }
     }
 
     public static func loadChatHistory(_ url: URL) -> Transcript {
@@ -391,7 +352,10 @@ public enum TranscriptLoader {
             if !text.isEmpty {
                 items.append(.notice(id: UUID().uuidString, text: text))
             }
-        case .autoCompactStarted, .turnCompleted, .unknown:
+        case .autoCompactStarted, .turnCompleted, .unknown,
+                .hookExecution, .compactionCheckpoint, .retryState,
+                .hooksChanged, .pluginsChanged, .scheduledTaskCreated,
+                .scheduledTaskDeleted, .subagentSpawned, .subagentFinished:
             assistantID = nil
             thoughtID = nil
         }

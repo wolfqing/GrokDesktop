@@ -4,7 +4,7 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 
-version="${VERSION:-0.1.7}"
+version="${VERSION:-0.1.8}"
 
 swift build -c release --product GrokDesktop
 

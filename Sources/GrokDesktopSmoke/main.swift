@@ -71,6 +71,9 @@ expect(transcript.items.contains(where: {
     return false
 }), "transcript assistant")
 expect(transcript.planEntries.first?.content == "Step one", "plan entries")
+expect(transcript.recap.contains("App.swift"), "transcript recap from fold")
+expect(transcript.compacted, "transcript compacted from fold")
+expect(transcript.subagents.count == 1, "transcript subagent from fold")
 
 let planUpdate = SessionUpdate.parse(params: [
     "update": [
@@ -565,6 +568,69 @@ expect(folded.items.contains(where: { if case .user(_, let text) = $0 { return t
 expect(folded.items.contains(where: { if case .notice(_, let text) = $0 { return text.contains("opened") }; return false }), "fold recap is durable")
 expect(folded.items.contains(where: { if case .notice(_, let text) = $0 { return text.contains("compacted") }; return false }), "fold compact is durable")
 expect(folded.lastUserPreview.contains("App.swift"), "projection last user")
+expect(folded.recap.contains("opened"), "fold stores recap")
+expect(folded.compacted, "fold stores compacted")
+
+var cancelSnap = SessionFold.apply([
+    SessionUpdate(kind: .toolCall, title: "build", toolCallId: "run1", status: "running"),
+    SessionUpdate(kind: .taskBackgrounded, text: "swift build", raw: ["task_id": "bg", "command": "swift build", "description": "Build"]),
+    SessionUpdate(kind: .subagentSpawned, raw: ["subagent_id": "kid", "description": "Explore", "subagent_type": "explore"])
+])
+expect(cancelSnap.tasks.contains(where: { $0.isRunning }), "cancel setup task")
+expect(cancelSnap.subagents.contains(where: { $0.isRunning }), "cancel setup subagent")
+SessionFold.cancelActiveWork(onto: &cancelSnap)
+expect(cancelSnap.items.contains(where: { if case .tool(_, _, let status, _) = $0 { return status == "cancelled" }; return false }), "cancel tools via fold")
+expect(cancelSnap.tasks.allSatisfy { !$0.isRunning }, "cancel tasks via fold")
+expect(cancelSnap.subagents.allSatisfy { !$0.isRunning }, "cancel subagents via fold")
+
+let workspace = SessionWorkspace(id: "w1", cwd: URL(fileURLWithPath: "/tmp"))
+workspace.fold(SessionFold.userTurn("hi"))
+workspace.fold(SessionUpdate(kind: .sessionRecap, text: "Said hello"))
+workspace.fold(SessionUpdate(kind: .autoCompactCompleted))
+expect(workspace.recap == "Said hello", "workspace fold recap")
+expect(workspace.compacted, "workspace fold compacted")
+workspace.fold(SessionUpdate(kind: .toolCall, title: "run", toolCallId: "x", status: "running"))
+workspace.markWorkStopped()
+expect(workspace.items.contains(where: { if case .tool(_, _, let status, _) = $0 { return status == "cancelled" }; return false }), "workspace stop uses fold")
+
+expect(FileManager.default.fileExists(atPath: updates.path), "replay fixture exists")
+let replayed = SessionReplay.replay(jsonl: updates)
+expect(replayed.report.updateCount >= 18, "replay reads fixture updates \(replayed.report.updateCount)")
+expect(replayed.report.userCount == 1, "replay users")
+expect(replayed.report.assistantCount == 1, "replay assistants")
+expect(replayed.report.toolCount >= 2, "replay tools")
+expect(replayed.report.todoCount == 2, "replay todos")
+expect(replayed.report.taskCount == 1, "replay tasks")
+expect(replayed.report.planCount == 1, "replay plan")
+expect(replayed.report.compacted, "replay compacted")
+expect(replayed.report.recap.contains("App.swift"), "replay recap")
+expect(replayed.report.subagentCount == 1, "replay subagent")
+expect(replayed.snapshot.subagents.first?.status == "completed", "replay subagent finished")
+expect(replayed.snapshot.items.contains(where: { if case .notice(_, let text) = $0 { return text.contains("Retrying") }; return false }), "replay retry notice")
+
+if let liveJSONL = SessionReplay.firstJSONL(
+    under: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".grok/sessions")
+) {
+    let live = SessionReplay.replay(jsonl: liveJSONL)
+    expect(live.report.updateCount > 0, "live session replay has updates")
+}
+
+let host = TerminalHost()
+let termID = try! host.create(command: "printf 'grok-desktop-terminal\\n'")
+var termOut = host.output(id: termID)
+for _ in 0..<40 {
+    if termOut?.exitCode != nil { break }
+    Thread.sleep(forTimeInterval: 0.05)
+    termOut = host.output(id: termID)
+}
+expect(termOut?.exitCode == 0, "terminal exit 0")
+expect(termOut?.output.contains("grok-desktop-terminal") == true, "terminal captured stdout")
+host.release(id: termID)
+expect(host.snapshots.isEmpty, "terminal released")
+
+expect(SessionUpdateKind(rawValue: "subagent_spawned") == .subagentSpawned, "subagent kind")
+expect(SessionUpdateKind(rawValue: "retry_state") == .retryState, "retry kind")
+expect(ACPEvent.preview(method: "session/prompt", params: ["sessionId": "abcdef1234"]).contains("abcd"), "event preview")
 
 let planQ = UserQuestion.parse([
     "question": "Approve this plan?",

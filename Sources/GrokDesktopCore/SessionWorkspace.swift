@@ -24,6 +24,9 @@ public final class SessionWorkspace: Identifiable {
     public var itemImages: [String: [URL]] = [:]
     public var todos: [AgentTodo] = []
     public var tasks: [AgentTask] = []
+    public var recap = ""
+    public var compacted = false
+    public var subagents: [AgentSubagent] = []
     public var stopRequested = false
 
     public init(id: String, cwd: URL, directory: URL? = nil, title: String = "") {
@@ -34,26 +37,23 @@ public final class SessionWorkspace: Identifiable {
     }
 
     public var isLive: Bool {
-        !stopRequested && (isTurnRunning || permission != nil || userQuestion != nil || !promptQueue.isEmpty)
+        !stopRequested && (
+            isTurnRunning
+                || permission != nil
+                || userQuestion != nil
+                || !promptQueue.isEmpty
+                || tasks.contains(where: \.isRunning)
+                || subagents.contains(where: \.isRunning)
+        )
     }
 
     public func markWorkStopped() {
         stopRequested = true
         isTurnRunning = false
         promptQueue.removeAll()
-        for index in todos.indices where todos[index].isActive {
-            todos[index].status = "cancelled"
-        }
-        for index in tasks.indices where tasks[index].isRunning {
-            tasks[index].status = "cancelled"
-            tasks[index].endedAt = Date()
-        }
-        for index in items.indices {
-            if case .tool(let id, let title, let status, let detail) = items[index],
-               status == "running" || status == "pending" || status == "in_progress" {
-                items[index] = .tool(id: id, title: title, status: "cancelled", detail: detail)
-            }
-        }
+        var next = snapshot()
+        SessionFold.cancelActiveWork(onto: &next)
+        adopt(next)
     }
 
     public var runningTools: Int {
