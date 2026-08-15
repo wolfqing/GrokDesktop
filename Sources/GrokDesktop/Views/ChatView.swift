@@ -85,21 +85,28 @@ private struct ChatScrollBottomMonitor: NSViewRepresentable {
 
         func emit() {
             guard let clip else { return }
-            let visible = clip.documentVisibleRect
-            let documentHeight = clip.documentView?.bounds.height ?? visible.maxY
-            onMetrics(
-                ChatScrollMetrics(
-                    offset: visible.minY,
-                    visible: visible.height,
-                    content: documentHeight
-                )
-            )
+            if let scroll {
+                ThinChatScroller.hideSystemScrollers(on: scroll)
+            }
+            onMetrics(Self.metrics(from: clip, slack: slack))
             guard Date() >= ignoreUntil else { return }
-            let near = documentHeight - visible.maxY <= slack
+            let near = Self.metrics(from: clip, slack: slack).isNearBottom
             if lastNear != near {
                 lastNear = near
                 onChange(near)
             }
+        }
+
+        static func metrics(from clip: NSClipView, slack: CGFloat) -> ChatScrollMetrics {
+            let visible = clip.documentVisibleRect
+            let content = clip.documentView?.bounds.height ?? visible.height
+            let viewH = max(clip.bounds.height, 1)
+            let flippedStart = visible.minY
+            let flippedEnd = content - visible.maxY
+            let legacyStart = content - visible.maxY
+            let useFlipped = (flippedEnd <= slack && flippedStart > slack) || flippedStart >= legacyStart
+            let offset = max(useFlipped ? flippedStart : legacyStart, 0)
+            return ChatScrollMetrics(offset: offset, visible: viewH, content: max(content, viewH))
         }
 
         private func enclosingScrollView(from view: NSView) -> NSScrollView? {
@@ -237,7 +244,7 @@ struct ChatView: View {
                 }
 
                 ScrollViewReader { proxy in
-                    ZStack(alignment: .bottomTrailing) {
+                    ZStack(alignment: .bottom) {
                         ScrollView {
                             LazyVStack(
                                 alignment: .leading,
@@ -299,22 +306,20 @@ struct ChatView: View {
                             }
                         )
 
-                        if !stickToLatest {
+                        if showJumpToLatest {
                             Button {
                                 jumpToLatest(proxy)
                             } label: {
                                 Image(systemName: "arrow.down")
                                     .font(.system(size: 13, weight: .semibold))
                                     .foregroundStyle(palette.text)
-                                    .frame(width: 34, height: 34)
+                                    .frame(width: 32, height: 32)
                                     .background(palette.elevated, in: Circle())
-                                    .overlay(Circle().stroke(palette.hairline))
                                     .shadow(color: Color.black.opacity(0.12), radius: 8, y: 3)
                             }
                             .buttonStyle(.plain)
                             .help(l10n.jumpToLatest)
-                            .padding(.trailing, 28)
-                            .padding(.bottom, 16)
+                            .padding(.bottom, 12)
                             .accessibilityLabel(l10n.jumpToLatest)
                         }
                     }
@@ -648,17 +653,21 @@ struct ChatView: View {
         return turns
     }
 
+    private var showJumpToLatest: Bool {
+        scrollMetrics.canScroll && !scrollMetrics.isNearBottom
+    }
+
     private var chatThumb: some View {
         GeometryReader { geo in
             if scrollMetrics.canScroll {
                 let inset: CGFloat = 10
                 let track = max(geo.size.height - inset * 2, 1)
-                let height = min(max(scrollMetrics.visible / scrollMetrics.content * track, 24), track)
+                let height = min(max(scrollMetrics.visible / max(scrollMetrics.content, 1) * track, 24), track)
                 let y = inset + scrollMetrics.progress * (track - height)
                 Capsule()
-                    .fill(palette.text.opacity(0.28))
+                    .fill(palette.text.opacity(0.22))
                     .frame(width: 3, height: height)
-                    .position(x: geo.size.width - 5, y: y + height / 2)
+                    .offset(x: geo.size.width - 6, y: y)
             }
         }
         .allowsHitTesting(false)
