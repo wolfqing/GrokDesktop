@@ -686,6 +686,12 @@ if let liveJSONL = SessionReplay.firstJSONL(
     expect(live.report.updateCount > 0, "live session replay has updates")
 }
 
+expect(ChatScrollMath.originY(progress: 0, content: 2000, visible: 800, flipped: true) == 0, "flipped top")
+expect(ChatScrollMath.originY(progress: 1, content: 2000, visible: 800, flipped: true) == 1200, "flipped bottom")
+expect(ChatScrollMath.originY(progress: 0, content: 2000, visible: 800, flipped: false) == 1200, "unflipped top")
+expect(abs(ChatScrollMath.progress(locationY: 14, track: 200, thumb: 28) - 0) < 0.001, "thumb top is 0")
+expect(abs(ChatScrollMath.progress(locationY: 186, track: 200, thumb: 28) - 1) < 0.001, "thumb bottom is 1")
+
 let timeoutDir = FileManager.default.temporaryDirectory.appendingPathComponent("gd-timeout-\(UUID().uuidString)", isDirectory: true)
 try! FileManager.default.createDirectory(at: timeoutDir, withIntermediateDirectories: true)
 let started = Date()

@@ -2,23 +2,35 @@ import AppKit
 import GrokDesktopCore
 import SwiftUI
 
-private struct ChatScrollMetrics: Equatable {
-    var offset: CGFloat = 0
-    var visible: CGFloat = 0
-    var content: CGFloat = 0
+private struct ChatScrollGeometryReader: ViewModifier {
+    var onMetrics: (ChatScrollMetrics) -> Void
 
-    var canScroll: Bool { content > visible + 12 }
-    var travel: CGFloat { max(content - visible, 1) }
-    var progress: CGFloat { min(max(offset / travel, 0), 1) }
-    var isNearBottom: Bool { content - (offset + visible) <= 56 }
+    func body(content: Content) -> some View {
+        if #available(macOS 15.0, *) {
+            content.onScrollGeometryChange(for: ChatScrollMetrics.self) { geo in
+                ChatScrollMetrics(
+                    offset: max(geo.visibleRect.minY, 0),
+                    visible: max(geo.containerSize.height, 1),
+                    content: max(geo.contentSize.height, geo.containerSize.height)
+                )
+            } action: { _, metrics in
+                onMetrics(metrics)
+            }
+        } else {
+            content
+        }
+    }
 }
 
-private struct ChatScrollBottomMonitor: NSViewRepresentable {
+
+
+struct ChatScrollBottomMonitor: NSViewRepresentable {
     var ignoreUntil: Date
     var slack: CGFloat = 56
     var isDark = false
     var onNearBottomChange: (Bool) -> Void
     var onMetrics: (ChatScrollMetrics) -> Void = { _ in }
+    var driver: ChatScrollDriver?
 
     @MainActor
     final class Coordinator {
@@ -32,6 +44,7 @@ private struct ChatScrollBottomMonitor: NSViewRepresentable {
         var isDark = false
         var onChange: (Bool) -> Void = { _ in }
         var onMetrics: (ChatScrollMetrics) -> Void = { _ in }
+        var driver: ChatScrollDriver?
         private var attachAttempts = 0
 
         func attach(from view: NSView) {
@@ -41,6 +54,7 @@ private struct ChatScrollBottomMonitor: NSViewRepresentable {
             }
             if let scroll = enclosingScrollView(from: view) {
                 self.scroll = scroll
+                driver?.attach(scroll)
                 styleScroller()
                 observe(scroll.contentView)
                 return
@@ -55,7 +69,7 @@ private struct ChatScrollBottomMonitor: NSViewRepresentable {
 
         func styleScroller() {
             guard let scroll else { return }
-            ThinChatScroller.hideSystemScrollers(on: scroll)
+            driver?.attach(scroll)
         }
 
         func observe(_ clip: NSClipView) {
@@ -86,46 +100,47 @@ private struct ChatScrollBottomMonitor: NSViewRepresentable {
         func emit() {
             guard let clip else { return }
             if let scroll {
-                ThinChatScroller.hideSystemScrollers(on: scroll)
+                driver?.attach(scroll)
             }
-            onMetrics(Self.metrics(from: clip, slack: slack))
+            let metrics = Self.metrics(from: clip, slack: slack)
+            driver?.update(metrics: metrics, isDark: isDark)
+            onMetrics(metrics)
             guard Date() >= ignoreUntil else { return }
-            let near = Self.metrics(from: clip, slack: slack).isNearBottom
-            if lastNear != near {
-                lastNear = near
-                onChange(near)
+            if lastNear != metrics.isNearBottom {
+                lastNear = metrics.isNearBottom
+                onChange(metrics.isNearBottom)
             }
         }
 
         static func metrics(from clip: NSClipView, slack: CGFloat) -> ChatScrollMetrics {
             let visible = clip.documentVisibleRect
-            let content = clip.documentView?.bounds.height ?? visible.height
+            let content = max(clip.documentView?.bounds.height ?? visible.height, visible.height)
             let viewH = max(clip.bounds.height, 1)
-            let flippedStart = visible.minY
-            let flippedEnd = content - visible.maxY
-            let legacyStart = content - visible.maxY
-            let useFlipped = (flippedEnd <= slack && flippedStart > slack) || flippedStart >= legacyStart
-            let offset = max(useFlipped ? flippedStart : legacyStart, 0)
-            return ChatScrollMetrics(offset: offset, visible: viewH, content: max(content, viewH))
+            let flipped = clip.documentView?.isFlipped ?? clip.isFlipped
+            let offset = max(flipped ? visible.minY : content - visible.maxY, 0)
+            return ChatScrollMetrics(offset: offset, visible: viewH, content: content)
         }
 
         private func enclosingScrollView(from view: NSView) -> NSScrollView? {
             if let scroll = view.enclosingScrollView { return scroll }
+            if let parent = view.superview {
+                for sibling in parent.subviews {
+                    if let scroll = nearbyScrollView(in: sibling) { return scroll }
+                }
+            }
             var current: NSView? = view
-            for _ in 0..<10 {
+            for _ in 0..<12 {
                 if let scroll = current as? NSScrollView { return scroll }
+                if let scroll = current?.enclosingScrollView { return scroll }
                 current = current?.superview
             }
-            var root: NSView? = view
-            for _ in 0..<8 { root = root?.superview ?? root }
-            return findScrollView(in: root)
+            return nil
         }
 
-        private func findScrollView(in view: NSView?) -> NSScrollView? {
-            guard let view else { return nil }
+        private func nearbyScrollView(in view: NSView) -> NSScrollView? {
             if let scroll = view as? NSScrollView { return scroll }
             for child in view.subviews {
-                if let found = findScrollView(in: child) { return found }
+                if let scroll = child as? NSScrollView { return scroll }
             }
             return nil
         }
@@ -143,6 +158,7 @@ private struct ChatScrollBottomMonitor: NSViewRepresentable {
         coordinator.isDark = isDark
         coordinator.onChange = onNearBottomChange
         coordinator.onMetrics = onMetrics
+        coordinator.driver = driver
         return coordinator
     }
 
@@ -161,6 +177,10 @@ private struct ChatScrollBottomMonitor: NSViewRepresentable {
         context.coordinator.isDark = isDark
         context.coordinator.onChange = onNearBottomChange
         context.coordinator.onMetrics = onMetrics
+        context.coordinator.driver = driver
+        if let scroll = context.coordinator.scroll {
+            driver?.attach(scroll)
+        }
         if context.coordinator.clip == nil {
             context.coordinator.attach(from: nsView)
         } else {
@@ -178,6 +198,7 @@ struct ChatView: View {
     @State private var copiedPromptID: String?
     @State private var ignoreScrollUntil = Date.distantPast
     @State private var scrollMetrics = ChatScrollMetrics()
+    @State private var scrollDriver = ChatScrollDriver()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -244,7 +265,7 @@ struct ChatView: View {
                 }
 
                 ScrollViewReader { proxy in
-                    ZStack(alignment: .bottom) {
+                    ZStack {
                         ScrollView {
                             LazyVStack(
                                 alignment: .leading,
@@ -263,7 +284,7 @@ struct ChatView: View {
                                                 .id(user.id)
                                                 .frame(maxWidth: .infinity)
                                                 .padding(.bottom, 2)
-                                                .background(palette.canvas)
+                                                .background(Color.clear)
                                         }
                                     }
                                 }
@@ -275,29 +296,19 @@ struct ChatView: View {
                             .padding(.vertical, model.compactChat ? 16 : 32)
                             .frame(maxWidth: .infinity)
                         }
-                        .scrollIndicators(.hidden)
+                        .scrollIndicators(.never)
+                        .modifier(ChatScrollGeometryReader { applyScrollMetrics($0) })
                         .background(
                             ChatScrollBottomMonitor(
                                 ignoreUntil: ignoreScrollUntil,
                                 isDark: palette.isDark,
                                 onNearBottomChange: { nearBottom in
-                                    if stickToLatest != nearBottom {
-                                        stickToLatest = nearBottom
-                                    }
+                                    applyNearBottom(nearBottom)
                                 },
-                                onMetrics: { metrics in
-                                    if scrollMetrics != metrics {
-                                        scrollMetrics = metrics
-                                    }
-                                    if Date() >= ignoreScrollUntil, stickToLatest != metrics.isNearBottom {
-                                        stickToLatest = metrics.isNearBottom
-                                    }
-                                }
+                                onMetrics: { applyScrollMetrics($0) },
+                                driver: scrollDriver
                             )
                         )
-                        .overlay(alignment: .trailing) {
-                            chatThumb
-                        }
                         .simultaneousGesture(
                             TapGesture().onEnded {
                                 if model.mentionQuery != nil || model.showPalette {
@@ -305,22 +316,27 @@ struct ChatView: View {
                                 }
                             }
                         )
-
-                        if showJumpToLatest {
-                            Button {
-                                jumpToLatest(proxy)
-                            } label: {
-                                Image(systemName: "arrow.down")
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(palette.text)
-                                    .frame(width: 32, height: 32)
-                                    .background(palette.elevated, in: Circle())
-                                    .shadow(color: Color.black.opacity(0.12), radius: 8, y: 3)
+                        .overlay(alignment: .trailing) {
+                            chatScrollbar(proxy)
+                        }
+                        .overlay(alignment: .bottom) {
+                            if showJumpToLatest {
+                                Button {
+                                    jumpToLatest(proxy)
+                                } label: {
+                                    Image(systemName: "arrow.down")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(palette.text)
+                                        .frame(width: 34, height: 34)
+                                        .background(palette.elevated, in: Circle())
+                                        .overlay(Circle().stroke(palette.hairline, lineWidth: 1))
+                                }
+                                .buttonStyle(.plain)
+                                .help(l10n.jumpToLatest)
+                                .padding(.bottom, 10)
+                                .accessibilityLabel(l10n.jumpToLatest)
+                                .transition(.opacity.combined(with: .scale(scale: 0.92)))
                             }
-                            .buttonStyle(.plain)
-                            .help(l10n.jumpToLatest)
-                            .padding(.bottom, 12)
-                            .accessibilityLabel(l10n.jumpToLatest)
                         }
                     }
                     .id(model.client.sessionID ?? "none")
@@ -654,23 +670,58 @@ struct ChatView: View {
     }
 
     private var showJumpToLatest: Bool {
-        scrollMetrics.canScroll && !scrollMetrics.isNearBottom
+        scrollMetrics.canScroll && (!stickToLatest || !scrollMetrics.isNearBottom)
     }
 
-    private var chatThumb: some View {
-        GeometryReader { geo in
-            if scrollMetrics.canScroll {
-                let inset: CGFloat = 10
-                let track = max(geo.size.height - inset * 2, 1)
-                let height = min(max(scrollMetrics.visible / max(scrollMetrics.content, 1) * track, 24), track)
-                let y = inset + scrollMetrics.progress * (track - height)
-                Capsule()
-                    .fill(palette.text.opacity(0.22))
-                    .frame(width: 3, height: height)
-                    .offset(x: geo.size.width - 6, y: y)
-            }
+    private func applyNearBottom(_ near: Bool) {
+        guard Date() >= ignoreScrollUntil else { return }
+        if stickToLatest != near {
+            stickToLatest = near
         }
-        .allowsHitTesting(false)
+    }
+
+    private func applyScrollMetrics(_ metrics: ChatScrollMetrics) {
+        if scrollMetrics != metrics {
+            scrollMetrics = metrics
+        }
+        applyNearBottom(metrics.isNearBottom)
+    }
+
+    private func chatScrollbar(_ proxy: ScrollViewProxy) -> some View {
+        OverlayScrollbar(
+            metrics: scrollMetrics,
+            isDark: palette.isDark,
+            onSeek: { progress in
+                seekConversation(proxy, to: progress)
+            }
+        )
+        .frame(width: 14)
+        .padding(.vertical, 6)
+    }
+
+    private var scrollableIDs: [String] {
+        var ids: [String] = []
+        for turn in chatTurns {
+            if let user = turn.user { ids.append(user.id) }
+            for row in turn.body { ids.append(row.id) }
+        }
+        ids.append("latest-anchor")
+        return ids
+    }
+
+    private func seekConversation(_ proxy: ScrollViewProxy, to progress: CGFloat) {
+        stickToLatest = progress >= 0.985
+        ignoreScrollUntil = Date().addingTimeInterval(0.25)
+        scrollDriver.seek(to: progress)
+        let ids = scrollableIDs
+        guard !ids.isEmpty else { return }
+        if progress >= 0.985 {
+            jumpToLatest(proxy)
+            return
+        }
+        let maxIndex = max(ids.count - 1, 0)
+        let index = min(max(Int((progress * CGFloat(maxIndex)).rounded()), 0), maxIndex)
+        proxy.scrollTo(ids[index], anchor: .top)
     }
 
     private var lastDisplayID: String? {
@@ -753,6 +804,13 @@ struct ChatView: View {
         })?.id == id
     }
 
+    private func isLatestUser(_ id: String) -> Bool {
+        model.client.items.last(where: {
+            if case .user = $0 { return true }
+            return false
+        })?.id == id
+    }
+
     private func isTodoTool(_ item: ConversationItem) -> Bool {
         guard case .tool(_, let title, _, _) = item else { return false }
         return ToolVoice.kind(title) == .todo
@@ -812,16 +870,30 @@ struct ChatView: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, model.compactChat ? 8 : 10)
                     .background(palette.selected, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    Button {
-                        copyPrompt(id, text)
-                    } label: {
-                        Image(systemName: copiedPromptID == id ? "checkmark" : "square.on.square")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(palette.secondary)
-                            .frame(width: 22, height: 22)
+                    HStack(spacing: 4) {
+                        if isLatestUser(id) {
+                            Button {
+                                model.restorePromptToComposer(text)
+                            } label: {
+                                Image(systemName: "arrow.uturn.backward")
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(palette.secondary)
+                                    .frame(width: 22, height: 22)
+                            }
+                            .buttonStyle(.plain)
+                            .help(l10n.restorePrompt)
+                        }
+                        Button {
+                            copyPrompt(id, text)
+                        } label: {
+                            Image(systemName: copiedPromptID == id ? "checkmark" : "square.on.square")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(palette.secondary)
+                                .frame(width: 22, height: 22)
+                        }
+                        .buttonStyle(.plain)
+                        .help(copiedPromptID == id ? l10n.copied : l10n.copyPrompt)
                     }
-                    .buttonStyle(.plain)
-                    .help(copiedPromptID == id ? l10n.copied : l10n.copyPrompt)
                 }
             }
             .padding(.horizontal, model.compactChat ? 16 : 28)

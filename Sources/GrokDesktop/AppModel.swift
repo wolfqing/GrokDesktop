@@ -792,6 +792,14 @@ final class AppModel: ObservableObject {
         try? text.write(to: backup, atomically: true, encoding: .utf8)
     }
 
+    func restorePromptToComposer(_ text: String) {
+        let shown = PromptMedia.displayText(text)
+        draft = shown.isEmpty ? text : shown
+        destination = .build
+        showPalette = false
+        mentionQuery = nil
+    }
+
     func forkCurrent() {
         Task {
             do {

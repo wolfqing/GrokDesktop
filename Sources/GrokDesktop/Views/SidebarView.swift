@@ -5,6 +5,8 @@ struct SidebarView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.palette) private var palette
     @Environment(\.l10n) private var l10n
+    @State private var sidebarScroll = ChatScrollMetrics()
+    @State private var sidebarDriver = ChatScrollDriver()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -215,6 +217,24 @@ struct SidebarView: View {
                 }
                 .padding(.top, 14)
                 .padding(.bottom, 16)
+            }
+            .scrollIndicators(.never)
+            .background(
+                ChatScrollBottomMonitor(
+                    ignoreUntil: .distantPast,
+                    isDark: palette.isDark,
+                    onNearBottomChange: { _ in },
+                    onMetrics: { sidebarScroll = $0 },
+                    driver: sidebarDriver
+                )
+            )
+            .overlay(alignment: .trailing) {
+                OverlayScrollbar(
+                    metrics: sidebarScroll,
+                    isDark: palette.isDark,
+                    onSeek: { sidebarDriver.seek(to: $0) }
+                )
+                .frame(width: 14)
             }
             }
         }

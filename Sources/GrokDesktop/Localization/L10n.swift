@@ -165,6 +165,7 @@ struct L10n {
     var stop: String { t("Stop", "停止") }
     var stopping: String { t("Stopping…", "正在停止") }
     var copyPrompt: String { t("Copy prompt", "复制提示") }
+    var restorePrompt: String { t("Put back in the composer", "填回输入框") }
     var copied: String { t("Copied", "已复制") }
     var jumpToLatest: String { t("Jump to latest", "跳到最新") }
     var inspector: String { t("Inspector", "右边栏") }
