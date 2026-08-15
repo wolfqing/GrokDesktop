@@ -5,21 +5,29 @@ import SwiftUI
 private struct ChatScrollBottomMonitor: NSViewRepresentable {
     var ignoreUntil: Date
     var slack: CGFloat = 56
+    var isDark = false
     var onNearBottomChange: (Bool) -> Void
 
     @MainActor
     final class Coordinator {
         var clip: NSClipView?
+        weak var scroll: NSScrollView?
         nonisolated(unsafe) var token: NSObjectProtocol?
         var lastNear: Bool?
         var ignoreUntil = Date.distantPast
         var slack: CGFloat = 56
+        var isDark = false
         var onChange: (Bool) -> Void = { _ in }
         private var attachAttempts = 0
 
         func attach(from view: NSView) {
-            if clip != nil { return }
+            if clip != nil {
+                styleScroller()
+                return
+            }
             if let scroll = enclosingScrollView(from: view) {
+                self.scroll = scroll
+                styleScroller()
                 observe(scroll.contentView)
                 return
             }
@@ -29,6 +37,11 @@ private struct ChatScrollBottomMonitor: NSViewRepresentable {
                 guard let view else { return }
                 self.attach(from: view)
             }
+        }
+
+        func styleScroller() {
+            guard let scroll else { return }
+            ThinChatScroller.install(on: scroll, isDark: isDark)
         }
 
         func observe(_ clip: NSClipView) {
@@ -87,6 +100,7 @@ private struct ChatScrollBottomMonitor: NSViewRepresentable {
         let coordinator = Coordinator()
         coordinator.ignoreUntil = ignoreUntil
         coordinator.slack = slack
+        coordinator.isDark = isDark
         coordinator.onChange = onNearBottomChange
         return coordinator
     }
@@ -103,10 +117,12 @@ private struct ChatScrollBottomMonitor: NSViewRepresentable {
     func updateNSView(_ nsView: NSView, context: Context) {
         context.coordinator.ignoreUntil = ignoreUntil
         context.coordinator.slack = slack
+        context.coordinator.isDark = isDark
         context.coordinator.onChange = onNearBottomChange
         if context.coordinator.clip == nil {
             context.coordinator.attach(from: nsView)
         } else {
+            context.coordinator.styleScroller()
             context.coordinator.emit()
         }
     }
@@ -234,7 +250,10 @@ struct ChatView: View {
                             }
                         }
                         .background(
-                            ChatScrollBottomMonitor(ignoreUntil: ignoreScrollUntil) { nearBottom in
+                            ChatScrollBottomMonitor(
+                                ignoreUntil: ignoreScrollUntil,
+                                isDark: palette.isDark
+                            ) { nearBottom in
                                 if stickToLatest != nearBottom {
                                     stickToLatest = nearBottom
                                 }
