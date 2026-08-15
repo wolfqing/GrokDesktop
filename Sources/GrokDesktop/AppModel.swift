@@ -6,11 +6,14 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 enum MainDestination: String {
-    case chat
+    case webChat
+    case build
     case dashboard
     case imagine
     case automations
     case skills
+
+    var isBuildSurface: Bool { self != .webChat }
 }
 
 enum ResponseStyle: String, CaseIterable, Identifiable {
@@ -79,7 +82,12 @@ final class AppModel: ObservableObject {
     @Published var sidebarCollapsed = false
     @Published var projectsExpanded = true
     @Published var historyExpanded = true
-    @Published var destination: MainDestination = .chat
+    @Published var destination: MainDestination = .build
+    @Published var lastBuildDestination: MainDestination = .build
+    @Published var didOpenWebChat = false
+    @Published var showInAppLogin = false
+    @Published var inAppLoginURL: URL?
+    @Published var webChatSignedIn = false
     @Published var isPrivateChat = false
     @Published var settingsSection: SettingsSection = .account
     @Published var firstRunReason: FirstRunReason?
@@ -115,6 +123,7 @@ final class AppModel: ObservableObject {
     @Published var claudeImport = ClaudeImportSnapshot()
     @Published var promptHistory: [String] = UserDefaults.standard.stringArray(forKey: "promptHistory") ?? []
     private var escapeArmedAt: Date?
+    private var loginPollTask: Task<Void, Never>?
     @Published var sidebarNotice: String?
     @Published var needsFolderPick = false
     @Published var personas: [String] = []
@@ -214,11 +223,15 @@ final class AppModel: ObservableObject {
         restoreInspectorWidth()
         restoreInspectorPanes()
         restoreWorkingDirectory()
+        restoreProductSurface()
         refreshAll()
         firstRunReason = bootstrapReason()
         refreshWorkspace()
         refreshAccountUsage()
         bindClient()
+        AttentionCenter.shared.onOpenSession = { [weak self] id in
+            self?.openWaitingSession(id)
+        }
         ChatLinkActions.previewFile = { [weak self] url in
             self?.previewFile(url)
         }
@@ -231,20 +244,27 @@ final class AppModel: ObservableObject {
             ChatLinkActions.open(standardized)
             return
         }
-        previewedFile = standardized
-        showInspector = true
-        inspectorDetailsVisible = false
-        if inspectorWidth <= GrokTheme.inspectorWidth {
-            setInspectorWidth(GrokTheme.inspectorPreviewWidth)
-        }
-        if destination != .chat {
-            destination = .chat
+        // Defer past the current hit-test / constraint pass. Mutating
+        // inspector width + inserting a preview during click crashes AppKit.
+        afterHitTest { [weak self] in
+            guard let self else { return }
+            self.previewedFile = standardized
+            self.showInspector = true
+            self.inspectorDetailsVisible = false
+            if self.inspectorWidth <= GrokTheme.inspectorWidth {
+                self.setInspectorWidth(GrokTheme.inspectorPreviewWidth)
+            }
+            if self.destination != .build {
+                self.destination = .build
+            }
         }
     }
 
     func clearPreview() {
-        previewedFile = nil
-        inspectorDetailsVisible = true
+        afterHitTest { [weak self] in
+            self?.previewedFile = nil
+            self?.inspectorDetailsVisible = true
+        }
     }
 
     func setInspectorWidth(_ width: CGFloat) {
@@ -263,20 +283,29 @@ final class AppModel: ObservableObject {
     }
 
     func hideInspectorPane(_ pane: InspectorPane) {
-        hiddenInspectorPanes.insert(pane.rawValue)
-        persistInspectorPanes()
+        afterHitTest { [weak self] in
+            guard let self else { return }
+            self.hiddenInspectorPanes.insert(pane.rawValue)
+            self.persistInspectorPanes()
+        }
     }
 
     func showInspectorPane(_ pane: InspectorPane) {
-        hiddenInspectorPanes.remove(pane.rawValue)
-        inspectorDetailsVisible = true
-        persistInspectorPanes()
+        afterHitTest { [weak self] in
+            guard let self else { return }
+            self.hiddenInspectorPanes.remove(pane.rawValue)
+            self.inspectorDetailsVisible = true
+            self.persistInspectorPanes()
+        }
     }
 
     func showAllInspectorPanes() {
-        hiddenInspectorPanes.removeAll()
-        inspectorDetailsVisible = true
-        persistInspectorPanes()
+        afterHitTest { [weak self] in
+            guard let self else { return }
+            self.hiddenInspectorPanes.removeAll()
+            self.inspectorDetailsVisible = true
+            self.persistInspectorPanes()
+        }
     }
 
     var hiddenInspectorPaneList: [InspectorPane] {
@@ -295,6 +324,12 @@ final class AppModel: ObservableObject {
     var displayedContextWindow: Int {
         let window = workspace.contextWindow > 0 ? workspace.contextWindow : contextBreakdown.window
         return window > 0 ? window : 200_000
+    }
+
+    private func afterHitTest(_ work: @escaping @MainActor () -> Void) {
+        Task { @MainActor in
+            work()
+        }
     }
 
     private func persistInspectorPanes() {
@@ -320,8 +355,90 @@ final class AppModel: ObservableObject {
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 self?.objectWillChange.send()
+                self?.syncAttention()
             }
             .store(in: &clientCancellables)
+        NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.syncAttention()
+            }
+            .store(in: &clientCancellables)
+    }
+
+    func prepareAttention() {
+        if notifyThinking {
+            AttentionCenter.shared.prepare()
+        }
+        syncAttention()
+    }
+
+    func openWaitingSession(_ id: String) {
+        if client.focusIfLoaded(id) {
+            destination = .build
+            showInspector = true
+            return
+        }
+        if let record = sessions.first(where: { $0.id == id }) {
+            open(record)
+            return
+        }
+        destination = .build
+    }
+
+    func dispatchWork(_ text: String) {
+        let trimmed = applyGoalIfNeeded(text)
+        guard !trimmed.isEmpty else { return }
+        recordPrompt(trimmed)
+        destination = .dashboard
+        Task {
+            do {
+                try await client.newSession(cwd: client.workingDirectory)
+                try await client.send(text: trimmed)
+                if !isPrivateChat {
+                    refreshSessions()
+                }
+                refreshWorkspace()
+            } catch {
+                present(error)
+            }
+        }
+    }
+
+    var attentionNeeds: [AttentionNeed] {
+        let chinese = language.resolved() == .chinese
+        return client.liveWorkspaces.compactMap { workspace in
+            if workspace.userQuestion != nil {
+                return AttentionNeed(
+                    sessionID: workspace.id,
+                    kind: .question,
+                    title: chinese ? "Grok 在等你回答" : "Grok is waiting for an answer",
+                    body: workspace.title.isEmpty
+                        ? workspace.cwd.lastPathComponent
+                        : workspace.title
+                )
+            }
+            if workspace.permission != nil {
+                return AttentionNeed(
+                    sessionID: workspace.id,
+                    kind: .permission,
+                    title: chinese ? "Grok 在等你批准" : "Grok needs approval",
+                    body: workspace.title.isEmpty
+                        ? workspace.cwd.lastPathComponent
+                        : workspace.title
+                )
+            }
+            return nil
+        }
+    }
+
+    func syncAttention() {
+        AttentionCenter.shared.sync(
+            needs: attentionNeeds,
+            focusedSessionID: client.sessionID,
+            destinationIsChat: destination == .build,
+            enabled: notifyThinking
+        )
     }
 
     var liveSessions: [SessionRecord] {
@@ -370,7 +487,6 @@ final class AppModel: ObservableObject {
     }
 
     func refreshContextBreakdown() {
-        refreshWorkspace()
         contextBreakdown = ContextBreakdown.make(
             items: client.items,
             sessionDirectory: client.sessionDirectory,
@@ -452,7 +568,7 @@ final class AppModel: ObservableObject {
     }
 
     var isEmptyChat: Bool {
-        destination == .chat && client.items.isEmpty && firstRunReason == nil
+        destination == .build && client.items.isEmpty && firstRunReason == nil
     }
 
     var isHomeDirectory: Bool {
@@ -474,9 +590,20 @@ final class AppModel: ObservableObject {
     }
 
     func refreshWorkspace() {
-        let sessionDir = sessions.first(where: { $0.id == client.sessionID })?.directory ?? client.sessionDirectory
-        workspace = WorkspaceSnapshot.load(cwd: client.workingDirectory, sessionDirectory: sessionDir)
         refreshContextBreakdown()
+        let cwd = client.workingDirectory
+        let sessionDir = sessions.first(where: { $0.id == client.sessionID })?.directory ?? client.sessionDirectory
+        if workspace.path != cwd.path {
+            workspace = WorkspaceSnapshot(path: cwd.path, name: cwd.lastPathComponent)
+        }
+        Task { [weak self] in
+            let loaded = await Task.detached {
+                WorkspaceSnapshot.load(cwd: cwd, sessionDirectory: sessionDir)
+            }.value
+            guard let self else { return }
+            guard self.client.workingDirectory.standardizedFileURL.path == cwd.standardizedFileURL.path else { return }
+            self.workspace = loaded
+        }
     }
 
     func openInFinder() {
@@ -498,9 +625,45 @@ final class AppModel: ObservableObject {
     }
 
     func openChat() {
-        destination = .chat
+        destination = .build
+        rememberBuildDestination()
         client.resetConversation()
         firstRunReason = locator.locate() == nil ? .missingCLI : nil
+    }
+
+    func openWebChat() {
+        didOpenWebChat = true
+        showPalette = false
+        showAttachMenu = false
+        mentionQuery = nil
+        destination = .webChat
+        UserDefaults.standard.set("webChat", forKey: "productSurface")
+        Task { await refreshWebChatAuth() }
+    }
+
+    func openBuildSurface() {
+        if destination == .webChat {
+            destination = lastBuildDestination == .webChat ? .build : lastBuildDestination
+        }
+        rememberBuildDestination()
+        UserDefaults.standard.set("build", forKey: "productSurface")
+    }
+
+    func rememberBuildDestination() {
+        if destination.isBuildSurface {
+            lastBuildDestination = destination
+        }
+    }
+
+    private func restoreProductSurface() {
+        if UserDefaults.standard.string(forKey: "productSurface") == "webChat" {
+            didOpenWebChat = true
+            destination = .webChat
+        }
+    }
+
+    func refreshWebChatAuth() async {
+        webChatSignedIn = await GrokWebSession.chatLikelySignedIn()
     }
 
     func startNewSession() {
@@ -508,7 +671,7 @@ final class AppModel: ObservableObject {
     }
 
     func startNewSession(cwd: URL) {
-        destination = .chat
+        destination = .build
         rememberWorkingDirectory(cwd)
         Task {
             do {
@@ -563,7 +726,7 @@ final class AppModel: ObservableObject {
     }
 
     func open(_ record: SessionRecord) {
-        destination = .chat
+        destination = .build
         isPrivateChat = false
         if client.focusIfLoaded(record.id) {
             firstRunReason = nil
@@ -646,7 +809,7 @@ final class AppModel: ObservableObject {
 
     func jumpLatest() {
         jumpTarget = client.items.last?.id
-        destination = .chat
+        destination = .build
     }
 
     func dismissComposerSuggestions() {
@@ -751,7 +914,7 @@ final class AppModel: ObservableObject {
         historyCursor = nil
         recordPrompt(text)
         draft = ""
-        destination = .chat
+        destination = .build
         let aside = SessionFold.isAside(text)
         Task {
             do {
@@ -767,7 +930,7 @@ final class AppModel: ObservableObject {
     }
 
     func enqueueAside(_ text: String) {
-        destination = .chat
+        destination = .build
         draft = ""
         showPalette = false
         Task {
@@ -795,7 +958,7 @@ final class AppModel: ObservableObject {
         pendingBusySend = nil
         historyCursor = nil
         recordPrompt(text)
-        destination = .chat
+        destination = .build
         Task {
             do {
                 try await client.sendNow(text: text)
@@ -838,7 +1001,7 @@ final class AppModel: ObservableObject {
     }
 
     func runSkill(_ skill: SkillRecord) {
-        destination = .chat
+        destination = .build
         insertSlashPrompt("/\(skill.slug)")
     }
 
@@ -863,7 +1026,7 @@ final class AppModel: ObservableObject {
     }
 
     func runAutomation(_ record: AutomationRecord) {
-        destination = .chat
+        destination = .build
         draft = record.prompt
         sendDraft()
     }
@@ -876,13 +1039,13 @@ final class AppModel: ObservableObject {
         findQuery = query
         findTimeline = timeline
         showFind = true
-        destination = .chat
+        destination = .build
     }
 
     func jumpToHit(_ hit: ChatSearchHit) {
         jumpTarget = hit.id
         showFind = false
-        destination = .chat
+        destination = .build
     }
 
     func handleWorkflowCommand(_ rest: String) {
@@ -904,7 +1067,7 @@ final class AppModel: ObservableObject {
         let display = uniqueWorkflowName(name)
         workflowRuns.insert(WorkflowRun(name: display, status: "running", note: extra), at: 0)
         workflowRunStore.save(workflowRuns)
-        destination = .chat
+        destination = .build
         automationsTab = 0
         let line = extra.isEmpty ? "/workflow \(name)" : "/workflow \(name) \(extra)"
         draft = line
@@ -921,7 +1084,7 @@ final class AppModel: ObservableObject {
             }
             workflowRunStore.save(workflowRuns)
         }
-        destination = .chat
+        destination = .build
         draft = "/workflow \(verb) \(name)"
         sendDraft()
     }
@@ -1062,7 +1225,7 @@ final class AppModel: ObservableObject {
         )
         addAutomation(item)
         draft = item.prompt
-        destination = .chat
+        destination = .build
     }
 
     func handleCommand(_ raw: String) {
@@ -1116,7 +1279,7 @@ final class AppModel: ObservableObject {
                 sendDraft()
             }
         case "/view-plan", "/show-plan", "/plan-view":
-            destination = .chat
+            destination = .build
             showInspector = true
             client.setMode(.plan)
         case "/jump":
@@ -1178,7 +1341,7 @@ final class AppModel: ObservableObject {
             destination = .imagine
             if !rest.isEmpty {
                 draft = "/imagine \(rest)"
-                destination = .chat
+                destination = .build
                 sendDraft()
             }
         case "/imagine-video":
@@ -1352,9 +1515,10 @@ final class AppModel: ObservableObject {
     }
 
     func handleComposerKey(keyCode: UInt16, modifierFlags: UInt) -> Bool {
-        guard destination == .chat else { return false }
+        guard destination == .build else { return false }
         if showSettings || showAbout || showResumePicker || showPromptHistory || showCLIReport
-            || showDocsPicker || showFeedbackSheet || showShortcuts || showClaudeImport || showAddWorkflow || showAddMCP {
+            || showDocsPicker || showFeedbackSheet || showShortcuts || showClaudeImport || showAddWorkflow || showAddMCP
+            || showInAppLogin {
             return false
         }
         if showPalette || mentionQuery != nil || pendingBusySend != nil { return false }
@@ -1679,22 +1843,49 @@ final class AppModel: ObservableObject {
     }
 
     func login() {
-        guard locator.locate() != nil else {
-            firstRunReason = .missingCLI
+        if locator.locate() == nil {
+            openWebChat()
             return
         }
+        showInAppLogin = true
+        inAppLoginURL = nil
         Task {
             do {
                 let challenge = try await client.beginLogin()
-                if let url = challenge.url {
-                    NSWorkspace.shared.open(url)
-                }
-                firstRunReason = client.authPresence.isReady ? nil : .unsigned
-                account = AccountProfile.load()
-                refreshAccountUsage()
+                inAppLoginURL = challenge.url ?? GrokWebSession.homeURL
+                startLoginPoll()
             } catch {
                 fallbackLogin()
             }
+        }
+    }
+
+    func dismissInAppLogin() {
+        showInAppLogin = false
+        loginPollTask?.cancel()
+        loginPollTask = nil
+    }
+
+    func openLoginInSystemBrowser() {
+        if let url = inAppLoginURL ?? client.authChallenge?.url {
+            NSWorkspace.shared.open(url)
+        } else {
+            fallbackLogin()
+        }
+    }
+
+    func handleLoginCallback(_ url: URL) {
+        Task {
+            _ = try? await URLSession.shared.data(from: url)
+            if let code = GrokWebSession.callbackCode(in: url) {
+                loginCode = code
+                do {
+                    try await client.submitLoginCode(code)
+                } catch {
+                    // Local grok listener may have already consumed the callback.
+                }
+            }
+            await finishLoginSuccess()
         }
     }
 
@@ -1704,10 +1895,8 @@ final class AppModel: ObservableObject {
         Task {
             do {
                 try await client.submitLoginCode(code)
-                account = AccountProfile.load()
                 loginCode = ""
-                firstRunReason = bootstrapReason()
-                refreshAccountUsage()
+                await finishLoginSuccess()
             } catch {
                 fallbackLogin()
             }
@@ -1715,21 +1904,53 @@ final class AppModel: ObservableObject {
     }
 
     func logout() {
-        guard let grok = locator.locate() else { return }
-        let process = Process()
-        process.executableURL = grok
-        process.arguments = ["logout"]
-        try? process.run()
-        process.waitUntilExit()
+        if let grok = locator.locate() {
+            let process = Process()
+            process.executableURL = grok
+            process.arguments = ["logout"]
+            try? process.run()
+            process.waitUntilExit()
+        }
         client.refreshAuth()
         account = AccountProfile()
         accountUsage = AccountUsage()
+        webChatSignedIn = false
         firstRunReason = bootstrapReason()
+        Task { await GrokWebSession.clear() }
+    }
+
+    private func startLoginPoll() {
+        loginPollTask?.cancel()
+        loginPollTask = Task { [weak self] in
+            for _ in 0..<90 {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard let self, !Task.isCancelled else { return }
+                self.client.refreshAuth()
+                if self.client.authPresence.isReady {
+                    await self.finishLoginSuccess()
+                    return
+                }
+            }
+        }
+    }
+
+    private func finishLoginSuccess() async {
+        loginPollTask?.cancel()
+        loginPollTask = nil
+        client.refreshAuth()
+        account = AccountProfile.load()
+        firstRunReason = bootstrapReason()
+        refreshAccountUsage()
+        GrokWebChatHost.shared.reloadHome()
+        await refreshWebChatAuth()
+        if client.authPresence.isReady || webChatSignedIn {
+            showInAppLogin = false
+        }
     }
 
     func exportDiagnostics() {
         let text = DiagnosticExport.make(
-            version: "0.1.9",
+            version: "0.1.10",
             grokVersion: client.grokVersion,
             state: String(describing: client.state),
             lastError: client.lastError,
@@ -1746,6 +1967,9 @@ final class AppModel: ObservableObject {
     }
 
     private func fallbackLogin() {
+        if inAppLoginURL == nil {
+            inAppLoginURL = GrokWebSession.homeURL
+        }
         guard let grok = locator.locate() else { return }
         let process = Process()
         process.executableURL = grok

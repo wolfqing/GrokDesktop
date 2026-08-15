@@ -6,6 +6,8 @@ struct PermissionBar: View {
     @Environment(\.palette) private var palette
     @Environment(\.l10n) private var l10n
     let request: PermissionRequest
+    var sessionID: String? = nil
+    var inset = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -58,21 +60,21 @@ struct PermissionBar: View {
             HStack(spacing: 8) {
                 if let allow = allowOption {
                     Button(l10n.t("Allow once", "允许一次")) {
-                        model.client.answerPermission(optionID: allow.id)
+                        model.client.answerPermission(optionID: allow.id, sessionID: sessionID)
                     }
                     .buttonStyle(GrokPrimaryButtonStyle())
 
                     Menu {
                         Button(l10n.t("Allow for this session", "本会话都允许")) {
-                            model.client.answerPermission(optionID: allow.id, rememberSession: true)
+                            model.client.answerPermission(optionID: allow.id, rememberSession: true, sessionID: sessionID)
                         }
                         Button(l10n.t("Allow edits this session", "本会话允许编辑")) {
                             model.client.setAllowEditsThisSession(true)
-                            model.client.answerPermission(optionID: allow.id)
+                            model.client.answerPermission(optionID: allow.id, sessionID: sessionID)
                         }
                         ForEach(request.options.filter { extraOption($0) }) { option in
                             Button(option.name) {
-                                model.client.answerPermission(optionID: option.id)
+                                model.client.answerPermission(optionID: option.id, sessionID: sessionID)
                             }
                         }
                     } label: {
@@ -86,7 +88,7 @@ struct PermissionBar: View {
                     .fixedSize()
                 }
                 Button(l10n.t("Deny", "拒绝")) {
-                    model.client.rejectPermission()
+                    model.client.rejectPermission(sessionID: sessionID)
                 }
                 .buttonStyle(GrokSecondaryButtonStyle())
             }
@@ -98,7 +100,7 @@ struct PermissionBar: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(palette.hairline, lineWidth: 1)
         )
-        .padding(.horizontal, 24)
+        .padding(.horizontal, inset ? 24 : 0)
     }
 
     private var displayTitle: String {

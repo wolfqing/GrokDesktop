@@ -6,13 +6,22 @@ public struct TerminalSnapshot: Identifiable, Equatable, Sendable {
     public var running: Bool
     public var exitCode: Int32?
     public var truncated: Bool
+    public var preview: String
 
-    public init(id: String, command: String, running: Bool, exitCode: Int32? = nil, truncated: Bool = false) {
+    public init(
+        id: String,
+        command: String,
+        running: Bool,
+        exitCode: Int32? = nil,
+        truncated: Bool = false,
+        preview: String = ""
+    ) {
         self.id = id
         self.command = command
         self.running = running
         self.exitCode = exitCode
         self.truncated = truncated
+        self.preview = preview
     }
 }
 
@@ -54,6 +63,8 @@ public final class TerminalHost: @unchecked Sendable {
 
     private var slots: [String: Slot] = [:]
     private let lock = NSLock()
+    private var notifyScheduled = false
+    public var onChange: (@Sendable () -> Void)?
 
     public init() {}
 
@@ -67,7 +78,8 @@ public final class TerminalHost: @unchecked Sendable {
                     command: $0.command,
                     running: $0.process.isRunning,
                     exitCode: $0.exitCode,
-                    truncated: $0.truncated
+                    truncated: $0.truncated,
+                    preview: Self.tail(of: $0.output)
                 )
             }
             .sorted { $0.id < $1.id }
@@ -206,8 +218,10 @@ public final class TerminalHost: @unchecked Sendable {
 
     private func append(id: String, _ chunk: Data) {
         lock.lock()
-        defer { lock.unlock() }
-        guard var slot = slots[id] else { return }
+        guard var slot = slots[id] else {
+            lock.unlock()
+            return
+        }
         let remaining = slot.outputByteLimit - slot.output.count
         if remaining <= 0 {
             slot.truncated = true
@@ -218,6 +232,8 @@ public final class TerminalHost: @unchecked Sendable {
             slot.output.append(chunk)
         }
         slots[id] = slot
+        lock.unlock()
+        scheduleNotify()
     }
 
     private func finished(id: String, code: Int32) {
@@ -234,6 +250,36 @@ public final class TerminalHost: @unchecked Sendable {
         for waiter in waiters {
             waiter.resume(returning: (exitCode: code, signal: nil))
         }
+        scheduleNotify(force: true)
+    }
+
+    private func scheduleNotify(force: Bool = false) {
+        if force {
+            onChange?()
+            return
+        }
+        lock.lock()
+        if notifyScheduled {
+            lock.unlock()
+            return
+        }
+        notifyScheduled = true
+        lock.unlock()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+            guard let self else { return }
+            self.lock.lock()
+            self.notifyScheduled = false
+            self.lock.unlock()
+            self.onChange?()
+        }
+    }
+
+    public static func tail(of data: Data, lines: Int = 8) -> String {
+        let text = String(data: data, encoding: .utf8) ?? String(decoding: data, as: UTF8.self)
+        let rows = text.split(separator: "\n", omittingEmptySubsequences: false)
+        return rows.suffix(lines)
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func displayCommand(_ command: String, args: [String]) -> String {

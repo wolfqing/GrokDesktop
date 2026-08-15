@@ -43,16 +43,11 @@ public enum TurnNarrative {
         running: Bool,
         stopping: Bool
     ) -> TurnStory? {
-        guard let goal = lastUserGoal(in: items) else { return nil }
-        let progress = PromptTimestamp.progress(for: todos)
-        let files = changedFiles(items: items, hunks: hunks)
         let activeTodo = todos.first(where: \.isActive)
-        let pendingTodo = todos.first(where: { $0.status == "pending" })
         let runningTool = items.reversed().compactMap { item -> String? in
             guard case .tool(_, let title, let status, _) = item else { return nil }
-            guard status == "running" || status == "in_progress" || status == "pending" else { return nil }
-            let lower = title.lowercased()
-            if lower.contains("todo") || lower == "updating plan" { return nil }
+            guard ToolVoice.isActive(status) else { return nil }
+            if ToolVoice.kind(title) == .todo { return nil }
             return ToolVoice.headline(title, chinese: chinese)
         }.first
 
@@ -62,13 +57,10 @@ public enum TurnNarrative {
         } else if running || activeTodo != nil || runningTool != nil {
             phase = .working
         } else {
-            phase = .done
-        }
-
-        if phase == .done, files.isEmpty, progress.total == 0 {
             return nil
         }
 
+        let progress = PromptTimestamp.progress(for: todos)
         let step: String
         if stopping {
             step = chinese ? "正在停止" : "Stopping"
@@ -76,19 +68,15 @@ public enum TurnNarrative {
             step = activeTodo.content
         } else if let runningTool {
             step = runningTool
-        } else if phase == .working {
-            step = chinese ? "在想下一步" : "Thinking"
-        } else if progress.total > 0, progress.done == progress.total {
-            step = chinese ? "本轮完成" : "Turn finished"
         } else {
-            step = chinese ? "本轮完成" : "Turn finished"
+            step = chinese ? "在想" : "Thinking"
         }
 
         return TurnStory(
-            goal: goal,
+            goal: lastUserGoal(in: items) ?? "",
             step: step,
-            nextStep: phase == .working ? pendingTodo?.content : nil,
-            files: files,
+            nextStep: todos.first(where: { $0.status == "pending" })?.content,
+            files: changedFiles(items: items, hunks: hunks),
             done: progress.done,
             total: progress.total,
             phase: phase

@@ -128,22 +128,7 @@ public enum DiffScan {
     }
 
     public static func workspaceDiff(cwd: URL, limitBytes: Int = 80_000) -> String {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = ["-C", cwd.path, "diff", "--no-color", "HEAD"]
-        process.currentDirectoryURL = cwd
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
-            return ""
-        }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        let slice = data.count > limitBytes ? data.prefix(limitBytes) : data
-        return String(data: slice, encoding: .utf8) ?? ""
+        TimedProcess.git(cwd: cwd, ["diff", "--no-color", "HEAD"], timeout: 4, limitBytes: limitBytes) ?? ""
     }
 
     private static func stripDiffPrefix(_ raw: String) -> String {

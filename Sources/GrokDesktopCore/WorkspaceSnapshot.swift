@@ -38,10 +38,10 @@ public struct WorkspaceSnapshot: Equatable, Sendable {
 
     public static func load(cwd: URL, sessionDirectory: URL? = nil) -> WorkspaceSnapshot {
         var snap = WorkspaceSnapshot(path: cwd.path, name: cwd.lastPathComponent)
-        snap.branch = git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"])
+        snap.branch = TimedProcess.git(cwd: cwd, ["rev-parse", "--abbrev-ref", "HEAD"])
         snap.isRepo = snap.branch != nil
         if snap.isRepo {
-            let numstat = git(cwd, ["diff", "--numstat", "HEAD"]) ?? ""
+            let numstat = TimedProcess.git(cwd: cwd, ["diff", "--numstat", "HEAD"]) ?? ""
             var plus = 0
             var minus = 0
             for line in numstat.split(separator: "\n") {
@@ -53,7 +53,7 @@ public struct WorkspaceSnapshot: Equatable, Sendable {
             }
             snap.insertions = plus
             snap.deletions = minus
-            let remotes = git(cwd, ["remote", "-v"]) ?? ""
+            let remotes = TimedProcess.git(cwd: cwd, ["remote", "-v"]) ?? ""
             var seen = Set<String>()
             for line in remotes.split(separator: "\n") {
                 let parts = line.split(whereSeparator: { $0.isWhitespace })
@@ -78,25 +78,5 @@ public struct WorkspaceSnapshot: Equatable, Sendable {
             }
         }
         return snap
-    }
-
-    private static func git(_ cwd: URL, _ args: [String]) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = ["-C", cwd.path] + args
-        process.currentDirectoryURL = cwd
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
-            return nil
-        }
-        guard process.terminationStatus == 0 else { return nil }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        let text = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return (text?.isEmpty == false) ? text : nil
     }
 }

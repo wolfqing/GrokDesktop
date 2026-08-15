@@ -53,11 +53,15 @@ struct FirstRunView: View {
                     Button(l10n.t("Recheck", "重新检测")) { model.retryLocate() }
                         .buttonStyle(GrokSecondaryButtonStyle())
                 } else {
-                    Button(l10n.t("Recheck", "重新检测")) { model.retryLocate() }
+                    Button(l10n.loginGrok) { model.login() }
                         .buttonStyle(GrokPrimaryButtonStyle())
+                    Button(l10n.t("Recheck", "重新检测")) { model.retryLocate() }
+                        .buttonStyle(GrokSecondaryButtonStyle())
                 }
-                Button(l10n.loginGrok) { model.login() }
-                    .buttonStyle(GrokSecondaryButtonStyle())
+                if reason != .unsigned {
+                    Button(l10n.loginGrok) { model.login() }
+                        .buttonStyle(GrokSecondaryButtonStyle())
+                }
                 Button(l10n.t("Docs", "文档")) { model.openDocs() }
                     .buttonStyle(GrokSecondaryButtonStyle())
             }

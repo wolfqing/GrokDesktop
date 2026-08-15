@@ -5,38 +5,88 @@ struct DashboardView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.palette) private var palette
     @Environment(\.l10n) private var l10n
+    @State private var dispatchDraft = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             PageHeader(
                 title: l10n.liveAgents,
-                subtitle: l10n.t("Only work that is running right now.", "只看此刻还在跑的任务。")
-            ) {
-                Button(l10n.newChat) { model.startNewSession() }
-                    .buttonStyle(GrokPrimaryButtonStyle())
-            }
+                subtitle: l10n.t("Dispatch work, then handle anything that is waiting.", "派活，并处理正在等你的会话。")
+            )
 
-            if model.client.liveWorkspaces.isEmpty {
+            dispatchBar
+
+            if roster.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(l10n.t("Nothing is running.", "现在没有进行中的任务。"))
                         .font(.system(size: 15, weight: .medium))
-                    Text(l10n.t("Start a chat when you want to dispatch work.", "要派活时，开一个新对话就行。"))
+                    Text(l10n.t("Type a job above to start a new agent.", "在上面输入任务，派一个新 agent。"))
                         .font(.system(size: 13))
                         .foregroundStyle(palette.secondary)
                 }
                 .padding(.top, 8)
             } else {
-                ForEach(model.client.liveWorkspaces) { workspace in
-                    liveCard(workspace)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(roster) { workspace in
+                            liveCard(workspace)
+                        }
+                    }
                 }
             }
 
-            Spacer()
+            Spacer(minLength: 0)
         }
         .padding(32)
-        .frame(maxWidth: 720)
+        .frame(maxWidth: 760)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(palette.canvas)
+    }
+
+    private var roster: [SessionWorkspace] {
+        model.client.liveWorkspaces.sorted { rank($0) < rank($1) }
+    }
+
+    private var dispatchBar: some View {
+        HStack(alignment: .bottom, spacing: 10) {
+            TextField(
+                l10n.t("Dispatch a new agent…", "派一个新任务…"),
+                text: $dispatchDraft,
+                axis: .vertical
+            )
+            .textFieldStyle(.plain)
+            .font(.system(size: 15))
+            .lineLimit(1...4)
+            .onSubmit(dispatch)
+
+            Button(action: dispatch) {
+                Image(systemName: "arrow.up")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(canDispatch ? palette.sendGlyph : palette.secondary)
+                    .frame(width: 30, height: 30)
+                    .background(canDispatch ? palette.send : palette.chip, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!canDispatch)
+            .help(l10n.t("Dispatch", "派活"))
+        }
+        .padding(14)
+        .background(palette.input, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(palette.hairline, lineWidth: 1)
+        )
+    }
+
+    private var canDispatch: Bool {
+        !dispatchDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func dispatch() {
+        let text = dispatchDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        dispatchDraft = ""
+        model.dispatchWork(text)
     }
 
     private func liveCard(_ workspace: SessionWorkspace) -> some View {
@@ -44,8 +94,10 @@ struct DashboardView: View {
             HStack(spacing: 8) {
                 RunningStatusIcon(
                     active: workspace.isTurnRunning || workspace.tasks.contains(where: \.isRunning),
-                    idleSystemImage: workspace.permission != nil ? "exclamationmark.circle" : "checkmark.circle",
-                    color: workspace.permission != nil ? .orange : palette.secondary,
+                    idleSystemImage: workspace.permission != nil || workspace.userQuestion != nil
+                        ? "exclamationmark.circle"
+                        : "checkmark.circle",
+                    color: workspace.permission != nil || workspace.userQuestion != nil ? .orange : palette.secondary,
                     size: 12
                 )
                 Text(statusText(workspace))
@@ -55,6 +107,10 @@ struct DashboardView: View {
                     .font(.system(size: 12))
                     .foregroundStyle(palette.secondary)
             }
+            Text(workspace.title.isEmpty ? workspace.cwd.lastPathComponent : workspace.title)
+                .font(.system(size: 13))
+                .foregroundStyle(palette.secondary)
+                .lineLimit(2)
             Text(workspace.cwd.lastPathComponent)
                 .font(.system(size: 12))
                 .foregroundStyle(palette.secondary)
@@ -64,6 +120,13 @@ struct DashboardView: View {
                     .font(.system(size: 11))
                     .foregroundStyle(palette.secondary)
             }
+
+            if let question = workspace.userQuestion {
+                QuestionCard(request: question, sessionID: workspace.id, inset: false)
+            } else if let permission = workspace.permission {
+                PermissionBar(request: permission, sessionID: workspace.id, inset: false)
+            }
+
             HStack {
                 Text("\(workspace.runningTools) \(l10n.running)")
                 Text("\(workspace.finishedTools) \(l10n.completed)")
@@ -71,10 +134,10 @@ struct DashboardView: View {
                 Spacer()
                 Button(l10n.t("Open", "打开")) {
                     _ = model.client.focusIfLoaded(workspace.id)
-                    model.destination = .chat
+                    model.destination = .build
                 }
                 .buttonStyle(GrokSecondaryButtonStyle())
-                if workspace.isTurnRunning || workspace.todos.contains(where: \.isActive) || workspace.tasks.contains(where: \.isRunning) {
+                if workspace.isLive {
                     Button(l10n.stop) { model.client.stopWork(sessionID: workspace.id) }
                         .buttonStyle(GrokSecondaryButtonStyle())
                 }
@@ -83,6 +146,13 @@ struct DashboardView: View {
         }
         .padding(16)
         .background(palette.chip, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private func rank(_ workspace: SessionWorkspace) -> Int {
+        if workspace.userQuestion != nil { return 0 }
+        if workspace.permission != nil { return 1 }
+        if workspace.isTurnRunning { return 2 }
+        return 3
     }
 
     private func statusText(_ workspace: SessionWorkspace) -> String {

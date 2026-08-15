@@ -2,10 +2,113 @@ import AppKit
 import GrokDesktopCore
 import SwiftUI
 
-private struct LatestMinYKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
+private struct ChatScrollBottomMonitor: NSViewRepresentable {
+    var ignoreUntil: Date
+    var slack: CGFloat = 56
+    var onNearBottomChange: (Bool) -> Void
+
+    @MainActor
+    final class Coordinator {
+        var clip: NSClipView?
+        nonisolated(unsafe) var token: NSObjectProtocol?
+        var lastNear: Bool?
+        var ignoreUntil = Date.distantPast
+        var slack: CGFloat = 56
+        var onChange: (Bool) -> Void = { _ in }
+        private var attachAttempts = 0
+
+        func attach(from view: NSView) {
+            if clip != nil { return }
+            if let scroll = enclosingScrollView(from: view) {
+                observe(scroll.contentView)
+                return
+            }
+            attachAttempts += 1
+            guard attachAttempts < 20 else { return }
+            DispatchQueue.main.async { [weak view] in
+                guard let view else { return }
+                self.attach(from: view)
+            }
+        }
+
+        func observe(_ clip: NSClipView) {
+            self.clip = clip
+            clip.postsBoundsChangedNotifications = true
+            token = NotificationCenter.default.addObserver(
+                forName: NSView.boundsDidChangeNotification,
+                object: clip,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    self?.emit()
+                }
+            }
+            emit()
+        }
+
+        func emit() {
+            guard Date() >= ignoreUntil, let clip else { return }
+            let visible = clip.documentVisibleRect
+            let documentHeight = clip.documentView?.bounds.height ?? visible.maxY
+            let near = documentHeight - visible.maxY <= slack
+            if lastNear != near {
+                lastNear = near
+                onChange(near)
+            }
+        }
+
+        private func enclosingScrollView(from view: NSView) -> NSScrollView? {
+            if let scroll = view.enclosingScrollView { return scroll }
+            var current: NSView? = view
+            for _ in 0..<10 {
+                if let scroll = current as? NSScrollView { return scroll }
+                current = current?.superview
+            }
+            var root: NSView? = view
+            for _ in 0..<8 { root = root?.superview ?? root }
+            return findScrollView(in: root)
+        }
+
+        private func findScrollView(in view: NSView?) -> NSScrollView? {
+            guard let view else { return nil }
+            if let scroll = view as? NSScrollView { return scroll }
+            for child in view.subviews {
+                if let found = findScrollView(in: child) { return found }
+            }
+            return nil
+        }
+
+        deinit {
+            if let token { NotificationCenter.default.removeObserver(token) }
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        let coordinator = Coordinator()
+        coordinator.ignoreUntil = ignoreUntil
+        coordinator.slack = slack
+        coordinator.onChange = onNearBottomChange
+        return coordinator
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        view.isHidden = true
+        DispatchQueue.main.async {
+            context.coordinator.attach(from: view)
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.ignoreUntil = ignoreUntil
+        context.coordinator.slack = slack
+        context.coordinator.onChange = onNearBottomChange
+        if context.coordinator.clip == nil {
+            context.coordinator.attach(from: nsView)
+        } else {
+            context.coordinator.emit()
+        }
     }
 }
 
@@ -81,91 +184,75 @@ struct ChatView: View {
                     .padding(.top, 8)
                 }
 
-                GeometryReader { viewport in
-                    ScrollViewReader { proxy in
-                        ZStack(alignment: .bottomTrailing) {
-                            ScrollView {
-                                LazyVStack(alignment: .leading, spacing: model.compactChat ? 10 : 22) {
-                                    ForEach(displayedItems) { item in
-                                        messageRow(item)
-                                            .id(item.id)
-                                    }
-                                    if let story = turnStory {
-                                        turnStoryCard(story)
-                                            .id("turn-story-\(story.step)-\(story.files.joined())-\(story.phase)")
-                                    }
-                                    Color.clear
-                                        .frame(height: 1)
-                                        .id("latest-anchor")
-                                        .background(
-                                            GeometryReader { geo in
-                                                Color.clear.preference(
-                                                    key: LatestMinYKey.self,
-                                                    value: geo.frame(in: .named("chatScroll")).minY
-                                                )
-                                            }
-                                        )
+                ScrollViewReader { proxy in
+                    ZStack(alignment: .bottomTrailing) {
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: model.compactChat ? 8 : 16) {
+                                ForEach(displayedRows) { row in
+                                    displayRow(row)
+                                        .id(row.id)
                                 }
-                                .frame(maxWidth: GrokTheme.contentWidth)
-                                .padding(.vertical, model.compactChat ? 14 : 28)
-                                .frame(maxWidth: .infinity)
+                                Color.clear
+                                    .frame(height: 1)
+                                    .id("latest-anchor")
                             }
-                            .coordinateSpace(name: "chatScroll")
-                            .simultaneousGesture(
-                                TapGesture().onEnded {
-                                    if model.mentionQuery != nil || model.showPalette {
-                                        model.dismissComposerSuggestions()
-                                    }
-                                }
-                            )
-                            .onPreferenceChange(LatestMinYKey.self) { minY in
-                                guard Date() >= ignoreScrollUntil else { return }
-                                let slack: CGFloat = 56
-                                if minY > viewport.size.height + slack {
-                                    stickToLatest = false
-                                } else if minY <= viewport.size.height + 12 {
-                                    stickToLatest = true
+                            .frame(maxWidth: GrokTheme.contentWidth)
+                            .padding(.vertical, model.compactChat ? 14 : 28)
+                            .frame(maxWidth: .infinity)
+                        }
+                        .background(
+                            ChatScrollBottomMonitor(ignoreUntil: ignoreScrollUntil) { nearBottom in
+                                if stickToLatest != nearBottom {
+                                    stickToLatest = nearBottom
                                 }
                             }
+                        )
+                        .simultaneousGesture(
+                            TapGesture().onEnded {
+                                if model.mentionQuery != nil || model.showPalette {
+                                    model.dismissComposerSuggestions()
+                                }
+                            }
+                        )
 
-                            if !stickToLatest {
-                                Button {
-                                    jumpToLatest(proxy)
-                                } label: {
-                                    Image(systemName: "arrow.down")
-                                        .font(.system(size: 13, weight: .semibold))
-                                        .foregroundStyle(palette.text)
-                                        .frame(width: 34, height: 34)
-                                        .background(palette.elevated, in: Circle())
-                                        .overlay(Circle().stroke(palette.hairline))
-                                        .shadow(color: Color.black.opacity(0.12), radius: 8, y: 3)
-                                }
-                                .buttonStyle(.plain)
-                                .help(l10n.jumpToLatest)
-                                .padding(.trailing, 28)
-                                .padding(.bottom, 16)
-                            }
-                        }
-                        .id(model.client.sessionID ?? "none")
-                        .onAppear { pinToBottom(proxy) }
-                        .onChange(of: model.client.sessionID) { _, _ in
-                            pinToBottom(proxy)
-                        }
-                        .onChange(of: followToken) { _, _ in
-                            if stickToLatest {
+                        if !stickToLatest {
+                            Button {
                                 jumpToLatest(proxy)
+                            } label: {
+                                Image(systemName: "arrow.down")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(palette.text)
+                                    .frame(width: 34, height: 34)
+                                    .background(palette.elevated, in: Circle())
+                                    .overlay(Circle().stroke(palette.hairline))
+                                    .shadow(color: Color.black.opacity(0.12), radius: 8, y: 3)
                             }
+                            .buttonStyle(.plain)
+                            .help(l10n.jumpToLatest)
+                            .padding(.trailing, 28)
+                            .padding(.bottom, 16)
+                            .accessibilityLabel(l10n.jumpToLatest)
                         }
-                        .onChange(of: model.jumpTarget) { _, target in
-                            if let target {
-                                if target == displayedItems.last?.id {
-                                    jumpToLatest(proxy)
-                                } else {
-                                    stickToLatest = false
-                                    proxy.scrollTo(target, anchor: .center)
-                                }
-                                model.jumpTarget = nil
+                    }
+                    .id(model.client.sessionID ?? "none")
+                    .onAppear { pinToBottom(proxy) }
+                    .onChange(of: model.client.sessionID) { _, _ in
+                        pinToBottom(proxy)
+                    }
+                    .onChange(of: followToken) { _, _ in
+                        if stickToLatest {
+                            jumpToLatest(proxy)
+                        }
+                    }
+                    .onChange(of: model.jumpTarget) { _, target in
+                        if let target {
+                            if target == lastDisplayID {
+                                jumpToLatest(proxy)
+                            } else {
+                                stickToLatest = false
+                                proxy.scrollTo(target, anchor: .center)
                             }
+                            model.jumpTarget = nil
                         }
                     }
                 }
@@ -201,6 +288,7 @@ struct ChatView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(palette.canvas)
+        .animation(.easeOut(duration: 0.16), value: turnStory != nil)
     }
 
     private func compactContext(_ value: Int) -> String {
@@ -215,6 +303,11 @@ struct ChatView: View {
 
     private var composerBlock: some View {
         VStack(spacing: 10) {
+            if let story = turnStory {
+                liveTurnStrip(story)
+                    .frame(maxWidth: 760)
+                    .transition(.opacity)
+            }
             ComposerView()
                 .frame(maxWidth: 760)
             if model.isPrivateChat {
@@ -395,20 +488,67 @@ struct ChatView: View {
         .frame(maxWidth: 420)
     }
 
-    private var displayedItems: [ConversationItem] {
-        var result: [ConversationItem] = []
+    private enum DisplayRow: Identifiable {
+        case message(ConversationItem)
+        case tools(id: String, items: [ConversationItem])
+
+        var id: String {
+            switch self {
+            case .message(let item):
+                return item.id
+            case .tools(let id, _):
+                return id
+            }
+        }
+    }
+
+    private var displayedRows: [DisplayRow] {
+        var rows: [DisplayRow] = []
+        var pending: [ConversationItem] = []
+
+        func flushTools() {
+            guard !pending.isEmpty else { return }
+            let id = pending.map(\.id).joined(separator: "+")
+            rows.append(.tools(id: id, items: pending))
+            pending = []
+        }
+
         for item in model.client.items {
             if case .thought = item, !model.showThinkingBlocks { continue }
             if isTodoTool(item) { continue }
-            if model.mergeToolRows,
-               case .tool(_, let title, _, _) = item,
-               case .tool(_, let previous, _, _) = result.last,
-               previous == title {
-                result.removeLast()
+            if case .tool(_, let title, let status, _) = item {
+                if canMerge(title: title, status: status, onto: pending) {
+                    pending.append(item)
+                } else {
+                    flushTools()
+                    pending = [item]
+                }
+            } else {
+                flushTools()
+                rows.append(.message(item))
             }
-            result.append(item)
         }
-        return result
+        flushTools()
+        return rows
+    }
+
+    private var lastDisplayID: String? {
+        switch displayedRows.last {
+        case .message(let item):
+            return item.id
+        case .tools(_, let items):
+            return items.last?.id
+        case .none:
+            return nil
+        }
+    }
+
+    private func canMerge(title: String, status: String, onto pending: [ConversationItem]) -> Bool {
+        guard model.mergeToolRows, let last = pending.last else { return false }
+        guard case .tool(_, let previousTitle, let previousStatus, _) = last else { return false }
+        guard !ToolVoice.isActive(status), !ToolVoice.isActive(previousStatus) else { return false }
+        let kind = ToolVoice.kind(title)
+        return kind != .other && kind == ToolVoice.kind(previousTitle)
     }
 
     private var todoFingerprint: String {
@@ -446,7 +586,7 @@ struct ChatView: View {
     private func jumpToLatest(_ proxy: ScrollViewProxy) {
         stickToLatest = true
         ignoreScrollUntil = Date().addingTimeInterval(0.8)
-        let lastID = displayedItems.last?.id
+        let lastID = lastDisplayID
         DispatchQueue.main.async {
             if let lastID {
                 proxy.scrollTo(lastID, anchor: .bottom)
@@ -474,8 +614,7 @@ struct ChatView: View {
 
     private func isTodoTool(_ item: ConversationItem) -> Bool {
         guard case .tool(_, let title, _, _) = item else { return false }
-        let name = title.lowercased()
-        return name == "todo_write" || name == "updating plan" || name.contains("todo")
+        return ToolVoice.kind(title) == .todo
     }
 
     private var turnStory: TurnStory? {
@@ -489,84 +628,37 @@ struct ChatView: View {
         )
     }
 
-    private func turnStoryCard(_ story: TurnStory) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text(l10n.t("This turn", "本轮"))
-                    .font(.system(size: 13, weight: .semibold))
-                Spacer()
-                if story.total > 0 {
-                    Text("\(story.done)/\(story.total)")
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
-                        .foregroundStyle(palette.secondary)
-                }
-                if model.client.hasActiveWork {
-                    Button(model.client.isStopping ? l10n.stopping : l10n.stop) {
-                        if !model.client.isStopping { model.client.stopWork() }
-                    }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(palette.sendGlyph)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(palette.send, in: Capsule())
-                    .disabled(model.client.isStopping)
-                }
-            }
-            storyLine(l10n.t("Goal", "目标"), story.goal)
-            HStack(alignment: .top, spacing: 8) {
-                Text(l10n.t("Now", "现在"))
-                    .font(.system(size: 12, weight: .medium))
+    private func liveTurnStrip(_ story: TurnStory) -> some View {
+        HStack(spacing: 8) {
+            RunningStatusIcon(
+                active: story.phase == .working,
+                idleSystemImage: "pause.circle",
+                color: .orange,
+                size: 11
+            )
+            Text(story.step)
+                .font(.system(size: 12))
+                .foregroundStyle(palette.secondary)
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            if story.total > 0 {
+                Text("\(story.done)/\(story.total)")
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .foregroundStyle(palette.secondary)
-                    .frame(width: 52, alignment: .leading)
-                HStack(spacing: 6) {
-                    if story.phase == .working || story.phase == .stopping {
-                        RunningStatusIcon(
-                            active: story.phase == .working,
-                            idleSystemImage: "pause.circle",
-                            color: .orange,
-                            size: 12
-                        )
-                    }
-                    Text(story.step)
-                        .font(.system(size: 13, weight: .medium))
-                }
-            }
-            if let next = story.nextStep, !next.isEmpty {
-                storyLine(l10n.t("Next", "下一步"), next)
-            }
-            if !story.files.isEmpty {
-                HStack(alignment: .top, spacing: 8) {
-                    Text(l10n.t("Changed", "改了"))
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(palette.secondary)
-                        .frame(width: 52, alignment: .leading)
-                    VStack(alignment: .leading, spacing: 4) {
-                        ForEach(Array(story.files.prefix(5)), id: \.self) { name in
-                            ChatFileLabel(path: name)
-                        }
-                        if story.files.count > 5 {
-                            Text("+\(story.files.count - 5)")
-                                .font(.system(size: 12))
-                                .foregroundStyle(palette.secondary)
-                        }
-                    }
-                }
             }
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(palette.chip, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .padding(.horizontal, model.compactChat ? 16 : 28)
+        .padding(.horizontal, 4)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(story.step)
     }
 
-    private func storyLine(_ label: String, _ value: String) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Text(label)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(palette.secondary)
-                .frame(width: 52, alignment: .leading)
-            LinkedText(text: value, fontSize: 13, markdown: false)
+    @ViewBuilder
+    private func displayRow(_ row: DisplayRow) -> some View {
+        switch row {
+        case .message(let item):
+            messageRow(item)
+        case .tools(_, let items):
+            toolCluster(items)
         }
     }
 
@@ -648,51 +740,142 @@ struct ChatView: View {
             }
             .padding(.horizontal, model.compactChat ? 16 : 28)
         case .thought(_, let text):
-            DisclosureGroup(l10n.think) {
+            DisclosureGroup {
                 LinkedText(text: text, fontSize: 13, markdown: false, color: palette.secondary)
+            } label: {
+                Text(l10n.think)
+                    .font(.system(size: 13))
+                    .foregroundStyle(palette.secondary)
             }
+            .tint(palette.secondary)
+            .foregroundStyle(palette.secondary)
             .padding(.horizontal, model.compactChat ? 16 : 28)
         case .tool(let id, let title, let status, let detail):
-            let chinese = model.language.resolved() == .chinese
-            let active = status == "running" || status == "in_progress"
-            DisclosureGroup {
-                if !detail.isEmpty {
-                    LinkedText(
-                        text: detail,
-                        fontSize: 12,
-                        monospaced: true,
-                        markdown: false,
-                        color: palette.secondary
-                    )
-                }
-            } label: {
-                HStack(spacing: 8) {
-                    RunningStatusIcon(
-                        active: active && !model.client.isStopping,
-                        idleSystemImage: status == "completed" ? "checkmark.circle.fill" : (status == "cancelled" ? "xmark.circle" : "wrench.and.screwdriver"),
-                        color: status == "completed" ? .green : (status == "failed" || status == "cancelled" ? .orange : palette.secondary),
-                        size: 13
-                    )
-                    LinkedText(
-                        text: ToolVoice.headline(title, chinese: chinese),
-                        fontSize: 13,
-                        markdown: false,
-                        fillsWidth: false
-                    )
-                    Spacer()
-                    Text(model.client.isStopping && active ? l10n.stopping : ToolVoice.statusLabel(status, chinese: chinese))
-                        .foregroundStyle(palette.secondary)
-                }
-                .font(.system(size: 13, weight: .medium))
-            }
-            .padding(12)
-            .background(palette.chip, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .padding(.horizontal, 28)
-            .help(id)
+            toolLine(id: id, title: title, status: status, detail: detail)
+                .padding(.horizontal, model.compactChat ? 16 : 28)
         case .notice(_, let text):
             LinkedText(text: text, fontSize: 13, markdown: false, color: palette.secondary)
                 .padding(.horizontal, 28)
         }
+    }
+
+    @ViewBuilder
+    private func toolCluster(_ items: [ConversationItem]) -> some View {
+        let chinese = model.language.resolved() == .chinese
+        if items.count == 1, case .tool(let id, let title, let status, let detail) = items[0] {
+            toolLine(id: id, title: title, status: status, detail: detail)
+                .padding(.horizontal, model.compactChat ? 16 : 28)
+        } else if let first = items.first, case .tool(_, let title, _, _) = first {
+            DisclosureGroup {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(items, id: \.id) { item in
+                        if case .tool(let id, let itemTitle, let status, let detail) = item {
+                            toolLine(id: id, title: itemTitle, status: status, detail: detail, grouped: true)
+                        }
+                    }
+                }
+                .padding(.leading, 20)
+            } label: {
+                toolHeader(
+                    status: items.allSatisfy(toolSucceeded) ? "completed" : "cancelled",
+                    verb: ToolVoice.groupHeadline(kind: ToolVoice.kind(title), count: items.count, chinese: chinese),
+                    target: "",
+                    location: nil
+                )
+            }
+            .padding(.horizontal, model.compactChat ? 16 : 28)
+        }
+    }
+
+    @ViewBuilder
+    private func toolLine(
+        id: String,
+        title: String,
+        status: String,
+        detail: String,
+        grouped: Bool = false
+    ) -> some View {
+        let chinese = model.language.resolved() == .chinese
+        let parsed = ToolVoice.line(title, chinese: chinese, cwd: model.client.workingDirectory)
+        let shownStatus = model.client.isStopping && ToolVoice.isActive(status) ? "cancelled" : status
+        if detail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            toolHeader(status: shownStatus, verb: parsed.verb, target: parsed.target, location: parsed.location)
+                .help(id)
+        } else {
+            DisclosureGroup {
+                LinkedText(
+                    text: detail,
+                    fontSize: 12,
+                    monospaced: true,
+                    markdown: false,
+                    color: palette.secondary
+                )
+                .padding(.leading, grouped ? 0 : 20)
+            } label: {
+                toolHeader(status: shownStatus, verb: parsed.verb, target: parsed.target, location: parsed.location)
+            }
+            .help(id)
+        }
+    }
+
+    private func toolHeader(status: String, verb: String, target: String, location: String?) -> some View {
+        let active = ToolVoice.isActive(status)
+        return HStack(spacing: 8) {
+            RunningStatusIcon(
+                active: active && !model.client.isStopping,
+                idleSystemImage: toolIdleIcon(status),
+                color: toolColor(status),
+                size: 11
+            )
+            Text(verb)
+                .foregroundStyle(palette.secondary)
+            if !target.isEmpty {
+                if let location, looksLikeFileTarget(location) {
+                    ChatFileLabel(path: location, title: target)
+                } else {
+                    Text(target)
+                        .foregroundStyle(palette.text.opacity(0.82))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+            Spacer(minLength: 0)
+            if status == "failed" || status == "cancelled" {
+                Text(ToolVoice.statusLabel(status, chinese: model.language.resolved() == .chinese))
+                    .foregroundStyle(palette.secondary)
+            }
+        }
+        .font(.system(size: 13))
+        .padding(.vertical, 1)
+    }
+
+    private func toolSucceeded(_ item: ConversationItem) -> Bool {
+        if case .tool(_, _, let status, _) = item {
+            return status == "completed"
+        }
+        return false
+    }
+
+    private func toolIdleIcon(_ status: String) -> String {
+        switch status {
+        case "completed": return "checkmark"
+        case "cancelled": return "xmark"
+        case "failed": return "exclamationmark"
+        default: return "circle"
+        }
+    }
+
+    private func toolColor(_ status: String) -> Color {
+        switch status {
+        case "completed": return palette.secondary
+        case "failed": return .orange
+        case "cancelled": return palette.secondary.opacity(0.7)
+        default: return palette.secondary
+        }
+    }
+
+    private func looksLikeFileTarget(_ path: String) -> Bool {
+        path.hasPrefix("/") || path.hasPrefix("~/") || path.hasPrefix("./") || path.contains("/")
     }
 }
 
@@ -732,13 +915,14 @@ private struct PromptImageView: View {
 
 private struct ChatFileLabel: View {
     let path: String
+    var title: String? = nil
     @EnvironmentObject private var model: AppModel
     @Environment(\.palette) private var palette
 
     var body: some View {
         let url = ChatLinkDetector.resolve(path, baseDirectory: model.client.workingDirectory)?.url
             ?? URL(fileURLWithPath: path)
-        Button(path) {
+        Button(title ?? path) {
             ChatLinkActions.activate(url)
         }
         .buttonStyle(.plain)

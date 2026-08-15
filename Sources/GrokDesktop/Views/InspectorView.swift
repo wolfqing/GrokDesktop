@@ -28,11 +28,17 @@ struct InspectorView: View {
                 }
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
+                        if let story = liveStory {
+                            turnSection(story)
+                        }
                         if model.inspectorPaneVisible(.context) {
                             contextSection
                         }
                         if showsWork, model.inspectorPaneVisible(.work) {
                             workSection
+                        }
+                        if showsTerminals, model.inspectorPaneVisible(.terminals) {
+                            terminalsSection
                         }
                         if showsChanges, model.inspectorPaneVisible(.changes) {
                             changesSection
@@ -56,7 +62,7 @@ struct InspectorView: View {
             Task { await model.client.refreshGit() }
         }
         .onChange(of: model.client.items.count) { _, _ in
-            model.refreshWorkspace()
+            model.refreshContextBreakdown()
         }
     }
 
@@ -127,11 +133,112 @@ struct InspectorView: View {
     }
 
     private var hasVisiblePanes: Bool {
-        model.inspectorPaneVisible(.context)
+        liveStory != nil
+            || model.inspectorPaneVisible(.context)
             || (showsWork && model.inspectorPaneVisible(.work))
+            || (showsTerminals && model.inspectorPaneVisible(.terminals))
             || (showsChanges && model.inspectorPaneVisible(.changes))
             || (!model.officialWorkflows.isEmpty && model.inspectorPaneVisible(.workflows))
             || (!model.personas.isEmpty && model.inspectorPaneVisible(.personas))
+    }
+
+    private var liveStory: TurnStory? {
+        TurnNarrative.story(
+            items: model.client.items,
+            todos: model.client.todos,
+            hunks: model.client.hunks,
+            chinese: model.language.resolved() == .chinese,
+            running: model.client.isTurnRunning,
+            stopping: model.client.isStopping
+        )
+    }
+
+    private var showsTerminals: Bool {
+        !model.client.terminals.isEmpty
+    }
+
+    private func turnSection(_ story: TurnStory) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(l10n.t("This turn", "本轮"))
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(palette.secondary)
+                Spacer()
+                if story.total > 0 {
+                    Text("\(story.done)/\(story.total)")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundStyle(palette.secondary)
+                }
+            }
+            HStack(alignment: .top, spacing: 6) {
+                RunningStatusIcon(
+                    active: story.phase == .working,
+                    idleSystemImage: "pause.circle",
+                    color: .orange,
+                    size: 11
+                )
+                .padding(.top, 2)
+                Text(story.step)
+                    .font(.system(size: 12, weight: .medium))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let next = story.nextStep, !next.isEmpty {
+                Text(l10n.t("Next: \(next)", "下一步：\(next)"))
+                    .font(.system(size: 11))
+                    .foregroundStyle(palette.secondary)
+                    .lineLimit(2)
+            }
+        }
+    }
+
+    private var terminalsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            paneHeader(.terminals, title: l10n.t("Terminals", "终端")) { EmptyView() }
+            ForEach(model.client.terminals) { terminal in
+                terminalRow(terminal)
+            }
+        }
+    }
+
+    private func terminalRow(_ terminal: TerminalSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 6) {
+                RunningStatusIcon(
+                    active: terminal.running,
+                    idleSystemImage: terminal.exitCode == 0 ? "checkmark" : "xmark",
+                    color: terminal.running ? .orange : palette.secondary,
+                    size: 11
+                )
+                .padding(.top, 2)
+                Text(terminal.command)
+                    .font(.system(size: 11, design: .monospaced))
+                    .lineLimit(2)
+                    .textSelection(.enabled)
+                Spacer(minLength: 4)
+                if terminal.running {
+                    Button(l10n.stop) {
+                        model.client.killTerminal(terminal.id)
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color.orange)
+                } else if let code = terminal.exitCode {
+                    Text("\(code)")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(palette.secondary)
+                }
+            }
+            if !terminal.preview.isEmpty {
+                Text(terminal.preview)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(palette.secondary)
+                    .textSelection(.enabled)
+                    .lineLimit(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+                    .background(palette.chip, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+        }
     }
 
     private var contextSection: some View {
@@ -658,7 +765,7 @@ private struct DiffFileBlock: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Button {
-                    expanded.toggle()
+                    DispatchQueue.main.async { expanded.toggle() }
                 } label: {
                     Image(systemName: "chevron.down")
                         .font(.system(size: 9, weight: .semibold))

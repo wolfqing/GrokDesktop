@@ -169,12 +169,38 @@ struct SettingsView: View {
                     languageOption(.chinese, l10n.chinese)
                 }
             }
+            VStack(alignment: .leading, spacing: 8) {
+                statusLine(
+                    model.client.authPresence == .signedIn
+                        ? l10n.buildSignedIn
+                        : (model.client.authPresence == .apiKey ? l10n.buildAPIKey : l10n.buildSignedOut),
+                    ok: model.client.authPresence.isReady
+                )
+                statusLine(model.webChatSignedIn ? l10n.chatSignedIn : l10n.chatSignedOut, ok: model.webChatSignedIn)
+                if model.client.authPresence == .apiKey {
+                    Text(l10n.apiKeyChatNote)
+                        .font(.system(size: 12))
+                        .foregroundStyle(palette.secondary)
+                }
+            }
             Button(l10n.loginGrok) { model.login() }
                 .buttonStyle(GrokPrimaryButtonStyle())
             Button(l10n.t("Sign out", "退出登录")) { model.logout() }
                 .buttonStyle(GrokSecondaryButtonStyle())
         }
         .padding(.top, 8)
+        .task { await model.refreshWebChatAuth() }
+    }
+
+    private func statusLine(_ text: String, ok: Bool) -> some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(ok ? Color.green.opacity(0.85) : palette.secondary.opacity(0.45))
+                .frame(width: 7, height: 7)
+            Text(text)
+                .font(.system(size: 13))
+                .foregroundStyle(ok ? palette.text : palette.secondary)
+        }
     }
 
     private var accountName: String {
@@ -366,7 +392,7 @@ struct SettingsView: View {
             Text(l10n.t("Send feedback through the local grok CLI.", "通过本机 grok CLI 发送反馈。"))
                 .foregroundStyle(palette.secondary)
             Button("/feedback") {
-                model.destination = .chat
+                model.destination = .build
                 model.draft = "/feedback "
                 model.showSettings = false
             }
@@ -395,7 +421,7 @@ struct SettingsView: View {
                 Text(l10n.agentLibrary)
                 Spacer()
                 Button(l10n.createAgent) {
-                    model.destination = .chat
+                    model.destination = .build
                     model.draft = "/config-agents "
                     model.showSettings = false
                 }
@@ -588,14 +614,14 @@ struct SettingsView: View {
             ))
             .foregroundStyle(palette.secondary)
             HStack {
-                Text("Grok Desktop 0.1.9")
+                Text("Grok Desktop 0.1.10")
                 Spacer()
                 Text(model.client.grokVersion ?? "grok ?")
                     .foregroundStyle(palette.secondary)
             }
             .font(.system(size: 13))
             Button("/privacy") {
-                model.destination = .chat
+                model.destination = .build
                 model.draft = "/privacy"
                 model.showSettings = false
                 model.sendDraft()
@@ -761,7 +787,7 @@ struct SettingsView: View {
             HStack {
                 Text("App")
                 Spacer()
-                Text("0.1.9")
+                Text("0.1.10")
             }
             HStack {
                 Text("grok")

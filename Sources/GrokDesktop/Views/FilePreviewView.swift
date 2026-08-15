@@ -11,68 +11,80 @@ struct FilePreviewPane: View {
     @State private var document: FilePreviewDocument?
 
     var body: some View {
-        let preview = document ?? FilePreview.load(url)
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Image(systemName: icon(for: preview.kind))
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(palette.secondary)
-                Text(preview.name)
-                    .font(.system(size: 12, weight: .semibold))
-                    .lineLimit(1)
-                    .help(preview.url.path)
-                Spacer(minLength: 4)
-                Button {
-                    ChatLinkActions.reveal(preview.url)
-                } label: {
-                    Image(systemName: "folder")
-                        .font(.system(size: 11, weight: .medium))
+            if let preview = document {
+                chrome(preview)
+                previewBody(preview)
+                if preview.truncated {
+                    Text(l10n.t("Showing the first part of the file.", "只显示了文件开头。"))
+                        .font(.system(size: 10))
+                        .foregroundStyle(palette.secondary)
                 }
-                .buttonStyle(.plain)
-                .help(l10n.t("Show in Finder", "在 Finder 中显示"))
-                Button {
-                    ChatLinkActions.open(preview.url)
-                } label: {
-                    Image(systemName: "arrow.up.forward")
-                        .font(.system(size: 11, weight: .medium))
-                }
-                .buttonStyle(.plain)
-                .help(l10n.t("Open", "打开"))
-                Button {
-                    model.clearPreview()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 11, weight: .semibold))
-                }
-                .buttonStyle(.plain)
-                .help(l10n.t("Close preview", "关闭预览"))
-            }
-            .foregroundStyle(palette.secondary)
-
-            Group {
-                if !preview.exists {
-                    placeholder(l10n.t("This file is not on disk.", "磁盘上没有这个文件。"))
-                } else if preview.kind == .directory {
-                    placeholder(l10n.t("This is a folder.", "这是一个文件夹。"))
-                } else {
-                    content(preview)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(palette.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-
-            if preview.truncated {
-                Text(l10n.t("Showing the first part of the file.", "只显示了文件开头。"))
-                    .font(.system(size: 10))
-                    .foregroundStyle(palette.secondary)
+            } else {
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .onAppear { document = FilePreview.load(url) }
-        .onChange(of: url) { _, next in
-            document = FilePreview.load(next)
+        .task(id: url) {
+            let loaded = await Task.detached { FilePreview.load(url) }.value
+            document = loaded
         }
+    }
+
+    private func chrome(_ preview: FilePreviewDocument) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon(for: preview.kind))
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(palette.secondary)
+            Text(preview.name)
+                .font(.system(size: 12, weight: .semibold))
+                .lineLimit(1)
+                .help(preview.url.path)
+            Spacer(minLength: 4)
+            Button {
+                ChatLinkActions.reveal(preview.url)
+            } label: {
+                Image(systemName: "folder")
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .buttonStyle(.plain)
+            .help(l10n.t("Show in Finder", "在 Finder 中显示"))
+            Button {
+                ChatLinkActions.open(preview.url)
+            } label: {
+                Image(systemName: "arrow.up.forward")
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .buttonStyle(.plain)
+            .help(l10n.t("Open", "打开"))
+            Button {
+                model.clearPreview()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+            .help(l10n.t("Close preview", "关闭预览"))
+        }
+        .foregroundStyle(palette.secondary)
+    }
+
+    @ViewBuilder
+    private func previewBody(_ preview: FilePreviewDocument) -> some View {
+        Group {
+            if !preview.exists {
+                placeholder(l10n.t("This file is not on disk.", "磁盘上没有这个文件。"))
+            } else if preview.kind == .directory {
+                placeholder(l10n.t("This is a folder.", "这是一个文件夹。"))
+            } else {
+                content(preview)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(palette.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     @ViewBuilder
@@ -85,6 +97,8 @@ struct FilePreviewPane: View {
             }
         case .html:
             HTMLPreviewView(url: preview.url, isDark: palette.isDark)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
         case .image:
             if let image = NSImage(contentsOf: preview.url) {
                 ScrollView {

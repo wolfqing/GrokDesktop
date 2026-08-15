@@ -116,6 +116,20 @@ public final class ACPClient: ObservableObject {
         apply(tier: .auto)
         grokVersion = Self.readVersion(locator: locator)
         authPresence = AuthPresence.probe()
+        terminalsHost.onChange = { [weak self] in
+            Task { @MainActor in
+                self?.refreshTerminals()
+            }
+        }
+    }
+
+    public func refreshTerminals() {
+        terminals = terminalsHost.snapshots
+    }
+
+    public func killTerminal(_ id: String) {
+        terminalsHost.kill(id: id)
+        terminals = terminalsHost.snapshots
     }
 
     public var grokURL: URL? { locator.locate() }
@@ -194,7 +208,7 @@ public final class ACPClient: ObservableObject {
                 "protocolVersion": 1,
                 "clientInfo": [
                     "name": "GrokDesktop",
-                    "version": "0.1.9"
+                    "version": "0.1.10"
                 ],
                 "clientCapabilities": [
                     "fs": [
@@ -700,7 +714,8 @@ public final class ACPClient: ObservableObject {
             gitDiffText = extracted.isEmpty ? Self.pretty(diffs.result) : extracted
         }
         if gitDiffText.isEmpty {
-            gitDiffText = DiffScan.workspaceDiff(cwd: workingDirectory)
+            let cwd = workingDirectory
+            gitDiffText = await Task.detached { DiffScan.workspaceDiff(cwd: cwd) }.value
         }
         if gitStatusText.isEmpty, gitDiffText.isEmpty {
             // keep WorkspaceSnapshot as the fallback

@@ -33,6 +33,25 @@ struct L10n {
     }
 
     var search: String { t("Search", "搜索") }
+    var productChat: String { t("Chat", "Chat") }
+    var productBuild: String { t("Build", "Build") }
+    var webChatHint: String {
+        t(
+            "grok.com chat. History stays on the web, separate from Build sessions.",
+            "grok.com 对话。记录留在网页，和 Build 会话分开。"
+        )
+    }
+    var buildSignedIn: String { t("Build signed in", "Build 已登录") }
+    var buildAPIKey: String { t("Build using API key", "Build 使用 API Key") }
+    var buildSignedOut: String { t("Build signed out", "Build 未登录") }
+    var chatSignedIn: String { t("Chat signed in", "Chat 已登录") }
+    var chatSignedOut: String { t("Chat signed out", "Chat 未登录") }
+    var apiKeyChatNote: String {
+        t(
+            "An API key only covers Build. Chat still needs a grok.com account.",
+            "API Key 只能用于 Build。Chat 仍需要 grok.com 账号。"
+        )
+    }
     var newChat: String { t("New Chat", "新对话") }
     var imagine: String { t("Imagine", "Imagine") }
     var liveAgents: String { t("Live agents", "进行中") }
@@ -90,7 +109,7 @@ struct L10n {
     var system: String { t("System", "系统") }
     var wrapCode: String { t("Wrap Long Lines For Code Blocks By Default", "代码块默认自动换行") }
     var enableAutoScroll: String { t("Enable Auto Scroll", "启用自动滚动") }
-    var notifyThinking: String { t("Notify When Grok Finishes Thinking", "Grok 完成思考时通知") }
+    var notifyThinking: String { t("Notify when a session needs you", "会话需要批准或回答时通知") }
     var requireCmdEnter: String { t("Require Cmd+Enter To Submit", "使用 Cmd+Enter 发送") }
     var requireCmdEnterHelp: String {
         t(

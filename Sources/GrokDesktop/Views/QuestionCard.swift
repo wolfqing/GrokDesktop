@@ -6,6 +6,8 @@ struct QuestionCard: View {
     @Environment(\.palette) private var palette
     @Environment(\.l10n) private var l10n
     let request: UserQuestionRequest
+    var sessionID: String? = nil
+    var inset = true
     @State private var selected: [String: Set<String>] = [:]
     @State private var note = ""
 
@@ -40,7 +42,7 @@ struct QuestionCard: View {
                 .disabled(!canSubmit && note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                 Button(l10n.t("Skip", "跳过")) {
-                    model.client.answerQuestion(.skipInterview)
+                    model.client.answerQuestion(.skipInterview, sessionID: sessionID)
                 }
                 .buttonStyle(GrokSecondaryButtonStyle())
             }
@@ -52,7 +54,7 @@ struct QuestionCard: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(palette.hairline, lineWidth: 1)
         )
-        .padding(.horizontal, 24)
+        .padding(.horizontal, inset ? 24 : 0)
     }
 
     private var canSubmit: Bool {
@@ -186,7 +188,7 @@ struct QuestionCard: View {
     private func submit(force _: UserQuestion? = nil) {
         let typed = note.trimmingCharacters(in: .whitespacesAndNewlines)
         if !canSubmit, !typed.isEmpty {
-            model.client.answerQuestion(.chatAboutThis(typed))
+            model.client.answerQuestion(.chatAboutThis(typed), sessionID: sessionID)
             return
         }
         var answers: [String: [String]] = [:]
@@ -196,9 +198,9 @@ struct QuestionCard: View {
         }
         let missing = request.questions.contains { (selected[$0.id] ?? []).isEmpty }
         if !typed.isEmpty, missing {
-            model.client.answerQuestion(.chatAboutThis(typed))
+            model.client.answerQuestion(.chatAboutThis(typed), sessionID: sessionID)
             return
         }
-        model.client.answerQuestion(.accepted(answers: answers, partial: missing))
+        model.client.answerQuestion(.accepted(answers: answers, partial: missing), sessionID: sessionID)
     }
 }

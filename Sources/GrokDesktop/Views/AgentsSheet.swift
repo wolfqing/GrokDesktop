@@ -62,7 +62,7 @@ struct AgentsSheet: View {
                             Button(l10n.t("Use", "使用")) {
                                 model.showAgents = false
                                 model.draft = "/agents \(agent.slug) "
-                                model.destination = .chat
+                                model.destination = .build
                             }
                             .buttonStyle(GrokSecondaryButtonStyle())
                             if !agent.isBundled {

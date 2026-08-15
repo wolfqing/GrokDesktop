@@ -24,7 +24,7 @@ struct ImagineView: View {
             Button(l10n.t("Generate", "生成")) {
                 let text = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !text.isEmpty else { return }
-                model.destination = .chat
+                model.destination = .build
                 model.draft = "/imagine \(text)"
                 model.sendDraft()
             }

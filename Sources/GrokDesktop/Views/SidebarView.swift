@@ -28,42 +28,74 @@ struct SidebarView: View {
         HStack(spacing: 8) {
             GrokMark(size: 20)
             if !model.sidebarCollapsed {
-                Text("Grok build")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(palette.text)
-                    .lineLimit(1)
+                productSwitcher
                 Spacer(minLength: 4)
-                Button {
-                    model.showSearchField.toggle()
-                } label: {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(model.showSearchField ? palette.text : palette.secondary)
-                        .frame(width: 28, height: 28)
-                        .background(
-                            model.showSearchField ? palette.selected : Color.clear,
-                            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        )
+                if model.destination.isBuildSurface {
+                    Button {
+                        model.showSearchField.toggle()
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(model.showSearchField ? palette.text : palette.secondary)
+                            .frame(width: 28, height: 28)
+                            .background(
+                                model.showSearchField ? palette.selected : Color.clear,
+                                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .help(l10n.search)
                 }
-                .buttonStyle(.plain)
-                .help(l10n.search)
             }
         }
     }
 
+    private var productSwitcher: some View {
+        HStack(spacing: 2) {
+            productTab(l10n.productChat, selected: model.destination == .webChat) {
+                model.openWebChat()
+            }
+            productTab(l10n.productBuild, selected: model.destination.isBuildSurface) {
+                model.openBuildSurface()
+            }
+        }
+        .padding(3)
+        .background(palette.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func productTab(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(selected ? palette.text : palette.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(selected ? palette.elevated : Color.clear, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
     private var collapsedRail: some View {
         VStack(spacing: 8) {
-            iconButton("magnifyingglass", selected: model.showSearchField) {
-                model.sidebarCollapsed = false
-                model.showSearchField = true
+            iconButton("bubble.left.and.bubble.right", selected: model.destination == .webChat) {
+                model.openWebChat()
             }
-            iconButton("square.and.pencil", selected: model.destination == .chat) { model.openChat() }
-            iconButton("circle.hexagongrid", selected: model.destination == .dashboard, badge: model.client.isLive) {
-                model.destination = .dashboard
+            iconButton("hammer", selected: model.destination.isBuildSurface) {
+                model.openBuildSurface()
             }
-            iconButton("photo", selected: model.destination == .imagine) { model.destination = .imagine }
-            iconButton("bolt", selected: model.destination == .automations) { model.destination = .automations }
-            iconButton("square.grid.2x2", selected: model.destination == .skills) { model.destination = .skills }
+            if model.destination.isBuildSurface {
+                iconButton("magnifyingglass", selected: model.showSearchField) {
+                    model.sidebarCollapsed = false
+                    model.showSearchField = true
+                }
+                iconButton("square.and.pencil", selected: model.destination == .build) { model.openChat() }
+                iconButton("circle.hexagongrid", selected: model.destination == .dashboard, badge: model.client.isLive) {
+                    model.destination = .dashboard
+                }
+                iconButton("photo", selected: model.destination == .imagine) { model.destination = .imagine }
+                iconButton("bolt", selected: model.destination == .automations) { model.destination = .automations }
+                iconButton("square.grid.2x2", selected: model.destination == .skills) { model.destination = .skills }
+            }
             Spacer()
         }
         .padding(.top, 8)
@@ -73,12 +105,20 @@ struct SidebarView: View {
 
     private var expandedContent: some View {
         VStack(alignment: .leading, spacing: 2) {
+            if model.destination == .webChat {
+                Text(l10n.webChatHint)
+                    .font(.system(size: 12))
+                    .foregroundStyle(palette.secondary)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                Spacer()
+            } else {
             if model.showSearchField {
                 searchField
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
             }
-            navRow(l10n.newChat, systemImage: "square.and.pencil", selected: model.destination == .chat, prominent: true) {
+            navRow(l10n.newChat, systemImage: "square.and.pencil", selected: model.destination == .build, prominent: true) {
                 model.openChat()
             }
             navRow(
@@ -175,6 +215,7 @@ struct SidebarView: View {
                 }
                 .padding(.top, 14)
                 .padding(.bottom, 16)
+            }
             }
         }
     }

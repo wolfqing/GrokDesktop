@@ -16,7 +16,7 @@ struct SkillsView: View {
                 Spacer()
                 Menu {
                     Button(l10n.newSkill) {
-                        model.destination = .chat
+                        model.destination = .build
                         model.draft = "/create-skill "
                     }
                 } label: {

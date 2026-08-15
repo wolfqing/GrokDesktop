@@ -40,6 +40,10 @@ struct GrokDesktopApp: App {
                     .keyboardShortcut("n", modifiers: .command)
             }
             CommandMenu("Grok") {
+                Button(model.copy.productChat) { model.openWebChat() }
+                    .keyboardShortcut("1", modifiers: .command)
+                Button(model.copy.productBuild) { model.openBuildSurface() }
+                    .keyboardShortcut("2", modifiers: .command)
                 Button(model.copy.settings) { model.showSettings = true }
                     .keyboardShortcut(",", modifiers: .command)
                 Button(model.copy.chooseFolder) { model.chooseWorkingDirectory() }
@@ -47,13 +51,13 @@ struct GrokDesktopApp: App {
                 Button(model.copy.t("Command palette", "命令面板")) {
                     model.draft = "/"
                     model.showPalette = true
-                    model.destination = .chat
+                    model.destination = .build
                 }
                 .keyboardShortcut("k", modifiers: .command)
                 Button(model.copy.t("Open slash menu", "打开斜杠菜单")) {
                     model.draft = "/"
                     model.showPalette = true
-                    model.destination = .chat
+                    model.destination = .build
                 }
                 .keyboardShortcut("p", modifiers: .command)
                 Button(model.copy.t("Prompt history", "提示词历史")) {
@@ -68,7 +72,7 @@ struct GrokDesktopApp: App {
                 .keyboardShortcut("r", modifiers: [.command, .shift])
                 Button(model.copy.t("Inspector", "右侧栏")) {
                     model.showInspector.toggle()
-                    model.destination = .chat
+                    model.destination = .build
                 }
                 .keyboardShortcut("i", modifiers: .command)
                 Button(model.copy.t("Cycle mode", "切换模式")) { model.cycleMode() }

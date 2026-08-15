@@ -15,22 +15,33 @@ struct RootView: View {
             HStack(spacing: 0) {
                 SidebarView()
                     .frame(width: model.sidebarCollapsed ? GrokTheme.collapsedSidebarWidth : GrokTheme.sidebarWidth)
-                Group {
-                    switch model.destination {
-                    case .chat:
-                        ChatView()
-                    case .dashboard:
-                        DashboardView()
-                    case .imagine:
-                        ImagineView()
-                    case .automations:
-                        AutomationsView()
-                    case .skills:
-                        SkillsView()
+                ZStack {
+                    Group {
+                        switch model.destination {
+                        case .webChat:
+                            Color.clear
+                        case .build:
+                            ChatView()
+                        case .dashboard:
+                            DashboardView()
+                        case .imagine:
+                            ImagineView()
+                        case .automations:
+                            AutomationsView()
+                        case .skills:
+                            SkillsView()
+                        }
+                    }
+                    if model.didOpenWebChat || model.destination == .webChat {
+                        GrokWebChatView { signedIn in
+                            model.webChatSignedIn = signedIn
+                        }
+                        .opacity(model.destination == .webChat ? 1 : 0)
+                        .allowsHitTesting(model.destination == .webChat)
                     }
                 }
                 .frame(maxWidth: .infinity)
-                if model.showInspector && model.destination == .chat {
+                if model.showInspector && model.destination == .build {
                     InspectorResizeHandle(
                         width: model.inspectorWidth,
                         onChange: { model.setInspectorWidth($0) },
@@ -46,6 +57,11 @@ struct RootView: View {
                     .transition(.opacity)
                     .zIndex(2)
             }
+            if model.showInAppLogin {
+                InAppLoginView()
+                    .transition(.opacity)
+                    .zIndex(2)
+            }
             if model.showSettings {
                 SettingsView()
                     .transition(.opacity)
@@ -55,7 +71,7 @@ struct RootView: View {
                 CreateProjectSheet()
                     .zIndex(3)
             }
-            if model.showPalette && model.destination != .chat {
+            if model.showPalette && model.destination.isBuildSurface && model.destination != .build {
                 CommandPalette()
                     .zIndex(4)
             }
@@ -128,15 +144,24 @@ struct RootView: View {
             }
         }
         .onAppear {
+            model.prepareAttention()
             if model.needsFolderPick {
                 model.needsFolderPick = false
                 model.chooseWorkingDirectory()
             }
         }
+        .onChange(of: model.destination) { _, _ in
+            model.rememberBuildDestination()
+            model.syncAttention()
+        }
+        .onChange(of: model.notifyThinking) { _, _ in
+            model.syncAttention()
+        }
         .environment(\.palette, palette)
         .environment(\.l10n, model.copy)
         .foregroundStyle(palette.text)
         .background(palette.canvas)
+        .animation(.easeInOut(duration: 0.18), value: model.showInAppLogin)
         .animation(.easeInOut(duration: 0.18), value: model.showSettings)
         .animation(.easeInOut(duration: 0.18), value: model.showAbout)
         .animation(.easeInOut(duration: 0.18), value: model.destination)

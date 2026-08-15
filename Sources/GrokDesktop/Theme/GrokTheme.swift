@@ -64,6 +64,7 @@ extension EnvironmentValues {
 enum InspectorPane: String, CaseIterable, Identifiable {
     case context
     case work
+    case terminals
     case changes
     case workflows
     case personas
@@ -74,6 +75,7 @@ enum InspectorPane: String, CaseIterable, Identifiable {
         switch self {
         case .context: return chinese ? "上下文" : "Context"
         case .work: return chinese ? "任务" : "Tasks"
+        case .terminals: return chinese ? "终端" : "Terminals"
         case .changes: return chinese ? "变更" : "Changes"
         case .workflows: return chinese ? "工作流" : "Workflows"
         case .personas: return chinese ? "人设" : "Personas"
