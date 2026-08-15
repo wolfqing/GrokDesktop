@@ -72,9 +72,12 @@ final class AttentionCenter: NSObject, UNUserNotificationCenterDelegate {
     private func requestAccessIfNeeded() {
         guard !requested else { return }
         requested = true
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
-            Task { @MainActor in
-                self.authorized = granted
+        Task {
+            do {
+                authorized = try await UNUserNotificationCenter.current()
+                    .requestAuthorization(options: [.alert, .sound, .badge])
+            } catch {
+                authorized = false
             }
         }
     }
