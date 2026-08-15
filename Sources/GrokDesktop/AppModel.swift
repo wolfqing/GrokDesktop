@@ -68,6 +68,7 @@ final class AppModel: ObservableObject {
     @Published var showAbout = false
     @Published var showPalette = false
     @Published var showInspector = true
+    @Published var inspectorWidth: CGFloat = GrokTheme.inspectorWidth
     @Published var previewedFile: URL?
     @Published var showSearchField = false
     @Published var showAttachMenu = false
@@ -188,6 +189,7 @@ final class AppModel: ObservableObject {
         self.locator = locator
         self.sessionIndex = sessionIndex
         self.client = ACPClient(locator: locator)
+        restoreInspectorWidth()
         restoreWorkingDirectory()
         refreshAll()
         firstRunReason = bootstrapReason()
@@ -208,6 +210,9 @@ final class AppModel: ObservableObject {
         }
         previewedFile = standardized
         showInspector = true
+        if inspectorWidth <= GrokTheme.inspectorWidth {
+            setInspectorWidth(GrokTheme.inspectorPreviewWidth)
+        }
         if destination != .chat {
             destination = .chat
         }
@@ -215,6 +220,24 @@ final class AppModel: ObservableObject {
 
     func clearPreview() {
         previewedFile = nil
+    }
+
+    func setInspectorWidth(_ width: CGFloat) {
+        let next = GrokTheme.clampInspectorWidth(width)
+        guard inspectorWidth != next else { return }
+        inspectorWidth = next
+        UserDefaults.standard.set(Double(next), forKey: "inspectorWidth")
+    }
+
+    func resetInspectorWidth() {
+        setInspectorWidth(previewedFile == nil ? GrokTheme.inspectorWidth : GrokTheme.inspectorPreviewWidth)
+    }
+
+    private func restoreInspectorWidth() {
+        let stored = UserDefaults.standard.double(forKey: "inspectorWidth")
+        if stored >= Double(GrokTheme.inspectorMinWidth) {
+            inspectorWidth = GrokTheme.clampInspectorWidth(CGFloat(stored))
+        }
     }
 
     private func bindClient() {

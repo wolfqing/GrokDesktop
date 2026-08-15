@@ -66,8 +66,14 @@ enum GrokTheme {
     static let sidebarWidth: CGFloat = 260
     static let collapsedSidebarWidth: CGFloat = 64
     static let inspectorWidth: CGFloat = 320
+    static let inspectorMinWidth: CGFloat = 240
+    static let inspectorMaxWidth: CGFloat = 720
     static let inspectorPreviewWidth: CGFloat = 420
     static let inputRadius: CGFloat = 28
+
+    static func clampInspectorWidth(_ width: CGFloat) -> CGFloat {
+        min(max(width, inspectorMinWidth), inspectorMaxWidth)
+    }
 }
 
 private extension Color {

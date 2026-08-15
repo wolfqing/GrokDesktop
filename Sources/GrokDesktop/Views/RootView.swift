@@ -1,3 +1,4 @@
+import AppKit
 import GrokDesktopCore
 import SwiftUI
 
@@ -31,11 +32,13 @@ struct RootView: View {
                 }
                 .frame(maxWidth: .infinity)
                 if model.showInspector && model.destination == .chat {
-                    Rectangle()
-                        .fill(palette.hairline)
-                        .frame(width: 1)
+                    InspectorResizeHandle(
+                        width: model.inspectorWidth,
+                        onChange: { model.setInspectorWidth($0) },
+                        onReset: { model.resetInspectorWidth() }
+                    )
                     InspectorView()
-                        .frame(width: model.previewedFile == nil ? GrokTheme.inspectorWidth : GrokTheme.inspectorPreviewWidth)
+                        .frame(width: model.inspectorWidth)
                 }
             }
 
@@ -275,5 +278,54 @@ struct RootView: View {
             .frame(width: 480)
             .background(palette.elevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
+    }
+}
+
+private struct InspectorResizeHandle: View {
+    @Environment(\.palette) private var palette
+    @Environment(\.l10n) private var l10n
+    let width: CGFloat
+    let onChange: (CGFloat) -> Void
+    let onReset: () -> Void
+
+    @State private var dragOrigin: CGFloat?
+    @State private var hovering = false
+
+    var body: some View {
+        ZStack {
+            Rectangle()
+                .fill(hovering || dragOrigin != nil ? Color.accentColor.opacity(0.85) : palette.hairline)
+                .frame(width: 1)
+            Rectangle()
+                .fill(Color.clear)
+                .frame(width: 8)
+        }
+        .frame(maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .onHover { inside in
+            hovering = inside
+            if inside {
+                NSCursor.resizeLeftRight.push()
+            } else {
+                NSCursor.pop()
+            }
+        }
+        .gesture(
+            DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                .onChanged { value in
+                    if dragOrigin == nil {
+                        dragOrigin = width
+                    }
+                    onChange((dragOrigin ?? width) - value.translation.width)
+                }
+                .onEnded { _ in
+                    dragOrigin = nil
+                }
+        )
+        .onTapGesture(count: 2, perform: onReset)
+        .onDisappear {
+            if hovering { NSCursor.pop() }
+        }
+        .help(l10n.t("Drag to resize. Double-click to reset.", "拖动调整宽度。双击恢复默认。"))
     }
 }
