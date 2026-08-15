@@ -1,7 +1,33 @@
 import Foundation
 
+public enum ChatTableAlignment: String, Equatable, Sendable {
+    case leading
+    case center
+    case trailing
+}
+
+public struct ChatTable: Equatable, Sendable {
+    public var headers: [String]
+    public var rows: [[String]]
+    public var alignments: [ChatTableAlignment]
+
+    public init(headers: [String], rows: [[String]], alignments: [ChatTableAlignment] = []) {
+        self.headers = headers
+        self.rows = rows
+        if alignments.count == headers.count {
+            self.alignments = alignments
+        } else {
+            self.alignments = Array(repeating: .leading, count: headers.count)
+        }
+    }
+
+    public var columnCount: Int { headers.count }
+}
+
 public enum ChatBlock: Equatable, Sendable {
     case prose(String)
+    case heading(level: Int, text: String)
+    case table(ChatTable)
     case code(language: String, text: String)
 }
 
@@ -11,9 +37,7 @@ public enum ChatMarkdown {
         var remainder = text[...]
         while let start = remainder.range(of: "```") {
             let before = String(remainder[..<start.lowerBound])
-            if !before.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                result.append(.prose(before))
-            }
+            result.append(contentsOf: splitProse(before))
             remainder = remainder[start.upperBound...]
             let languageLine = remainder.prefix(while: { $0 != "\n" })
             let language = String(languageLine).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -33,14 +57,155 @@ public enum ChatMarkdown {
                 remainder = ""
             }
         }
-        let tail = String(remainder)
-        if !tail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            result.append(.prose(tail))
-        }
+        result.append(contentsOf: splitProse(String(remainder)))
         if result.isEmpty, !text.isEmpty {
             result.append(.prose(text))
         }
         return result
+    }
+
+    public static func splitProse(_ text: String) -> [ChatBlock] {
+        let trimmed = text.trimmingCharacters(in: .newlines)
+        guard !trimmed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
+        var blocks: [ChatBlock] = []
+        var paragraph: [String] = []
+        var tableLines: [String] = []
+        func flushParagraph() {
+            let joined = paragraph.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !joined.isEmpty {
+                blocks.append(.prose(joined))
+            }
+            paragraph = []
+        }
+        func flushTable() {
+            if let table = parseTable(tableLines) {
+                flushParagraph()
+                blocks.append(.table(table))
+            } else {
+                paragraph.append(contentsOf: tableLines)
+            }
+            tableLines = []
+        }
+        for raw in trimmed.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline) {
+            let line = String(raw)
+            if isTableLine(line) {
+                tableLines.append(line)
+                continue
+            }
+            if !tableLines.isEmpty { flushTable() }
+            if let heading = heading(in: line) {
+                flushParagraph()
+                blocks.append(.heading(level: heading.level, text: heading.text))
+            } else if line.trimmingCharacters(in: .whitespaces).isEmpty {
+                flushParagraph()
+            } else {
+                paragraph.append(line)
+            }
+        }
+        if !tableLines.isEmpty { flushTable() }
+        flushParagraph()
+        return blocks
+    }
+
+    public static func parseTable(_ lines: [String]) -> ChatTable? {
+        let rows = lines.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        guard rows.count >= 2, isSeparatorRow(rows[1]) else { return nil }
+        let headers = cells(in: rows[0])
+        let alignments = alignments(in: rows[1])
+        guard headers.count >= 2, alignments.count >= 2 else { return nil }
+        let width = headers.count
+        var body: [[String]] = []
+        for line in rows.dropFirst(2) {
+            guard isTableRow(line), !isSeparatorRow(line) else { return nil }
+            body.append(padded(cells(in: line), to: width))
+        }
+        return ChatTable(headers: padded(headers, to: width), rows: body, alignments: padded(alignments, to: width, fill: .leading))
+    }
+
+    public static func isTableLine(_ line: String) -> Bool {
+        isTableRow(line) || isSeparatorRow(line)
+    }
+
+    public static func isTableRow(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.contains("|") else { return false }
+        if heading(in: trimmed) != nil { return false }
+        return cells(in: trimmed).count >= 2
+    }
+
+    public static func isSeparatorRow(_ line: String) -> Bool {
+        let parts = cells(in: line)
+        guard parts.count >= 2 else { return false }
+        return parts.allSatisfy { cell in
+            let token = cell.replacingOccurrences(of: " ", with: "")
+            guard token.count >= 3 else { return false }
+            let stripped = token.trimmingCharacters(in: CharacterSet(charactersIn: ":"))
+            return !stripped.isEmpty && stripped.allSatisfy { $0 == "-" }
+        }
+    }
+
+    public static func heading(in line: String) -> (level: Int, text: String)? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasPrefix("#") else { return nil }
+        var level = 0
+        for character in trimmed {
+            if character == "#" { level += 1 } else { break }
+        }
+        guard (1...3).contains(level), trimmed.count > level else { return nil }
+        let mark = trimmed.index(trimmed.startIndex, offsetBy: level)
+        guard trimmed[mark].isWhitespace else { return nil }
+        let title = trimmed[trimmed.index(after: mark)...].trimmingCharacters(in: .whitespaces)
+        guard !title.isEmpty else { return nil }
+        return (level, title)
+    }
+
+    public static func cells(in line: String) -> [String] {
+        var value = line.trimmingCharacters(in: .whitespaces)
+        if value.hasPrefix("|") { value.removeFirst() }
+        if value.hasSuffix("|") { value.removeLast() }
+        var cells: [String] = []
+        var current = ""
+        var escaped = false
+        for character in value {
+            if escaped {
+                current.append(character)
+                escaped = false
+                continue
+            }
+            if character == "\\" {
+                escaped = true
+                continue
+            }
+            if character == "|" {
+                cells.append(current.trimmingCharacters(in: .whitespaces))
+                current = ""
+                continue
+            }
+            current.append(character)
+        }
+        cells.append(current.trimmingCharacters(in: .whitespaces))
+        return cells
+    }
+
+    public static func alignments(in line: String) -> [ChatTableAlignment] {
+        cells(in: line).map { cell in
+            let token = cell.replacingOccurrences(of: " ", with: "")
+            let left = token.hasPrefix(":")
+            let right = token.hasSuffix(":")
+            if left && right { return .center }
+            if right { return .trailing }
+            return .leading
+        }
+    }
+
+    private static func padded(_ cells: [String], to count: Int) -> [String] {
+        if cells.count >= count { return Array(cells.prefix(count)) }
+        return cells + Array(repeating: "", count: count - cells.count)
+    }
+
+    private static func padded(_ alignments: [ChatTableAlignment], to count: Int, fill: ChatTableAlignment) -> [ChatTableAlignment] {
+        if alignments.count >= count { return Array(alignments.prefix(count)) }
+        return alignments + Array(repeating: fill, count: count - alignments.count)
     }
 }
 

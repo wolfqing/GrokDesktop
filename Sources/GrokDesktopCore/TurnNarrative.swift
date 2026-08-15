@@ -54,7 +54,7 @@ public enum TurnNarrative {
         let phase: TurnStory.Phase
         if stopping {
             phase = .stopping
-        } else if running || activeTodo != nil || runningTool != nil {
+        } else if running {
             phase = .working
         } else {
             return nil

@@ -508,7 +508,7 @@ public final class ACPClient: ObservableObject {
     public var hasActiveWork: Bool {
         if isStopping { return true }
         guard currentWorkspace?.stopRequested != true else { return false }
-        return isTurnRunning || todos.contains(where: \.isActive) || tasks.contains(where: \.isRunning)
+        return isTurnRunning || tasks.contains(where: \.isRunning)
     }
 
     public func answerPermission(optionID: String, rememberSession: Bool = false, sessionID target: String? = nil) {
@@ -917,6 +917,9 @@ public final class ACPClient: ObservableObject {
         workspace.fold(update)
         if workspace.stopRequested {
             workspace.markWorkStopped()
+        }
+        if update.kind == .turnCompleted {
+            workspace.isTurnRunning = false
         }
         if update.kind == .plan {
             workspace.refreshArtifacts()

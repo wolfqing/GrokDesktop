@@ -852,7 +852,7 @@ final class AppModel: ObservableObject {
         mentionQuery = nil
         mentionMatches = []
         showAttachMenu = false
-        suppressSuggest = false
+        suppressSuggest = true
     }
 
     private static func fileMatches(cwd: URL, query: String, limit: Int = 40) -> [URL] {
@@ -2045,18 +2045,49 @@ final class AppModel: ObservableObject {
     }
 
     func pasteAttachments() {
-        let board = NSPasteboard.general
-        if let images = board.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage] {
-            for image in images {
-                if let url = Self.writePasteImage(image) {
-                    insertMention(url)
-                }
-            }
+        showAttachMenu = false
+        mentionQuery = nil
+        let urls = Self.clipboardAttachmentURLs()
+        guard !urls.isEmpty else {
+            flash(copy.t("Clipboard has no image.", "剪贴板里没有图片。"))
             return
         }
-        if let urls = board.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] {
-            for url in urls { insertMention(url) }
+        suppressSuggest = true
+        for url in urls {
+            insertMention(url)
         }
+        suppressSuggest = true
+    }
+
+    static func clipboardAttachmentURLs(board: NSPasteboard = .general) -> [URL] {
+        var urls: [URL] = []
+        var seen = Set<String>()
+        func add(_ url: URL) {
+            if seen.insert(url.path).inserted {
+                urls.append(url)
+            }
+        }
+
+        let fileURLs = (board.readObjects(forClasses: [NSURL.self], options: nil) as? [URL]) ?? []
+        for url in fileURLs where PromptMedia.isImageURL(url) {
+            add(url)
+        }
+        if !urls.isEmpty { return urls }
+
+        if let image = NSImage(pasteboard: board), let url = writePasteImage(image) {
+            add(url)
+            return urls
+        }
+        let types: [NSPasteboard.PasteboardType] = [.png, .tiff, NSPasteboard.PasteboardType("public.jpeg")]
+        for type in types {
+            if let data = board.data(forType: type),
+               let image = NSImage(data: data),
+               let url = writePasteImage(image) {
+                add(url)
+                break
+            }
+        }
+        return urls
     }
 
     func sessionInfoLine() -> String {

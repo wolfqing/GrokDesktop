@@ -189,7 +189,11 @@ public struct SessionUpdate: Equatable {
             text: extractText(update),
             title: update["title"] as? String ?? "",
             toolCallId: update["toolCallId"] as? String ?? update["tool_call_id"] as? String,
-            status: update["status"] as? String,
+            status: normalizedStatus(
+                update["status"] as? String
+                    ?? (meta["updateParams"] as? [String: Any])?["status"] as? String
+                    ?? (updateMeta["x.ai/tool"] as? [String: Any])?["status"] as? String
+            ),
             planEntries: parsePlanEntries(update["entries"]),
             timestamp: PromptTimestamp.parse(
                 meta["agentTimestampMs"]
@@ -201,6 +205,19 @@ public struct SessionUpdate: Equatable {
             imageDisplayNumber: images.displayNumber,
             raw: update
         )
+    }
+
+    public static func normalizedStatus(_ raw: String?) -> String? {
+        guard let raw, !raw.isEmpty else { return nil }
+        switch raw.lowercased() {
+        case "pending": return "pending"
+        case "in_progress", "inprogress": return "in_progress"
+        case "running": return "running"
+        case "completed", "complete", "success": return "completed"
+        case "failed", "error": return "failed"
+        case "cancelled", "canceled": return "cancelled"
+        default: return raw.lowercased()
+        }
     }
 
     public static func extractText(_ update: [String: Any]) -> String {

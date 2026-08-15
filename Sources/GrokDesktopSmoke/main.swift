@@ -417,6 +417,36 @@ expect(blocks[1]["type"] as? String == "image", "second block is image")
 
 let markdown = ChatMarkdown.blocks(in: "Hello **world**\n```swift\nlet x = 1\n```\nDone")
 expect(markdown.count == 3, "markdown splits prose and fence")
+expect(ChatMarkdown.heading(in: "## Next steps")?.level == 2, "markdown heading")
+expect(ChatMarkdown.heading(in: "#include <stdio.h>") == nil, "preprocessor is not a heading")
+let headed = ChatMarkdown.blocks(in: "Intro\n\n## Title\n\nBody text")
+expect(headed.count == 3, "blank lines and headings split prose")
+if case .heading(let level, let title) = headed[1] {
+    expect(level == 2 && title == "Title", "heading block")
+} else {
+    fail("expected heading block")
+}
+let tableBlocks = ChatMarkdown.blocks(in: """
+Before
+
+| 之前 | 现在 | 为什么 |
+| --- | ---: | :---: |
+| 16pt | 15.5pt | 更好读 |
+| 挤 | 分段 | **层次** |
+
+After
+""")
+expect(tableBlocks.count == 3, "table sits between prose")
+if case .table(let table) = tableBlocks[1] {
+    expect(table.headers == ["之前", "现在", "为什么"], "table headers")
+    expect(table.rows.count == 2, "table rows")
+    expect(table.rows[0][1] == "15.5pt", "table cell")
+    expect(table.alignments == [.leading, .trailing, .center], "table alignments")
+    expect(table.rows[1][2] == "**层次**", "table keeps inline markdown")
+} else {
+    fail("expected table block")
+}
+expect(ChatMarkdown.parseTable(["Chat | Build"]) == nil, "pipe sentence is not a table")
 if case .code(let language, let code) = markdown[1] {
     expect(language == "swift", "code language")
     expect(code.contains("let x"), "code body")
@@ -462,6 +492,25 @@ expect(
     ) == nil,
     "finished turn does not leave a story card"
 )
+expect(
+    TurnNarrative.story(
+        items: storyItems,
+        todos: [AgentTodo(id: "1", content: "改对话区", status: "in_progress")],
+        hunks: [],
+        chinese: true,
+        running: false,
+        stopping: false
+    ) == nil,
+    "leftover in-progress todo does not keep the turn spinner"
+)
+expect(SessionUpdate.normalizedStatus("Completed") == "completed", "normalize completed status")
+expect(SessionUpdate.normalizedStatus("Pending") == "pending", "normalize pending status")
+let pendingTool = SessionUpdate.parse(params: [
+    "sessionId": "s1",
+    "update": ["sessionUpdate": "tool_call", "toolCallId": "t1", "title": "read_file"],
+    "_meta": ["updateParams": ["status": "Pending"]]
+])
+expect(pendingTool.status == "pending", "tool_call reads Pending from updateParams")
 expect(TurnNarrative.fileNames(in: "edited Sources/GrokDesktop/Views/ChatView.swift").contains("ChatView.swift"), "extract file name")
 
 let exists: (String) -> Bool = {
@@ -666,6 +715,7 @@ for _ in 0..<40 {
 }
 expect(termOut?.exitCode == 0, "terminal exit 0")
 expect(termOut?.output.contains("grok-desktop-terminal") == true, "terminal captured stdout")
+expect(host.snapshots.contains(where: { $0.preview.contains("grok-desktop-terminal") }), "terminal snapshot keeps a preview")
 host.release(id: termID)
 expect(host.snapshots.isEmpty, "terminal released")
 

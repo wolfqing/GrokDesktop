@@ -48,6 +48,8 @@ cat > "$app/Contents/Info.plist" <<PLIST
   <true/>
   <key>NSPrincipalClass</key>
   <string>NSApplication</string>
+  <key>NSUserNotificationsUsageDescription</key>
+  <string>Grok Desktop notifies you when a session needs approval or an answer.</string>
 </dict>
 </plist>
 PLIST

@@ -65,7 +65,7 @@ This machine only needs Command Line Tools. There is no XCTest target.
 
 - Top of the sidebar: Chat | Build. Chat embeds grok.com. Build is the local CLI session.
 - Build left: new session, search, Imagine, live agents, history (from `~/.grok/sessions`)
-- Build center: conversation with Markdown, clickable links/files, and compact CLI-style tool lines. Live work sits above the composer and leaves when the turn ends.
+- Build center: conversation with Markdown, clickable links/files, and compact CLI-style tool lines. The current prompt stays pinned while you scroll. Live turn status and running terminals sit in the inspector.
 - Build right inspector: only the live pieces — context, tasks, Plan, diffs
 - Settings: appearance, account, behavior, extensions — reads `~/.grok/config.toml`
 

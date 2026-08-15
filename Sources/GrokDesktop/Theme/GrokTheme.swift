@@ -84,7 +84,7 @@ enum InspectorPane: String, CaseIterable, Identifiable {
 }
 
 enum GrokTheme {
-    static let contentWidth: CGFloat = 760
+    static let contentWidth: CGFloat = 680
     static let sidebarWidth: CGFloat = 260
     static let collapsedSidebarWidth: CGFloat = 64
     static let inspectorWidth: CGFloat = 320
@@ -92,6 +92,26 @@ enum GrokTheme {
     static let inspectorMaxWidth: CGFloat = 720
     static let inspectorPreviewWidth: CGFloat = 420
     static let inputRadius: CGFloat = 28
+    static let bubbleMaxWidth: CGFloat = 520
+
+    static func chatBodySize(compact: Bool) -> CGFloat { compact ? 14 : 15.5 }
+    static func chatBubbleSize(compact: Bool) -> CGFloat { compact ? 13.5 : 15 }
+    static func chatCodeSize(compact: Bool) -> CGFloat { compact ? 12 : 13 }
+    static func chatMetaSize(compact: Bool) -> CGFloat { compact ? 11 : 12 }
+    static func chatToolSize(compact: Bool) -> CGFloat { compact ? 12 : 12.5 }
+    static func chatRowSpacing(compact: Bool) -> CGFloat { compact ? 8 : 20 }
+    static func chatBlockSpacing(compact: Bool) -> CGFloat { compact ? 8 : 12 }
+    static let chatLineHeight: CGFloat = 1.32
+    static let chatParagraphSpacing: CGFloat = 4
+
+    static func chatHeadingSize(level: Int, compact: Bool) -> CGFloat {
+        let body = chatBodySize(compact: compact)
+        switch max(1, min(level, 3)) {
+        case 1: return body + 4.5
+        case 2: return body + 2.5
+        default: return body + 1
+        }
+    }
 
     static func clampInspectorWidth(_ width: CGFloat) -> CGFloat {
         min(max(width, inspectorMinWidth), inspectorMaxWidth)

@@ -47,6 +47,7 @@ struct LinkedText: View {
             }
         }
         .font(monospaced ? .system(size: fontSize, design: .monospaced) : .system(size: fontSize))
+        .lineSpacing(monospaced ? 2 : fontSize * (GrokTheme.chatLineHeight - 1))
         .foregroundStyle(color ?? palette.text)
         .textSelection(.enabled)
         .frame(maxWidth: fillsWidth ? .infinity : nil, alignment: .leading)
@@ -173,7 +174,7 @@ private struct LinkedTextNSView: NSViewRepresentable {
     }
 
     private func apply(to view: ChatTextView) {
-        let fingerprint = "\(text.count)|\(text.hashValue)|\(fontSize)|\(monospaced)|\(markdown)|\(textColor.hash)|\(baseDirectory.path)"
+        let fingerprint = "\(text.count)|\(text.hashValue)|\(fontSize)|\(monospaced)|\(markdown)|\(textColor.hash)|\(GrokTheme.chatLineHeight)|\(baseDirectory.path)"
         if view.appliedFingerprint == fingerprint { return }
         let rendered = Self.attributed(
             text,
@@ -206,6 +207,12 @@ private struct LinkedTextNSView: NSViewRepresentable {
             : NSFont.systemFont(ofSize: fontSize)
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byWordWrapping
+        if !monospaced {
+            paragraph.lineHeightMultiple = GrokTheme.chatLineHeight
+            paragraph.paragraphSpacing = GrokTheme.chatParagraphSpacing
+        } else {
+            paragraph.lineHeightMultiple = 1.18
+        }
 
         let mutable: NSMutableAttributedString
         if markdown {

@@ -112,6 +112,24 @@ private struct ChatScrollBottomMonitor: NSViewRepresentable {
     }
 }
 
+private struct StickyPrompt: Equatable {
+    var id: String
+    var text: String
+}
+
+private struct VisibleRowFrame: Equatable {
+    var id: String
+    var minY: CGFloat
+}
+
+private struct VisibleRowsKey: PreferenceKey {
+    static let defaultValue: [VisibleRowFrame] = []
+
+    static func reduce(value: inout [VisibleRowFrame], nextValue: () -> [VisibleRowFrame]) {
+        value.append(contentsOf: nextValue())
+    }
+}
+
 struct ChatView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.palette) private var palette
@@ -119,6 +137,7 @@ struct ChatView: View {
     @State private var stickToLatest = true
     @State private var copiedPromptID: String?
     @State private var ignoreScrollUntil = Date.distantPast
+    @State private var stickyPrompt: StickyPrompt?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -187,18 +206,32 @@ struct ChatView: View {
                 ScrollViewReader { proxy in
                     ZStack(alignment: .bottomTrailing) {
                         ScrollView {
-                            LazyVStack(alignment: .leading, spacing: model.compactChat ? 8 : 16) {
+                            LazyVStack(alignment: .leading, spacing: GrokTheme.chatRowSpacing(compact: model.compactChat)) {
                                 ForEach(displayedRows) { row in
                                     displayRow(row)
                                         .id(row.id)
+                                        .background(rowProbe(row))
                                 }
                                 Color.clear
                                     .frame(height: 1)
                                     .id("latest-anchor")
                             }
                             .frame(maxWidth: GrokTheme.contentWidth)
-                            .padding(.vertical, model.compactChat ? 14 : 28)
+                            .padding(.vertical, model.compactChat ? 16 : 32)
                             .frame(maxWidth: .infinity)
+                        }
+                        .coordinateSpace(name: "chatScroll")
+                        .onPreferenceChange(VisibleRowsKey.self) { frames in
+                            DispatchQueue.main.async {
+                                updateStickyPrompt(from: frames)
+                            }
+                        }
+                        .overlay(alignment: .top) {
+                            if let sticky = stickyPrompt {
+                                stickyPromptBar(sticky, proxy: proxy)
+                                    .padding(.top, 8)
+                                    .transition(.opacity)
+                            }
                         }
                         .background(
                             ChatScrollBottomMonitor(ignoreUntil: ignoreScrollUntil) { nearBottom in
@@ -237,6 +270,7 @@ struct ChatView: View {
                     .id(model.client.sessionID ?? "none")
                     .onAppear { pinToBottom(proxy) }
                     .onChange(of: model.client.sessionID) { _, _ in
+                        stickyPrompt = nil
                         pinToBottom(proxy)
                     }
                     .onChange(of: followToken) { _, _ in
@@ -288,7 +322,7 @@ struct ChatView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(palette.canvas)
-        .animation(.easeOut(duration: 0.16), value: turnStory != nil)
+        .animation(.easeOut(duration: 0.16), value: stickyPrompt?.id)
     }
 
     private func compactContext(_ value: Int) -> String {
@@ -303,11 +337,6 @@ struct ChatView: View {
 
     private var composerBlock: some View {
         VStack(spacing: 10) {
-            if let story = turnStory {
-                liveTurnStrip(story)
-                    .frame(maxWidth: 760)
-                    .transition(.opacity)
-            }
             ComposerView()
                 .frame(maxWidth: 760)
             if model.isPrivateChat {
@@ -500,6 +529,15 @@ struct ChatView: View {
                 return id
             }
         }
+
+        var contentIDs: [String] {
+            switch self {
+            case .message(let item):
+                return [item.id]
+            case .tools(let id, let items):
+                return [id] + items.map(\.id)
+            }
+        }
     }
 
     private var displayedRows: [DisplayRow] {
@@ -617,39 +655,83 @@ struct ChatView: View {
         return ToolVoice.kind(title) == .todo
     }
 
-    private var turnStory: TurnStory? {
-        TurnNarrative.story(
-            items: model.client.items,
-            todos: model.client.todos,
-            hunks: model.client.hunks,
-            chinese: model.language.resolved() == .chinese,
-            running: model.client.isTurnRunning,
-            stopping: model.client.isStopping
-        )
+    private var userTurns: [(id: String, text: String)] {
+        model.client.items.compactMap { item in
+            guard case .user(let id, let text) = item else { return nil }
+            let shown = PromptMedia.displayText(text)
+            return (id, shown.isEmpty ? text : shown)
+        }
     }
 
-    private func liveTurnStrip(_ story: TurnStory) -> some View {
-        HStack(spacing: 8) {
-            RunningStatusIcon(
-                active: story.phase == .working,
-                idleSystemImage: "pause.circle",
-                color: .orange,
-                size: 11
+    private func rowProbe(_ row: DisplayRow) -> some View {
+        GeometryReader { geo in
+            Color.clear.preference(
+                key: VisibleRowsKey.self,
+                value: [
+                    VisibleRowFrame(
+                        id: row.id,
+                        minY: geo.frame(in: .named("chatScroll")).minY
+                    )
+                ]
             )
-            Text(story.step)
-                .font(.system(size: 12))
-                .foregroundStyle(palette.secondary)
-                .lineLimit(1)
-            Spacer(minLength: 8)
-            if story.total > 0 {
-                Text("\(story.done)/\(story.total)")
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundStyle(palette.secondary)
-            }
         }
-        .padding(.horizontal, 4)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(story.step)
+    }
+
+    private func updateStickyPrompt(from frames: [VisibleRowFrame]) {
+        let turns = userTurns
+        guard !turns.isEmpty else {
+            if stickyPrompt != nil { stickyPrompt = nil }
+            return
+        }
+        let visible = frames.sorted { $0.minY < $1.minY }
+        guard let first = visible.first else { return }
+        let sequence = displayedRows.flatMap(\.contentIDs)
+        let firstIndex = sequence.firstIndex(of: first.id) ?? 0
+        let owning = turns.last { turn in
+            guard let index = sequence.firstIndex(of: turn.id) else { return false }
+            return index <= firstIndex
+        } ?? turns.first
+        guard let owning else {
+            if stickyPrompt != nil { stickyPrompt = nil }
+            return
+        }
+        if let original = visible.first(where: { $0.id == owning.id }), original.minY >= 6, original.minY < 140 {
+            if stickyPrompt != nil { stickyPrompt = nil }
+            return
+        }
+        let next = StickyPrompt(id: owning.id, text: owning.text)
+        if stickyPrompt != next {
+            stickyPrompt = next
+        }
+    }
+
+    private func stickyPromptBar(_ prompt: StickyPrompt, proxy: ScrollViewProxy) -> some View {
+        HStack {
+            Spacer(minLength: 80)
+            Button {
+                stickToLatest = false
+                proxy.scrollTo(prompt.id, anchor: .top)
+            } label: {
+                Text(prompt.text)
+                    .font(.system(size: GrokTheme.chatMetaSize(compact: false) + 1))
+                    .foregroundStyle(palette.text)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.trailing)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(palette.selected, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(palette.hairline)
+                    )
+                    .shadow(color: Color.black.opacity(0.10), radius: 8, y: 3)
+            }
+            .buttonStyle(.plain)
+            .help(prompt.text)
+        }
+        .padding(.horizontal, model.compactChat ? 16 : 28)
+        .frame(maxWidth: GrokTheme.contentWidth)
+        .frame(maxWidth: .infinity)
     }
 
     @ViewBuilder
@@ -688,22 +770,24 @@ struct ChatView: View {
                         if !shown.isEmpty {
                             LinkedText(
                                 text: shown,
-                                fontSize: model.compactChat ? 14 : 16,
+                                fontSize: GrokTheme.chatBubbleSize(compact: model.compactChat),
                                 markdown: false,
-                                fillsWidth: false
+                                fillsWidth: false,
+                                maxContentWidth: GrokTheme.bubbleMaxWidth
                             )
                         } else if images.isEmpty {
                             LinkedText(
                                 text: text,
-                                fontSize: model.compactChat ? 14 : 16,
+                                fontSize: GrokTheme.chatBubbleSize(compact: model.compactChat),
                                 markdown: false,
-                                fillsWidth: false
+                                fillsWidth: false,
+                                maxContentWidth: GrokTheme.bubbleMaxWidth
                             )
                         }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, model.compactChat ? 8 : 12)
-                    .background(palette.selected, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, model.compactChat ? 8 : 10)
+                    .background(palette.selected, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                     Button {
                         copyPrompt(id, text)
                     } label: {
@@ -718,16 +802,16 @@ struct ChatView: View {
             }
             .padding(.horizontal, model.compactChat ? 16 : 28)
         case .assistant(let id, let text, let done):
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 timestamp(id)
                 if text.isEmpty {
                     Text("…")
-                        .font(.system(size: model.compactChat ? 14 : 16))
+                        .font(.system(size: GrokTheme.chatBodySize(compact: model.compactChat)))
                         .foregroundStyle(palette.secondary)
                 } else {
                     MessageMarkdownView(
                         text: text,
-                        fontSize: model.compactChat ? 14 : 16,
+                        fontSize: GrokTheme.chatBodySize(compact: model.compactChat),
                         live: !done && model.client.isTurnRunning
                     )
                 }
@@ -741,10 +825,10 @@ struct ChatView: View {
             .padding(.horizontal, model.compactChat ? 16 : 28)
         case .thought(_, let text):
             DisclosureGroup {
-                LinkedText(text: text, fontSize: 13, markdown: false, color: palette.secondary)
+                LinkedText(text: text, fontSize: GrokTheme.chatMetaSize(compact: model.compactChat), markdown: false, color: palette.secondary)
             } label: {
                 Text(l10n.think)
-                    .font(.system(size: 13))
+                    .font(.system(size: GrokTheme.chatMetaSize(compact: model.compactChat)))
                     .foregroundStyle(palette.secondary)
             }
             .tint(palette.secondary)
@@ -754,8 +838,8 @@ struct ChatView: View {
             toolLine(id: id, title: title, status: status, detail: detail)
                 .padding(.horizontal, model.compactChat ? 16 : 28)
         case .notice(_, let text):
-            LinkedText(text: text, fontSize: 13, markdown: false, color: palette.secondary)
-                .padding(.horizontal, 28)
+            LinkedText(text: text, fontSize: GrokTheme.chatMetaSize(compact: model.compactChat), markdown: false, color: palette.secondary)
+                .padding(.horizontal, model.compactChat ? 16 : 28)
         }
     }
 
@@ -805,7 +889,7 @@ struct ChatView: View {
             DisclosureGroup {
                 LinkedText(
                     text: detail,
-                    fontSize: 12,
+                    fontSize: GrokTheme.chatCodeSize(compact: model.compactChat),
                     monospaced: true,
                     markdown: false,
                     color: palette.secondary
@@ -819,7 +903,7 @@ struct ChatView: View {
     }
 
     private func toolHeader(status: String, verb: String, target: String, location: String?) -> some View {
-        let active = ToolVoice.isActive(status)
+        let active = ToolVoice.isActive(status) && model.client.isTurnRunning
         return HStack(spacing: 8) {
             RunningStatusIcon(
                 active: active && !model.client.isStopping,
@@ -845,7 +929,7 @@ struct ChatView: View {
                     .foregroundStyle(palette.secondary)
             }
         }
-        .font(.system(size: 13))
+        .font(.system(size: GrokTheme.chatToolSize(compact: model.compactChat)))
         .padding(.vertical, 1)
     }
 

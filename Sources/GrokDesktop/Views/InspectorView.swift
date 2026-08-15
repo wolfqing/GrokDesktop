@@ -62,7 +62,7 @@ struct InspectorView: View {
             Task { await model.client.refreshGit() }
         }
         .onChange(of: model.client.items.count) { _, _ in
-            model.refreshContextBreakdown()
+            model.refreshWorkspace()
         }
     }
 
@@ -352,7 +352,7 @@ struct InspectorView: View {
             ForEach(checklist, id: \.id) { row in
                 HStack(alignment: .top, spacing: 6) {
                     RunningStatusIcon(
-                        active: row.status == "in_progress" || row.status == "running",
+                        active: model.client.isTurnRunning && (row.status == "in_progress" || row.status == "running"),
                         idleSystemImage: todoIcon(row.status),
                         color: todoColor(row.status),
                         size: 12
@@ -368,7 +368,7 @@ struct InspectorView: View {
                                 ElapsedDurationText(
                                     start: todo.startedAt,
                                     end: todo.endedAt,
-                                    running: todo.isActive,
+                                    running: todo.isActive && model.client.isTurnRunning,
                                     worked: todo.isDone || todo.isCancelled
                                 )
                             }
