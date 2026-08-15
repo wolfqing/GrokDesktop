@@ -52,8 +52,14 @@ cat > "$app/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
+# Bind Info.plist into an adhoc signature so Finder / `open` accepts the bundle.
+# Linker-signed binaries leave the plist unbound and can fail to launch after zip.
+codesign --force --deep --sign - "$app"
+xattr -cr "$app" || true
+
 zip="$root/dist/Grok-Desktop-${version}.zip"
 rm -f "$zip"
 ditto -c -k --keepParent "$app" "$zip"
+xattr -cr "$zip" || true
 echo "Built $app"
 echo "Zipped $zip"

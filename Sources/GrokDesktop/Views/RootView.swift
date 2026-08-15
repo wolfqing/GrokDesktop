@@ -1,4 +1,3 @@
-import AppKit
 import GrokDesktopCore
 import SwiftUI
 
@@ -308,7 +307,7 @@ private struct InspectorResizeHandle: View {
     @State private var hovering = false
 
     var body: some View {
-        ZStack {
+        let handle = ZStack {
             Rectangle()
                 .fill(hovering || dragOrigin != nil ? Color.accentColor.opacity(0.85) : palette.hairline)
                 .frame(width: 1)
@@ -318,14 +317,7 @@ private struct InspectorResizeHandle: View {
         }
         .frame(maxHeight: .infinity)
         .contentShape(Rectangle())
-        .onHover { inside in
-            hovering = inside
-            if inside {
-                NSCursor.resizeLeftRight.push()
-            } else {
-                NSCursor.pop()
-            }
-        }
+        .onHover { hovering = $0 }
         .gesture(
             DragGesture(minimumDistance: 1, coordinateSpace: .global)
                 .onChanged { value in
@@ -339,9 +331,12 @@ private struct InspectorResizeHandle: View {
                 }
         )
         .onTapGesture(count: 2, perform: onReset)
-        .onDisappear {
-            if hovering { NSCursor.pop() }
-        }
         .help(l10n.t("Drag to resize. Double-click to reset.", "拖动调整宽度。双击恢复默认。"))
+
+        if #available(macOS 15.0, *) {
+            handle.pointerStyle(.columnResize)
+        } else {
+            handle
+        }
     }
 }
