@@ -9,6 +9,8 @@ This entire app was built with [Grok Build](https://x.ai/build) on Grok 4.6.
 
 Community project. Not an official xAI / SpaceXAI product.
 
+![Grok Desktop Build window](docs/screenshot.png)
+
 ## Install
 
 **Download:** [Grok-Desktop-0.1.12.zip](https://github.com/wolfqing/GrokDesktop/releases/download/v0.1.12/Grok-Desktop-0.1.12.zip) · [All releases](https://github.com/wolfqing/GrokDesktop/releases)
