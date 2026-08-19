@@ -1,5 +1,12 @@
 # Grok Desktop
 
+[![Release](https://img.shields.io/github/v/release/wolfqing/GrokDesktop)](https://github.com/wolfqing/GrokDesktop/releases/latest)
+[![macOS 14+](https://img.shields.io/badge/macOS-14%2B-000000)](https://github.com/wolfqing/GrokDesktop)
+[![Swift](https://img.shields.io/badge/Swift-6-F05138)](https://www.swift.org)
+[![SwiftUI](https://img.shields.io/badge/SwiftUI-0071e3)](https://developer.apple.com/xcode/swiftui/)
+[![ACP](https://img.shields.io/badge/ACP-stdio-555555)](https://agentclientprotocol.com)
+[![License](https://img.shields.io/github/license/wolfqing/GrokDesktop)](LICENSE)
+
 A native macOS SwiftUI client for [Grok](https://grok.com/) and [Grok Build](https://x.ai/build).
 
 - **Chat** embeds grok.com in the window.
