@@ -29,6 +29,8 @@ Grok Desktop does **not** ship the `grok` binary. It looks on `PATH`, then `~/.l
 
 The zip is unsigned unless a release says otherwise. First open: right-click the app → Open.
 
+If it won't install, won't open, or you want a feature: [open an issue](https://github.com/wolfqing/GrokDesktop/issues/new/choose).
+
 **Chat** can sign in on grok.com inside the app. **Build** needs the CLI (and `grok login` or an API key). Signing in from the app WebView can cover both when you use a grok.com account.
 
 ## Layout

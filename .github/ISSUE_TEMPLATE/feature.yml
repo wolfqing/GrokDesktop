@@ -1,0 +1,24 @@
+name: 功能请求 / Feature request
+description: 想要的能力，或和 grok CLI 还对不齐的地方
+title: "[Feature] "
+labels: ["feature"]
+body:
+  - type: textarea
+    id: want
+    attributes:
+      label: What do you want?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why?
+      description: What you are doing today instead.
+  - type: dropdown
+    id: cli
+    attributes:
+      label: Does the official grok CLI already have this?
+      options:
+        - "Yes"
+        - "No"
+        - "Not sure"

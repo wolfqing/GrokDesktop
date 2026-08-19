@@ -1,0 +1,54 @@
+name: 打不开 / Won't open
+description: Dock 跳动、闪退、或窗口不出现
+title: "[Open] "
+labels: ["wont-open"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Unsigned zip: **right-click** `Grok Desktop.app` → **Open**. Double-click from Downloads is often blocked by Gatekeeper.
+  - type: dropdown
+    id: macos
+    attributes:
+      label: macOS
+      options:
+        - "14"
+        - "15"
+        - "16+"
+        - other
+    validations:
+      required: true
+  - type: dropdown
+    id: rightclick
+    attributes:
+      label: Did you right-click → Open?
+      options:
+        - "Yes"
+        - "No, I double-clicked"
+        - "Not sure"
+    validations:
+      required: true
+  - type: dropdown
+    id: symptom
+    attributes:
+      label: What do you see?
+      options:
+        - Gatekeeper / "can't be opened" dialog
+        - Dock icon bounces, no window
+        - Crash / quit immediately
+        - Window opens, then hangs
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: Details
+      description: Exact dialog text, or a Console / crash snippet if you have one.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      placeholder: "0.1.12"

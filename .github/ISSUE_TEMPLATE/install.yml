@@ -1,0 +1,49 @@
+name: 装不上 / Can't install
+description: 下载、解压、或安装官方 CLI 失败
+title: "[Install] "
+labels: ["install"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Grok Desktop does **not** ship `grok`. Install the official CLI first:
+
+        ```bash
+        curl -fsSL https://x.ai/cli/install.sh | bash
+        grok login
+        ```
+
+        The zip is unsigned. First open: right-click the app → Open.
+  - type: dropdown
+    id: macos
+    attributes:
+      label: macOS
+      options:
+        - "14"
+        - "15"
+        - "16+"
+        - other
+    validations:
+      required: true
+  - type: dropdown
+    id: how
+    attributes:
+      label: How did you install?
+      options:
+        - Release zip
+        - Built from source
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: Commands you ran, and the exact error.
+    validations:
+      required: true
+  - type: input
+    id: grok
+    attributes:
+      label: Does `grok --version` work in Terminal?
+      placeholder: "yes / no / unknown"
