@@ -10,7 +10,7 @@
 A native macOS SwiftUI client for [Grok](https://grok.com/) and [Grok Build](https://x.ai/build).
 
 - **Chat** embeds grok.com in the window.
-- **Build** talks to your local `grok` CLI over ACP. Sessions, skills, and config stay in `~/.grok`.
+- **Build** talks to your local `grok` CLI over ACP. Sessions, skills, Imagine, and config stay in `~/.grok`.
 
 This entire app was built with [Grok Build](https://x.ai/build) on Grok 4.6.
 
@@ -45,6 +45,7 @@ If it won't install, won't open, or you want a feature: [open an issue](https://
 - Sidebar switch: **Chat** | **Build** (`⌘1` / `⌘2`)
 - **Chat**: grok.com. History stays on the web, not mixed with Build sessions.
 - **Build left**: new session, search, Imagine, live agents, history from `~/.grok/sessions`
+- **Imagine**: local image and short video through the grok agent (`/imagine`, `/imagine-video`). Recents come from session `images/` folders. This is not grok.com/imagine inside Chat.
 - **Build center**: conversation, Markdown, clickable files/links. The current prompt stays pinned. Scroll away and a down arrow jumps back to the latest message. The latest prompt can be put back in the composer.
 - **Build inspector**: context, tasks, plan, diffs, live terminals
 - **Settings**: account, appearance, behavior, extensions — reads `~/.grok/config.toml`
