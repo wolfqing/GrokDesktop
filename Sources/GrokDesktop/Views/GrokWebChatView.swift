@@ -16,10 +16,12 @@ struct GrokWebChatView: NSViewRepresentable {
     func updateNSView(_ view: WKWebView, context: Context) {
         context.coordinator.onSignedInChange = onSignedInChange
         view.navigationDelegate = context.coordinator
+        view.isHidden = false
     }
 
     static func dismantleNSView(_ view: WKWebView, coordinator: Coordinator) {
         view.navigationDelegate = nil
+        GrokWebChatHost.shared.park()
     }
 
     final class Coordinator: NSObject, WKNavigationDelegate {

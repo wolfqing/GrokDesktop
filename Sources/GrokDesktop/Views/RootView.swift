@@ -15,6 +15,8 @@ struct RootView: View {
             HStack(spacing: 0) {
                 SidebarView()
                     .frame(width: model.sidebarCollapsed ? GrokTheme.collapsedSidebarWidth : GrokTheme.sidebarWidth)
+                    .frame(maxHeight: .infinity)
+                    .zIndex(1)
                 ZStack {
                     Group {
                         switch model.destination {
@@ -32,15 +34,15 @@ struct RootView: View {
                             SkillsView()
                         }
                     }
-                    if model.didOpenWebChat || model.destination == .webChat {
+                    if !DemoStudio.isEnabled, model.destination == .webChat {
                         GrokWebChatView { signedIn in
                             model.webChatSignedIn = signedIn
                         }
-                        .opacity(model.destination == .webChat ? 1 : 0)
-                        .allowsHitTesting(model.destination == .webChat)
                     }
                 }
-                .frame(maxWidth: .infinity)
+                .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                .clipped()
+                .background(palette.canvas)
                 if model.showInspector && model.destination == .build {
                     InspectorResizeHandle(
                         width: model.inspectorWidth,
@@ -51,6 +53,7 @@ struct RootView: View {
                         .frame(width: model.inspectorWidth)
                 }
             }
+            .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
 
             if model.showAbout {
                 AboutView()

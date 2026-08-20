@@ -15,6 +15,24 @@ struct GrokDesktopApp: App {
             RootView()
                 .environmentObject(model)
                 .preferredColorScheme(model.appearance.colorScheme)
+                .onAppear {
+                    NSApp.setActivationPolicy(.regular)
+                    NSApp.activate(ignoringOtherApps: true)
+                    for window in NSApp.windows {
+                        window.center()
+                        window.makeKeyAndOrderFront(nil)
+                        window.orderFrontRegardless()
+                    }
+                    if DemoStudio.isEnabled, let url = DemoStudio.screenshotURL {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+                            let ok = DemoStudio.writeScreenshot(model: model, to: url)
+                            fputs(ok ? "Wrote demo screenshot \(url.path)\n" : "Failed to write demo screenshot\n", stderr)
+                            if DemoStudio.shouldExitAfterScreenshot {
+                                NSApp.terminate(nil)
+                            }
+                        }
+                    }
+                }
                 .toolbar {
                     ToolbarItem(placement: .navigation) {
                         Button {

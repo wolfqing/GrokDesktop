@@ -15,14 +15,19 @@ struct SidebarView: View {
                 .padding(.top, 8)
                 .padding(.bottom, 8)
 
-            if model.sidebarCollapsed {
-                collapsedRail
-            } else {
-                expandedContent
+            Group {
+                if model.sidebarCollapsed {
+                    collapsedRail
+                } else {
+                    expandedContent
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
             accountFooter
+                .layoutPriority(1)
         }
+        .frame(maxHeight: .infinity)
         .background(palette.sidebar)
     }
 
@@ -218,6 +223,7 @@ struct SidebarView: View {
                 .padding(.top, 14)
                 .padding(.bottom, 16)
             }
+            .frame(maxHeight: .infinity)
             .scrollIndicators(.never)
             .background(
                 ChatScrollBottomMonitor(

@@ -82,14 +82,22 @@ final class GrokWebChatHost {
     func view(delegate: WKNavigationDelegate) -> WKWebView {
         if let webView {
             webView.navigationDelegate = delegate
+            webView.isHidden = false
+            webView.clipsToBounds = true
             webView.removeFromSuperview()
             return webView
         }
         let view = WKWebView(frame: .zero, configuration: GrokWebSession.configuration())
         view.navigationDelegate = delegate
+        view.clipsToBounds = true
         webView = view
         view.load(URLRequest(url: GrokWebSession.homeURL))
         return view
+    }
+
+    func park() {
+        webView?.isHidden = true
+        webView?.removeFromSuperview()
     }
 
     func reloadHome() {

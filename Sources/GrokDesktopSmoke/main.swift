@@ -815,11 +815,34 @@ expect(wrapped.contains("diff --git"), "extract patch from json")
 
 let imageRoot = FileManager.default.temporaryDirectory.appendingPathComponent("gd-imagine-\(UUID().uuidString)", isDirectory: true)
 let imageFolder = imageRoot.appendingPathComponent("sid/images", isDirectory: true)
+let assetsFolder = imageRoot.appendingPathComponent("sid/assets", isDirectory: true)
 try! FileManager.default.createDirectory(at: imageFolder, withIntermediateDirectories: true)
+try! FileManager.default.createDirectory(at: assetsFolder, withIntermediateDirectories: true)
 let thumb = imageFolder.appendingPathComponent("shot.png")
+let duplicate = assetsFolder.appendingPathComponent("shot-copy.png")
+let other = imageFolder.appendingPathComponent("other.png")
 try! Data([0x89, 0x50, 0x4E, 0x47]).write(to: thumb)
+try! Data([0x89, 0x50, 0x4E, 0x47]).write(to: duplicate)
+try! Data([0x89, 0x50, 0x4E, 0x47, 0x00]).write(to: other)
 let recents = ImagineLibrary.recent(sessionsRoot: imageRoot, limit: 8)
 expect(recents.contains(where: { $0.url.lastPathComponent == "shot.png" }), "imagine recent thumb")
+expect(
+    recents.filter { $0.url.lastPathComponent == "shot.png" || $0.url.lastPathComponent == "shot-copy.png" }.count == 1,
+    "imagine dedupe copies"
+)
+expect(recents.contains(where: { $0.url.lastPathComponent == "other.png" }), "imagine keeps different files")
+expect(ImaginePrompt.make(text: "a cat", video: false) == "/imagine a cat", "imagine prompt image")
+expect(ImaginePrompt.make(text: "a cat", video: true).hasPrefix("/imagine-video"), "imagine prompt video")
+expect(ImaginePrompt.make(text: "a cat", video: false, aspect: "16:9").contains("16:9"), "imagine prompt aspect")
+expect(
+    ImaginePrompt.make(text: "warmer light", video: false, reference: URL(fileURLWithPath: "/tmp/ref.png")).contains("@/tmp/ref.png"),
+    "imagine prompt reference"
+)
+expect(ImaginePrompt.make(text: "a cat", video: false, count: 3).contains("3 distinct"), "imagine prompt count")
+expect(ImaginePrompt.make(text: "a cat", video: false, mode: "speed").contains("fast"), "imagine prompt speed")
+expect(ImaginePrompt.make(text: "a cat", video: true, mode: "quality").contains("720p"), "imagine prompt quality video")
+expect(abs(ImaginePrompt.ratioValue("16:9") - (16.0 / 9.0)) < 0.001, "imagine ratio 16:9")
+expect(ImaginePrompt.ratioValue("auto") == 1, "imagine ratio auto")
 
 let searchItems: [ConversationItem] = [
     .user(id: "u1", text: "Look at App.swift"),
@@ -901,6 +924,23 @@ expect(missingPreview.kind == .markdown, "missing keeps md kind")
 expect(!ChatLinkDetector.likelyContainsLinks("plain hello"), "plain text is not linky")
 expect(ChatLinkDetector.likelyContainsLinks("see https://x.ai/build"), "http is linky")
 expect(ChatLinkDetector.likelyContainsLinks("open Sources/App.swift"), "relative file is linky")
+
+let demoClient = ACPClient(locator: GrokBinaryLocator(extraSearchPaths: [], pathEnvironment: "/empty", fileExists: { _ in false }))
+demoClient.applyDemo(
+    items: [
+        .user(id: "u", text: "Fix the 401 retry."),
+        .assistant(id: "a", text: "Stop retrying unauthorized.", done: true)
+    ],
+    todos: [AgentTodo(id: "t", content: "Patch AuthClient", status: "completed")],
+    hunks: [FileHunk(id: "h", path: "Sources/AuthClient.swift", added: 2, removed: 1)],
+    planEntries: [PlanEntry(content: "Fail on 401", status: "completed")],
+    gitDiff: "diff --git a/Sources/AuthClient.swift b/Sources/AuthClient.swift\n",
+    cwd: URL(fileURLWithPath: "/Users/ada/Projects/northwind")
+)
+expect(demoClient.items.count == 2, "demo items")
+expect(demoClient.sessionID == "demo-northwind", "demo session")
+expect(demoClient.workingDirectory.lastPathComponent == "northwind", "demo cwd")
+expect(demoClient.lastError == nil, "demo has no error")
 
 print("GrokDesktopSmoke ok")
 

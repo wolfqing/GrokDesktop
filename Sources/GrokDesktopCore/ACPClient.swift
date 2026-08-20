@@ -208,7 +208,7 @@ public final class ACPClient: ObservableObject {
                 "protocolVersion": 1,
                 "clientInfo": [
                     "name": "GrokDesktop",
-                    "version": "0.1.12"
+                    "version": "0.1.13"
                 ],
                 "clientCapabilities": [
                     "fs": [
@@ -668,6 +668,34 @@ public final class ACPClient: ObservableObject {
     public func dismissError() {
         lastError = nil
         currentWorkspace?.lastError = nil
+    }
+
+    /// Seeds a static transcript for screenshots. Does not touch disk or start grok.
+    public func applyDemo(
+        items: [ConversationItem],
+        todos: [AgentTodo],
+        hunks: [FileHunk],
+        planEntries: [PlanEntry],
+        gitDiff: String,
+        cwd: URL
+    ) {
+        resetConversation()
+        sessionID = "demo-northwind"
+        workingDirectory = cwd
+        self.items = items
+        self.todos = todos
+        self.hunks = hunks
+        self.planEntries = planEntries
+        gitDiffText = gitDiff
+        gitStatusText = "main"
+        state = .ready
+        lastError = nil
+        isTurnRunning = false
+        isReconnecting = false
+        shouldReconnect = false
+        reconnectTask?.cancel()
+        reconnectAttempt = 0
+        lastSessionID = nil
     }
 
     public func setMode(_ newMode: AgentMode) {

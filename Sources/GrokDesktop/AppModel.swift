@@ -229,6 +229,9 @@ final class AppModel: ObservableObject {
         refreshWorkspace()
         refreshAccountUsage()
         bindClient()
+        if DemoStudio.isEnabled {
+            applyDemoStudio()
+        }
         AttentionCenter.shared.onOpenSession = { [weak self] id in
             self?.openWaitingSession(id)
         }
@@ -324,6 +327,45 @@ final class AppModel: ObservableObject {
     var displayedContextWindow: Int {
         let window = workspace.contextWindow > 0 ? workspace.contextWindow : contextBreakdown.window
         return window > 0 ? window : 200_000
+    }
+
+    private func applyDemoStudio() {
+        account = DemoStudio.account
+        accountUsage = DemoStudio.usage
+        sessions = DemoStudio.sessions()
+        namedProjects = [DemoStudio.project]
+        skills = []
+        automations = []
+        officialWorkflows = []
+        mcpServers = []
+        firstRunReason = nil
+        didOpenWebChat = false
+        destination = .build
+        lastBuildDestination = .build
+        showInspector = true
+        inspectorDetailsVisible = true
+        hiddenInspectorPanes = []
+        previewedFile = nil
+        client.applyDemo(
+            items: DemoStudio.items,
+            todos: DemoStudio.todos,
+            hunks: DemoStudio.hunks,
+            planEntries: DemoStudio.plan,
+            gitDiff: DemoStudio.gitDiff,
+            cwd: DemoStudio.cwd
+        )
+        workspace = DemoStudio.workspace
+        refreshContextBreakdown()
+        if let url = DemoStudio.screenshotURL {
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 700_000_000)
+                let ok = DemoStudio.writeScreenshot(model: self, to: url)
+                fputs(ok ? "Wrote demo screenshot \(url.path)\n" : "Failed to write demo screenshot\n", stderr)
+                if DemoStudio.shouldExitAfterScreenshot {
+                    NSApp.terminate(nil)
+                }
+            }
+        }
     }
 
     private func afterHitTest(_ work: @escaping @MainActor () -> Void) {
@@ -585,11 +627,20 @@ final class AppModel: ObservableObject {
     }
 
     func refreshSessions() {
+        if DemoStudio.isEnabled {
+            sessions = DemoStudio.sessions()
+            return
+        }
         sessions = sessionIndex.load()
         refreshWorkspace()
     }
 
     func refreshWorkspace() {
+        if DemoStudio.isEnabled {
+            workspace = DemoStudio.workspace
+            refreshContextBreakdown()
+            return
+        }
         refreshContextBreakdown()
         let cwd = client.workingDirectory
         let sessionDir = sessions.first(where: { $0.id == client.sessionID })?.directory ?? client.sessionDirectory
@@ -937,6 +988,25 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func sendImagine(_ text: String) {
+        let trimmed = applyGoalIfNeeded(text).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        historyCursor = nil
+        recordPrompt(trimmed)
+        showPalette = false
+        Task {
+            do {
+                try await client.send(text: trimmed, kind: SessionFold.isAside(trimmed) ? .aside : .followUp)
+                if !isPrivateChat {
+                    refreshSessions()
+                }
+                refreshWorkspace()
+            } catch {
+                present(error)
+            }
+        }
+    }
+
     func enqueueAside(_ text: String) {
         destination = .build
         draft = ""
@@ -992,6 +1062,10 @@ final class AppModel: ObservableObject {
     }
 
     func refreshAccountUsage() {
+        if DemoStudio.isEnabled {
+            accountUsage = DemoStudio.usage
+            return
+        }
         guard !isRefreshingUsage else { return }
         isRefreshingUsage = true
         Task {
@@ -1348,16 +1422,12 @@ final class AppModel: ObservableObject {
         case "/imagine":
             destination = .imagine
             if !rest.isEmpty {
-                draft = "/imagine \(rest)"
-                destination = .build
-                sendDraft()
+                sendImagine("/imagine \(rest)")
             }
         case "/imagine-video":
-            if rest.isEmpty {
-                insertSlashPrompt("/imagine-video")
-            } else {
-                draft = "/imagine-video \(rest)"
-                sendDraft()
+            destination = .imagine
+            if !rest.isEmpty {
+                sendImagine("/imagine-video \(rest)")
             }
         case "/usage", "/cost":
             if rest == "manage" {
@@ -1958,7 +2028,7 @@ final class AppModel: ObservableObject {
 
     func exportDiagnostics() {
         let text = DiagnosticExport.make(
-            version: "0.1.12",
+            version: "0.1.13",
             grokVersion: client.grokVersion,
             state: String(describing: client.state),
             lastError: client.lastError,
