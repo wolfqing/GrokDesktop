@@ -58,7 +58,7 @@ struct MessageMarkdownView: View {
             .padding(.vertical, 7)
             LinkedText(
                 text: code,
-                fontSize: GrokTheme.chatCodeSize(compact: fontSize < 15),
+                fontSize: GrokTheme.chatCodeSize(compact: fontSize < 14),
                 monospaced: true,
                 markdown: false,
                 live: live

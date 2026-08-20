@@ -40,7 +40,7 @@ struct ComposerView: View {
                     }
                     TextField(composerPlaceholder, text: $model.draft, axis: .vertical)
                         .textFieldStyle(.plain)
-                        .font(.system(size: 16))
+                        .font(.system(size: 14.5))
                         .lineLimit(1...8)
                         .onSubmit {
                             let modifiers = NSEvent.modifierFlags

@@ -94,9 +94,9 @@ enum GrokTheme {
     static let inputRadius: CGFloat = 28
     static let bubbleMaxWidth: CGFloat = 520
 
-    static func chatBodySize(compact: Bool) -> CGFloat { compact ? 14 : 15.5 }
-    static func chatBubbleSize(compact: Bool) -> CGFloat { compact ? 13.5 : 15 }
-    static func chatCodeSize(compact: Bool) -> CGFloat { compact ? 12 : 13 }
+    static func chatBodySize(compact: Bool) -> CGFloat { compact ? 13 : 14.5 }
+    static func chatBubbleSize(compact: Bool) -> CGFloat { compact ? 13 : 14 }
+    static func chatCodeSize(compact: Bool) -> CGFloat { compact ? 11.5 : 12.5 }
     static func chatMetaSize(compact: Bool) -> CGFloat { compact ? 11 : 12 }
     static func chatToolSize(compact: Bool) -> CGFloat { compact ? 12 : 12.5 }
     static func chatRowSpacing(compact: Bool) -> CGFloat { compact ? 8 : 20 }

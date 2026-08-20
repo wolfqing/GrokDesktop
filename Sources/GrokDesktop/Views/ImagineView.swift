@@ -133,7 +133,7 @@ struct ImagineView: View {
 
             TextField(composerPlaceholder, text: $prompt, axis: .vertical)
                 .textFieldStyle(.plain)
-                .font(.system(size: 16))
+                .font(.system(size: 14))
                 .foregroundStyle(palette.text)
                 .lineLimit(1...4)
                 .onSubmit(submit)
@@ -206,7 +206,7 @@ struct ImagineView: View {
                             }
                         }
                         .foregroundStyle(palette.sendGlyph)
-                        .frame(width: 32, height: 32)
+                        .frame(width: 28, height: 28)
                         .background(palette.send, in: Circle())
                     }
                     .buttonStyle(.plain)
@@ -216,9 +216,9 @@ struct ImagineView: View {
 
                 Button(action: submit) {
                     Image(systemName: "arrow.up")
-                        .font(.system(size: 13, weight: .bold))
+                        .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(canSend ? palette.sendGlyph : palette.secondary)
-                        .frame(width: 32, height: 32)
+                        .frame(width: 28, height: 28)
                         .background(canSend ? palette.send : palette.chip, in: Circle())
                 }
                 .buttonStyle(.plain)
@@ -244,8 +244,8 @@ struct ImagineView: View {
         Button {
             showAspectPicker.toggle()
         } label: {
-            ImagineAspectGlyph(ratio: ImaginePrompt.ratioValue(aspect), maxSide: 16)
-                .frame(width: 28, height: 28)
+            ImagineAspectGlyph(ratio: ImaginePrompt.ratioValue(aspect), maxSide: 14)
+                .frame(width: 26, height: 26)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -268,9 +268,9 @@ struct ImagineView: View {
     private func toolButton(systemImage: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemImage)
-                .font(.system(size: 13, weight: .medium))
+                .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(palette.secondary)
-                .frame(width: 28, height: 28)
+                .frame(width: 26, height: 26)
         }
         .buttonStyle(.plain)
     }
@@ -278,9 +278,9 @@ struct ImagineView: View {
     private func toolLabel(systemImage: String, title: String) -> some View {
         HStack(spacing: 5) {
             Image(systemName: systemImage)
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: 11, weight: .medium))
             Text(title)
-                .font(.system(size: 13, weight: .medium))
+                .font(.system(size: 12, weight: .medium))
         }
         .foregroundStyle(palette.secondary)
         .padding(.horizontal, 8)
@@ -291,10 +291,10 @@ struct ImagineView: View {
     private func toolText(_ title: String, on: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 13, weight: .medium))
+                .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(on ? palette.text : palette.secondary)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 5)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -482,15 +482,15 @@ private struct ImagineSlidingPair: View {
             HStack(spacing: 5) {
                 if let icon {
                     Image(systemName: icon)
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.system(size: 10, weight: .medium))
                 }
                 Text(title)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 12, weight: .medium))
                     .lineLimit(1)
             }
             .foregroundStyle(selected && showThumb ? palette.text : palette.secondary)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
             .background {
                 if selected, showThumb {
                     Capsule(style: .continuous)
@@ -543,11 +543,11 @@ private struct ImagineAspectMenu: View {
                         ImagineAspectGlyph(ratio: ImaginePrompt.ratioValue(choice.ratio), maxSide: 20)
                             .frame(width: 28, height: 22)
                         Text(choice.ratio)
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(palette.text)
                         Spacer(minLength: 12)
                         Text(chinese ? choice.captionZH : choice.captionEN)
-                            .font(.system(size: 13))
+                            .font(.system(size: 12))
                             .foregroundStyle(palette.secondary)
                     }
                     .padding(.horizontal, 14)
