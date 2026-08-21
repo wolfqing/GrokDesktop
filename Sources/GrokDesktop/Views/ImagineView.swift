@@ -93,7 +93,7 @@ struct ImagineView: View {
                     }
                 }
                 .padding(28)
-                .padding(.bottom, 168)
+                .padding(.bottom, 196)
             }
             .scrollIndicators(.never)
 
@@ -101,11 +101,36 @@ struct ImagineView: View {
                 Color.clear
                     .contentShape(Rectangle())
                     .ignoresSafeArea()
-                    .onTapGesture { showAspectPicker = false }
+                    .onTapGesture {
+                        withAnimation(.easeOut(duration: 0.12)) {
+                            showAspectPicker = false
+                        }
+                    }
             }
 
-            composer
-                .zIndex(2)
+            VStack(spacing: 10) {
+                if showAspectPicker {
+                    ImagineAspectMenu(
+                        choices: aspectChoices,
+                        selected: aspect,
+                        chinese: model.language.resolved() == .chinese
+                    ) { value in
+                        aspect = value
+                        withAnimation(.easeOut(duration: 0.12)) {
+                            showAspectPicker = false
+                        }
+                    }
+                    .frame(maxWidth: 720, alignment: .trailing)
+                    .padding(.horizontal, 28)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .transition(
+                        .scale(scale: 0.96, anchor: .bottomTrailing)
+                        .combined(with: .opacity)
+                    )
+                }
+                composer
+            }
+            .zIndex(2)
         }
     }
 
@@ -131,12 +156,14 @@ struct ImagineView: View {
                 }
             }
 
-            TextField(composerPlaceholder, text: $prompt, axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(.system(size: 14))
-                .foregroundStyle(palette.text)
-                .lineLimit(1...4)
-                .onSubmit(submit)
+            PromptEditor(
+                text: $prompt,
+                placeholder: composerPlaceholder,
+                fontSize: 14,
+                minLines: 1,
+                maxLines: 4,
+                onSubmit: submit
+            )
 
             HStack(spacing: 8) {
                 toolButton(systemImage: "plus") {
@@ -189,7 +216,6 @@ struct ImagineView: View {
                 .help(l10n.t("Let grok choose.", "交给 grok 决定。"))
 
                 aspectButton
-                    .zIndex(3)
 
                 Spacer(minLength: 8)
 
@@ -242,27 +268,35 @@ struct ImagineView: View {
 
     private var aspectButton: some View {
         Button {
-            showAspectPicker.toggle()
+            withAnimation(.easeOut(duration: 0.16)) {
+                showAspectPicker.toggle()
+            }
         } label: {
-            ImagineAspectGlyph(ratio: ImaginePrompt.ratioValue(aspect), maxSide: 14)
-                .frame(width: 26, height: 26)
-                .contentShape(Rectangle())
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 6) {
+                    ImagineAspectShot(
+                        ratio: ImaginePrompt.ratioValue(aspect),
+                        slot: CGSize(width: 16, height: 16),
+                        selected: true,
+                        compact: true
+                    )
+                    Text(aspect)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(palette.secondary)
+                }
+                ImagineAspectShot(
+                    ratio: ImaginePrompt.ratioValue(aspect),
+                    slot: CGSize(width: 16, height: 16),
+                    selected: true,
+                    compact: true
+                )
+            }
+            .padding(.horizontal, 7)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help(l10n.t("Aspect ratio", "画面比例"))
-        .overlay(alignment: .top) {
-            if showAspectPicker {
-                ImagineAspectMenu(
-                    choices: aspectChoices,
-                    selected: aspect,
-                    chinese: model.language.resolved() == .chinese
-                ) { value in
-                    aspect = value
-                    showAspectPicker = false
-                }
-                .alignmentGuide(.top) { d in d[.bottom] + 10 }
-            }
-        }
     }
 
     private func toolButton(systemImage: String, action: @escaping () -> Void) -> some View {
@@ -512,17 +546,63 @@ private struct ImagineAspectChoice: Identifiable {
     let captionZH: String
 }
 
-private struct ImagineAspectGlyph: View {
+private struct ImagineAspectShot: View {
     let ratio: CGFloat
-    var maxSide: CGFloat = 18
+    var slot: CGSize = CGSize(width: 44, height: 56)
+    var selected = false
+    var compact = false
     @Environment(\.palette) private var palette
 
     var body: some View {
-        let width = ratio >= 1 ? maxSide : max(8, maxSide * ratio)
-        let height = ratio >= 1 ? max(8, maxSide / ratio) : maxSide
-        RoundedRectangle(cornerRadius: 2.5, style: .continuous)
-            .stroke(palette.text.opacity(0.88), lineWidth: 1.35)
-            .frame(width: width, height: height)
+        let size = fittedSize
+        let corner: CGFloat = compact ? 2.5 : 5
+        RoundedRectangle(cornerRadius: corner, style: .continuous)
+            .fill(screenFill)
+            .overlay {
+                RoundedRectangle(cornerRadius: corner, style: .continuous)
+                    .stroke(screenStroke, lineWidth: compact ? 1 : 1.15)
+            }
+            .overlay(alignment: .top) {
+                RoundedRectangle(cornerRadius: max(corner - 1, 1.5), style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(selected ? (palette.isDark ? 0.22 : 0.28) : 0.12),
+                                Color.white.opacity(0)
+                            ],
+                            startPoint: .top,
+                            endPoint: .center
+                        )
+                    )
+                    .padding(compact ? 0.8 : 1.2)
+            }
+            .shadow(
+                color: Color.black.opacity(selected ? 0.22 : 0.10),
+                radius: selected ? 3 : 1.4,
+                y: 1
+            )
+            .frame(width: size.width, height: size.height)
+            .frame(width: slot.width, height: slot.height, alignment: .bottom)
+    }
+
+    private var screenFill: Color {
+        if selected {
+            return palette.text.opacity(palette.isDark ? 0.92 : 0.86)
+        }
+        return palette.text.opacity(palette.isDark ? 0.16 : 0.08)
+    }
+
+    private var screenStroke: Color {
+        selected ? palette.text.opacity(0.95) : palette.text.opacity(palette.isDark ? 0.32 : 0.22)
+    }
+
+    private var fittedSize: CGSize {
+        if ratio >= 1 {
+            let height = min(slot.height, max(slot.width / ratio, compact ? 6 : 8))
+            return CGSize(width: slot.width, height: height)
+        }
+        let width = min(slot.width, max(slot.height * ratio, compact ? 6 : 8))
+        return CGSize(width: width, height: slot.height)
     }
 }
 
@@ -534,42 +614,51 @@ private struct ImagineAspectMenu: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        HStack(alignment: .bottom, spacing: 8) {
             ForEach(choices) { choice in
+                let on = selected == choice.ratio
                 Button {
                     onPick(choice.ratio)
                 } label: {
-                    HStack(spacing: 12) {
-                        ImagineAspectGlyph(ratio: ImaginePrompt.ratioValue(choice.ratio), maxSide: 20)
-                            .frame(width: 28, height: 22)
-                        Text(choice.ratio)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(palette.text)
-                        Spacer(minLength: 12)
-                        Text(chinese ? choice.captionZH : choice.captionEN)
-                            .font(.system(size: 12))
-                            .foregroundStyle(palette.secondary)
+                    VStack(spacing: 7) {
+                        ImagineAspectShot(
+                            ratio: ImaginePrompt.ratioValue(choice.ratio),
+                            slot: CGSize(width: 46, height: 58),
+                            selected: on
+                        )
+                        VStack(spacing: 1) {
+                            Text(choice.ratio)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(on ? palette.text : palette.text.opacity(0.86))
+                            Text(chinese ? choice.captionZH : choice.captionEN)
+                                .font(.system(size: 10))
+                                .foregroundStyle(palette.secondary)
+                                .lineLimit(1)
+                        }
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
+                    .frame(width: 54)
+                    .padding(.vertical, 6)
                     .background(
-                        selected == choice.ratio ? palette.chip : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        on ? palette.chip : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
                     )
-                    .contentShape(Rectangle())
+                    .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
                 .buttonStyle(.plain)
+                .help("\(choice.ratio) \(chinese ? choice.captionZH : choice.captionEN)")
             }
         }
-        .padding(.vertical, 8)
-        .frame(width: 196)
+        .padding(.horizontal, 12)
+        .padding(.top, 14)
+        .padding(.bottom, 12)
+        .fixedSize()
         .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(palette.elevated)
                 .shadow(color: Color.black.opacity(palette.isDark ? 0.5 : 0.14), radius: 22, y: 8)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(palette.hairline, lineWidth: 1)
         )
     }
