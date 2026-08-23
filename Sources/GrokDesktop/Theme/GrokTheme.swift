@@ -36,6 +36,8 @@ struct Palette: Equatable {
     var secondary: Color { isDark ? Color(white: 0.58) : Color(white: 0.40) }
     var chip: Color { Color.primary.opacity(isDark ? 0.08 : 0.055) }
     var selected: Color { isDark ? Color.white.opacity(0.08) : Color(white: 0.91) }
+    var promptBubble: Color { isDark ? Color(white: 0.82) : Color.black }
+    var promptBubbleText: Color { isDark ? Color.black : Color.white }
     var send: Color { isDark ? Color.white : Color.black }
     var sendGlyph: Color { isDark ? Color.black : Color.white }
     var overlay: Color { Color.black.opacity(isDark ? 0.55 : 0.22) }

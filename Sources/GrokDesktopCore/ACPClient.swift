@@ -50,6 +50,7 @@ public final class ACPClient: ObservableObject {
     @Published public var gitStatusText = ""
     @Published public var gitDiffText = ""
     @Published public private(set) var isReconnecting = false
+    @Published public private(set) var isLoadingSession = false
 
     public var runningTools: Int { currentWorkspace?.runningTools ?? 0 }
 
@@ -103,6 +104,7 @@ public final class ACPClient: ObservableObject {
     private var reconnectAttempt = 0
     private var workspaceByID: [String: SessionWorkspace] = [:]
     private var retainedSessionIDs: [String] = []
+    private var loadGeneration = 0
     private let terminalsHost = TerminalHost()
 
     public init(
@@ -208,7 +210,7 @@ public final class ACPClient: ObservableObject {
                 "protocolVersion": 1,
                 "clientInfo": [
                     "name": "GrokDesktop",
-                    "version": "0.1.13"
+                    "version": "0.1.14"
                 ],
                 "clientCapabilities": [
                     "fs": [
@@ -284,6 +286,7 @@ public final class ACPClient: ObservableObject {
         workspace.subagents = []
         workspace.stopRequested = false
         workspace.isTurnRunning = false
+        workspace.hydratedFromDisk = false
         rememberLoaded(sessionID)
         lastError = nil
         state = .ready
@@ -302,64 +305,102 @@ public final class ACPClient: ObservableObject {
         sessionDirectory = workspace.directory
         mode = workspace.mode
         state = .ready
+        isLoadingSession = false
         syncFromCurrent()
         return true
     }
 
     public func loadSession(id: String, cwd: URL, directory: URL? = nil) async throws {
-        if focusIfLoaded(id) { return }
-        try await connectIfNeeded()
+        loadGeneration += 1
+        let generation = loadGeneration
         workingDirectory = cwd
         sessionDirectory = directory ?? SessionIndex().directory(cwd: cwd.path, id: id)
         let workspace = ensureWorkspace(id: id, cwd: cwd, directory: sessionDirectory)
-        workspace.refreshArtifacts()
-        let transcript = sessionDirectory.map { TranscriptLoader.load(sessionDirectory: $0) }
-        if let transcript {
-            workspace.adopt(transcript)
-        }
-        workspace.assistantBufferID = nil
-        workspace.thoughtBufferID = nil
-        if !workspace.isLive {
-            workspace.permission = nil
-            workspace.userQuestion = nil
+        workspace.cwd = cwd
+        if workspace.directory == nil {
+            workspace.directory = sessionDirectory
         }
         sessionID = id
         lastSessionID = id
+        isLoadingSession = workspace.items.isEmpty && !workspace.hydratedFromDisk
         syncFromCurrent()
+
+        if workspace.loadedOnAgent {
+            isLoadingSession = false
+            return
+        }
+
+        if !workspace.hydratedFromDisk {
+            let dir = sessionDirectory
+            let transcript = await Task.detached(priority: .userInitiated) {
+                dir.map { TranscriptLoader.load(sessionDirectory: $0, includeHunks: false) }
+            }.value
+            guard generation == loadGeneration else { return }
+            if let transcript {
+                workspace.adopt(transcript)
+                workspace.hydratedFromDisk = true
+            }
+            workspace.assistantBufferID = nil
+            workspace.thoughtBufferID = nil
+            if !workspace.isLive {
+                workspace.permission = nil
+                workspace.userQuestion = nil
+            }
+        }
+
+        if sessionID == id {
+            isLoadingSession = false
+            syncFromCurrent()
+        }
+
         do {
-            _ = try await request(
-                method: "session/load",
-                params: [
-                    "sessionId": id,
-                    "cwd": cwd.path,
-                    "mcpServers": []
-                ]
-            )
-            workspace.loadedOnAgent = true
-            rememberLoaded(id)
-            workspace.lastError = nil
-            lastError = nil
-            isReconnecting = false
-            state = .ready
+            try await ensureAgentLoaded(workspace)
+            guard generation == loadGeneration else { return }
+            if sessionID == id {
+                lastError = nil
+                isReconnecting = false
+                state = .ready
+                workspace.refreshArtifacts()
+                syncFromCurrent()
+            }
         } catch {
+            guard generation == loadGeneration else { throw error }
             workspace.loadedOnAgent = false
             if isReconnecting, !workspace.items.isEmpty {
-                syncFromCurrent()
+                if sessionID == id { syncFromCurrent() }
                 throw error
             }
             workspace.lastError = error.localizedDescription
-            lastError = error.localizedDescription
+            if sessionID == id {
+                lastError = error.localizedDescription
+            }
             if !workspace.items.contains(where: {
                 if case .notice(_, let text) = $0 { return text == error.localizedDescription }
                 return false
             }) {
                 workspace.fold(SessionFold.notice(error.localizedDescription))
             }
-            syncFromCurrent()
+            if sessionID == id {
+                syncFromCurrent()
+            }
             throw error
         }
-        workspace.refreshArtifacts()
-        syncFromCurrent()
+    }
+
+    private func ensureAgentLoaded(_ workspace: SessionWorkspace) async throws {
+        if workspace.loadedOnAgent { return }
+        try await connectIfNeeded()
+        _ = try await request(
+            method: "session/load",
+            params: [
+                "sessionId": workspace.id,
+                "cwd": workspace.cwd.path,
+                "mcpServers": []
+            ]
+        )
+        workspace.loadedOnAgent = true
+        rememberLoaded(workspace.id)
+        workspace.lastError = nil
     }
 
     public func send(text: String, sessionID target: String? = nil, kind: QueuedPrompt.Kind = .followUp) async throws {
@@ -372,6 +413,9 @@ public final class ACPClient: ObservableObject {
         let id = target ?? sessionID
         guard let id, let workspace = workspaceByID[id] ?? currentWorkspace else {
             throw ACPError.rpc("No session")
+        }
+        if !workspace.loadedOnAgent {
+            try await ensureAgentLoaded(workspace)
         }
         if workspace.isTurnRunning {
             workspace.promptQueue.append(QueuedPrompt(text: trimmed, kind: kind))
@@ -612,6 +656,7 @@ public final class ACPClient: ObservableObject {
             respond(id: question.rpcID, result: UserQuestionOutcome.skipInterview.json)
         }
         sessionID = nil
+        isLoadingSession = false
         items = []
         permission = nil
         userQuestion = nil
@@ -725,8 +770,11 @@ public final class ACPClient: ObservableObject {
             }
         }
         if let directory = sessionDirectory {
-            let transcript = TranscriptLoader.load(sessionDirectory: directory)
+            let transcript = await Task.detached(priority: .userInitiated) {
+                TranscriptLoader.load(sessionDirectory: directory, includeHunks: false)
+            }.value
             currentWorkspace?.adopt(transcript)
+            currentWorkspace?.hydratedFromDisk = true
             syncFromCurrent()
         }
     }

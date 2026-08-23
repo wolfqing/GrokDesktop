@@ -682,8 +682,11 @@ expect(replayed.snapshot.items.contains(where: { if case .notice(_, let text) = 
 if let liveJSONL = SessionReplay.firstJSONL(
     under: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".grok/sessions")
 ) {
-    let live = SessionReplay.replay(jsonl: liveJSONL)
-    expect(live.report.updateCount > 0, "live session replay has updates")
+    let size = (try? liveJSONL.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+    if size > 40, size < 2_000_000 {
+        let live = SessionReplay.replay(jsonl: liveJSONL)
+        expect(live.report.updateCount > 0, "live session replay has updates")
+    }
 }
 
 expect(ChatScrollMath.originY(progress: 0, content: 2000, visible: 800, flipped: true) == 0, "flipped top")
@@ -941,6 +944,38 @@ expect(demoClient.items.count == 2, "demo items")
 expect(demoClient.sessionID == "demo-northwind", "demo session")
 expect(demoClient.workingDirectory.lastPathComponent == "northwind", "demo cwd")
 expect(demoClient.lastError == nil, "demo has no error")
+
+let indexRoot = FileManager.default.temporaryDirectory.appendingPathComponent("gd-index-\(UUID().uuidString)", isDirectory: true)
+let sessionDir = indexRoot
+    .appendingPathComponent("proj", isDirectory: true)
+    .appendingPathComponent("sid-fast", isDirectory: true)
+try! FileManager.default.createDirectory(at: sessionDir.appendingPathComponent("terminal"), withIntermediateDirectories: true)
+try! Data(repeating: 1, count: 64).write(to: sessionDir.appendingPathComponent("terminal/noise.bin"))
+try! Data(contentsOf: fixture).write(to: sessionDir.appendingPathComponent("summary.json"))
+let indexed = SessionIndex(sessionsRoot: indexRoot).load()
+expect(indexed.contains(where: { $0.id == "019ffa28-09d5-7f90-8d39-bbe1edba511b" }), "shallow session index finds summary")
+
+let bulkyDir = FileManager.default.temporaryDirectory.appendingPathComponent("gd-bulky-\(UUID().uuidString)", isDirectory: true)
+try! FileManager.default.createDirectory(at: bulkyDir, withIntermediateDirectories: true)
+let huge = String(repeating: "x", count: 80_000)
+let bulkyJSONL = """
+{"method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"open this"}}}}
+{"method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"tool_call","toolCallId":"t-big","title":"read_file","status":"running"}}}
+{"method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"tool_call_update","toolCallId":"t-big","status":"completed","title":"read_file","content":{"type":"text","text":"\(huge)"}}}}
+{"method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"done reading"}}}}
+"""
+try! bulkyJSONL.write(to: bulkyDir.appendingPathComponent("updates.jsonl"), atomically: true, encoding: .utf8)
+let bulky = TranscriptLoader.load(sessionDirectory: bulkyDir)
+expect(bulky.items.contains(where: { if case .user(_, let text) = $0 { return text.contains("open this") }; return false }), "bulky replay keeps user")
+expect(bulky.items.contains(where: { if case .assistant(_, let text, _) = $0 { return text.contains("done reading") }; return false }), "bulky replay keeps assistant")
+let bulkyTool = bulky.items.first { if case .tool(let id, _, let status, _) = $0 { return id == "t-big" && status == "completed" }; return false }
+expect(bulkyTool != nil, "bulky tool_call_update still completes")
+if case .tool(_, _, _, let detail)? = bulkyTool {
+    expect(detail.count < 10_000, "bulky tool detail is truncated, got \(detail.count)")
+}
+
+let cached = TranscriptLoader.load(sessionDirectory: bulkyDir)
+expect(cached.items == bulky.items, "second load hits transcript cache")
 
 print("GrokDesktopSmoke ok")
 

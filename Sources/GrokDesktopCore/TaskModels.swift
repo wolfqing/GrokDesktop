@@ -109,6 +109,18 @@ public struct AgentSubagent: Identifiable, Hashable, Sendable {
 }
 
 public enum PromptTimestamp {
+    private static let dateLock = NSLock()
+    nonisolated(unsafe) private static let isoFractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+    nonisolated(unsafe) private static let isoBasic: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+
     public static func parse(_ value: Any?) -> Date? {
         if let date = value as? Date { return date }
         if let number = value as? Double {
@@ -122,12 +134,10 @@ public enum PromptTimestamp {
         }
         if let text = value as? String {
             if let number = Double(text) { return fromEpoch(number) }
-            let withFraction = ISO8601DateFormatter()
-            withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            if let date = withFraction.date(from: text) { return date }
-            let plain = ISO8601DateFormatter()
-            plain.formatOptions = [.withInternetDateTime]
-            return plain.date(from: text)
+            dateLock.lock()
+            defer { dateLock.unlock() }
+            if let date = isoFractional.date(from: text) { return date }
+            return isoBasic.date(from: text)
         }
         if let dict = value as? [String: Any] {
             if let secs = dict["secs_since_epoch"] as? Double {

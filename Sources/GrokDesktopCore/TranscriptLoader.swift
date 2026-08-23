@@ -84,7 +84,22 @@ public struct Transcript: Sendable {
 }
 
 public enum TranscriptLoader {
-    public static func load(sessionDirectory: URL, limit: Int = 400) -> Transcript {
+    public static func load(
+        sessionDirectory: URL,
+        limit: Int = 400,
+        includeHunks: Bool = true
+    ) -> Transcript {
+        if var cached = TranscriptCache.load(sessionDirectory: sessionDirectory, limit: limit) {
+            cached.planMarkdown = (try? String(
+                contentsOf: sessionDirectory.appendingPathComponent("plan.md"),
+                encoding: .utf8
+            )) ?? ""
+            if includeHunks {
+                cached.hunks = loadHunks(sessionDirectory: sessionDirectory)
+            }
+            return cached
+        }
+
         var snapshot = SessionReplay.replay(sessionDirectory: sessionDirectory).snapshot
 
         attachDiskImages(sessionDirectory: sessionDirectory, items: snapshot.items, itemImages: &snapshot.itemImages)
@@ -95,11 +110,11 @@ public enum TranscriptLoader {
 
         let planURL = sessionDirectory.appendingPathComponent("plan.md")
         let planMarkdown = (try? String(contentsOf: planURL, encoding: .utf8)) ?? ""
-        return Transcript(
+        let transcript = Transcript(
             items: snapshot.items,
             planEntries: snapshot.planEntries,
             planMarkdown: planMarkdown,
-            hunks: loadHunks(sessionDirectory: sessionDirectory),
+            hunks: includeHunks ? loadHunks(sessionDirectory: sessionDirectory) : [],
             itemDates: snapshot.itemDates,
             itemImages: snapshot.itemImages,
             todos: snapshot.todos,
@@ -108,6 +123,8 @@ public enum TranscriptLoader {
             compacted: snapshot.compacted,
             subagents: snapshot.subagents
         )
+        TranscriptCache.save(transcript, sessionDirectory: sessionDirectory, limit: limit)
+        return transcript
     }
 
     public static func loadChatHistory(_ url: URL) -> Transcript {
@@ -261,7 +278,7 @@ public enum TranscriptLoader {
         todos: inout [AgentTodo],
         tasks: inout [AgentTask]
     ) {
-        let previous = Set(items.map(\.id))
+        let countBefore = items.count
         switch update.kind {
         case .userMessageChunk:
             assistantID = nil
@@ -300,7 +317,7 @@ public enum TranscriptLoader {
             append(kind: .thought, text: update.text, items: &items, bufferID: &thoughtID)
         case .toolCall, .toolCallUpdate:
             let id = update.toolCallId ?? UUID().uuidString
-            if let index = items.firstIndex(where: { $0.id == id }) {
+            if let index = items.lastIndex(where: { $0.id == id }) {
                 if case .tool(_, let title, let status, let detail) = items[index] {
                     items[index] = .tool(
                         id: id,
@@ -359,8 +376,8 @@ public enum TranscriptLoader {
             assistantID = nil
             thoughtID = nil
         }
-        if let timestamp = update.timestamp {
-            for item in items where previous.contains(item.id) == false {
+        if let timestamp = update.timestamp, items.count > countBefore {
+            for item in items.suffix(items.count - countBefore) {
                 itemDates[item.id] = timestamp
             }
         }
@@ -407,7 +424,7 @@ public enum TranscriptLoader {
         items: inout [ConversationItem],
         bufferID: inout String?
     ) {
-        if let id = bufferID, let index = items.firstIndex(where: { $0.id == id }) {
+        if let id = bufferID, let index = items.lastIndex(where: { $0.id == id }) {
             switch kind {
             case .assistant:
                 if case .assistant(_, let existing, _) = items[index] {

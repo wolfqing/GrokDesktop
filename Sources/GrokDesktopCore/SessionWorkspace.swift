@@ -19,6 +19,7 @@ public final class SessionWorkspace: Identifiable {
     public var lastError: String?
     public var mode: AgentMode = .normal
     public var loadedOnAgent = false
+    public var hydratedFromDisk = false
     public var allowEditsThisSession = false
     public var itemDates: [String: Date] = [:]
     public var itemImages: [String: [URL]] = [:]

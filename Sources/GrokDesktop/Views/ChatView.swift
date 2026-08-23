@@ -207,6 +207,9 @@ struct ChatView: View {
             if let reason = model.firstRunReason, model.client.items.isEmpty {
                 FirstRunView(reason: reason)
                 composerBlock
+            } else if model.client.items.isEmpty, model.client.isLoadingSession {
+                loadingState
+                composerBlock
             } else if model.client.items.isEmpty {
                 emptyState
             } else {
@@ -269,24 +272,11 @@ struct ChatView: View {
                         ScrollView {
                             LazyVStack(
                                 alignment: .leading,
-                                spacing: GrokTheme.chatRowSpacing(compact: model.compactChat),
-                                pinnedViews: [.sectionHeaders]
+                                spacing: GrokTheme.chatRowSpacing(compact: model.compactChat)
                             ) {
-                                ForEach(chatTurns) { turn in
-                                    Section {
-                                        ForEach(turn.body) { row in
-                                            displayRow(row)
-                                                .id(row.id)
-                                        }
-                                    } header: {
-                                        if let user = turn.user {
-                                            messageRow(user)
-                                                .id(user.id)
-                                                .frame(maxWidth: .infinity)
-                                                .padding(.bottom, 2)
-                                                .background(Color.clear)
-                                        }
-                                    }
+                                ForEach(displayedRows) { row in
+                                    displayRow(row)
+                                        .id(row.id)
                                 }
                                 Color.clear
                                     .frame(height: 1)
@@ -496,6 +486,18 @@ struct ChatView: View {
         .padding(.vertical, 10)
     }
 
+    private var loadingState: some View {
+        VStack(spacing: 12) {
+            Spacer()
+            ProgressView()
+            Text(l10n.t("Loading conversation…", "正在加载对话…"))
+                .font(.system(size: 13))
+                .foregroundStyle(palette.secondary)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
     private var emptyState: some View {
         let chinese = model.language.resolved() == .chinese
         let folderSessions = model.filteredSessions.filter { $0.cwd == model.client.workingDirectory.path }
@@ -633,42 +635,6 @@ struct ChatView: View {
         return rows
     }
 
-    private struct ChatTurn: Identifiable {
-        var id: String
-        var user: ConversationItem?
-        var body: [DisplayRow]
-    }
-
-    private var chatTurns: [ChatTurn] {
-        var turns: [ChatTurn] = []
-        var currentUser: ConversationItem?
-        var body: [DisplayRow] = []
-
-        func flush() {
-            guard currentUser != nil || !body.isEmpty else { return }
-            turns.append(
-                ChatTurn(
-                    id: currentUser?.id ?? body.first?.id ?? "turn-\(turns.count)",
-                    user: currentUser,
-                    body: body
-                )
-            )
-            currentUser = nil
-            body = []
-        }
-
-        for row in displayedRows {
-            if case .message(let item) = row, case .user = item {
-                flush()
-                currentUser = item
-            } else {
-                body.append(row)
-            }
-        }
-        flush()
-        return turns
-    }
-
     private var showJumpToLatest: Bool {
         scrollMetrics.canScroll && (!stickToLatest || !scrollMetrics.isNearBottom)
     }
@@ -700,13 +666,7 @@ struct ChatView: View {
     }
 
     private var scrollableIDs: [String] {
-        var ids: [String] = []
-        for turn in chatTurns {
-            if let user = turn.user { ids.append(user.id) }
-            for row in turn.body { ids.append(row.id) }
-        }
-        ids.append("latest-anchor")
-        return ids
+        displayedRows.map(\.id) + ["latest-anchor"]
     }
 
     private func seekConversation(_ proxy: ScrollViewProxy, to progress: CGFloat) {
@@ -855,6 +815,7 @@ struct ChatView: View {
                                 fontSize: GrokTheme.chatBubbleSize(compact: model.compactChat),
                                 markdown: false,
                                 fillsWidth: false,
+                                color: palette.promptBubbleText,
                                 maxContentWidth: GrokTheme.bubbleMaxWidth
                             )
                         } else if images.isEmpty {
@@ -863,13 +824,14 @@ struct ChatView: View {
                                 fontSize: GrokTheme.chatBubbleSize(compact: model.compactChat),
                                 markdown: false,
                                 fillsWidth: false,
+                                color: palette.promptBubbleText,
                                 maxContentWidth: GrokTheme.bubbleMaxWidth
                             )
                         }
                     }
                     .padding(.horizontal, 14)
                     .padding(.vertical, model.compactChat ? 8 : 10)
-                    .background(palette.selected, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .background(palette.promptBubble, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                     HStack(spacing: 4) {
                         if isLatestUser(id) {
                             Button {

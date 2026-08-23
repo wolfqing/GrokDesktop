@@ -49,19 +49,36 @@ public struct SessionIndex {
     }
 
     public func load(limit: Int = 80) -> [SessionRecord] {
-        guard let enumerator = fileManager.enumerator(
+        guard let cwdDirs = try? fileManager.contentsOfDirectory(
             at: sessionsRoot,
-            includingPropertiesForKeys: [.isRegularFileKey],
+            includingPropertiesForKeys: [.isDirectoryKey],
             options: [.skipsHiddenFiles]
         ) else {
             return []
         }
 
         var records: [SessionRecord] = []
-        for case let url as URL in enumerator {
-            guard url.lastPathComponent == "summary.json" else { continue }
-            if let record = decode(summaryURL: url) {
-                records.append(record)
+        records.reserveCapacity(min(limit, 80))
+        for cwdDir in cwdDirs {
+            guard isDirectory(cwdDir) else {
+                if cwdDir.lastPathComponent == "summary.json", let record = decode(summaryURL: cwdDir) {
+                    records.append(record)
+                }
+                continue
+            }
+            guard let sessionDirs = try? fileManager.contentsOfDirectory(
+                at: cwdDir,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+            ) else { continue }
+            for sessionDir in sessionDirs {
+                let summary = isDirectory(sessionDir)
+                    ? sessionDir.appendingPathComponent("summary.json")
+                    : sessionDir
+                guard summary.lastPathComponent == "summary.json" else { continue }
+                if let record = decode(summaryURL: summary) {
+                    records.append(record)
+                }
             }
         }
 
@@ -69,6 +86,11 @@ public struct SessionIndex {
             .sorted { $0.updatedAt > $1.updatedAt }
             .prefix(limit)
             .map { $0 }
+    }
+
+    private func isDirectory(_ url: URL) -> Bool {
+        var isDir: ObjCBool = false
+        return fileManager.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue
     }
 
     public func directory(cwd: String, id: String) -> URL {
@@ -116,8 +138,8 @@ public struct SessionIndex {
         if title.isEmpty && messages == 0 {
             return nil
         }
-        let updated = parseDate(dict["updated_at"] as? String)
-            ?? parseDate(dict["last_active_at"] as? String)
+        let updated = PromptTimestamp.parse(dict["updated_at"] as? String)
+            ?? PromptTimestamp.parse(dict["last_active_at"] as? String)
             ?? .distantPast
         return SessionRecord(
             id: id,
@@ -149,17 +171,6 @@ public struct SessionIndex {
         return name.isEmpty ? "Untitled" : name
     }
 
-    private func parseDate(_ raw: String?) -> Date? {
-        guard let raw else { return nil }
-        let withFraction = ISO8601DateFormatter()
-        withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = withFraction.date(from: raw) {
-            return date
-        }
-        let basic = ISO8601DateFormatter()
-        basic.formatOptions = [.withInternetDateTime]
-        return basic.date(from: raw)
-    }
 }
 
 public enum SessionSearch {

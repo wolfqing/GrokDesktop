@@ -779,9 +779,9 @@ final class AppModel: ObservableObject {
     func open(_ record: SessionRecord) {
         destination = .build
         isPrivateChat = false
+        firstRunReason = nil
+        sidebarNotice = nil
         if client.focusIfLoaded(record.id) {
-            firstRunReason = nil
-            sidebarNotice = nil
             refreshWorkspace()
             Task { await client.refreshGit() }
             return
@@ -789,14 +789,13 @@ final class AppModel: ObservableObject {
         Task {
             do {
                 try await client.loadSession(id: record.id, cwd: URL(fileURLWithPath: record.cwd), directory: record.directory)
-                firstRunReason = nil
-                sidebarNotice = nil
+                guard client.sessionID == record.id else { return }
                 refreshWorkspace()
                 await client.refreshGit()
             } catch {
+                guard client.sessionID == record.id else { return }
                 sidebarNotice = copy.t("Couldn't resume “\(record.title)”", "无法恢复「\(record.title)」")
                 flash(sidebarNotice ?? error.localizedDescription)
-                firstRunReason = nil
             }
         }
     }
@@ -2028,7 +2027,7 @@ final class AppModel: ObservableObject {
 
     func exportDiagnostics() {
         let text = DiagnosticExport.make(
-            version: "0.1.13",
+            version: "0.1.14",
             grokVersion: client.grokVersion,
             state: String(describing: client.state),
             lastError: client.lastError,

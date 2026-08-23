@@ -120,6 +120,16 @@ public enum SessionUpdateKind: String, Sendable {
     case subagentFinished = "subagent_finished"
     case notice
     case unknown
+
+    var needsRaw: Bool {
+        switch self {
+        case .toolCall, .toolCallUpdate, .taskBackgrounded, .taskCompleted,
+             .subagentSpawned, .subagentFinished, .retryState, .scheduledTaskCreated:
+            return true
+        default:
+            return false
+        }
+    }
 }
 
 public struct SessionUpdate: Equatable {
@@ -174,7 +184,13 @@ public struct SessionUpdate: Equatable {
         self.raw = raw
     }
 
-    public static func parse(params: [String: Any], envelopeTimestamp: Any? = nil) -> SessionUpdate {
+    public static let toolDetailLimit = 2_000
+
+    public static func parse(
+        params: [String: Any],
+        envelopeTimestamp: Any? = nil,
+        compactTools: Bool = false
+    ) -> SessionUpdate {
         let update = params["update"] as? [String: Any] ?? params
         let kindRaw = (update["sessionUpdate"] as? String)
             ?? (update["session_update"] as? String)
@@ -183,10 +199,15 @@ public struct SessionUpdate: Equatable {
         let meta = params["_meta"] as? [String: Any] ?? [:]
         let updateMeta = update["_meta"] as? [String: Any] ?? [:]
         let images = PromptMedia.images(in: update)
+        var text = extractText(update)
+        if compactTools, kind == .toolCall || kind == .toolCallUpdate, text.count > toolDetailLimit {
+            text = String(text.prefix(toolDetailLimit))
+        }
+        let keepRaw = !compactTools || kind.needsRaw
         return SessionUpdate(
             kind: kind,
             sessionId: params["sessionId"] as? String ?? params["session_id"] as? String,
-            text: extractText(update),
+            text: text,
             title: update["title"] as? String ?? "",
             toolCallId: update["toolCallId"] as? String ?? update["tool_call_id"] as? String,
             status: normalizedStatus(
@@ -203,7 +224,7 @@ public struct SessionUpdate: Equatable {
             ),
             imageURLs: images.urls,
             imageDisplayNumber: images.displayNumber,
-            raw: update
+            raw: keepRaw ? update : [:]
         )
     }
 
