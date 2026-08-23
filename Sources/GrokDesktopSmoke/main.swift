@@ -694,6 +694,10 @@ expect(ChatScrollMath.originY(progress: 1, content: 2000, visible: 800, flipped:
 expect(ChatScrollMath.originY(progress: 0, content: 2000, visible: 800, flipped: false) == 1200, "unflipped top")
 expect(abs(ChatScrollMath.progress(locationY: 14, track: 200, thumb: 28) - 0) < 0.001, "thumb top is 0")
 expect(abs(ChatScrollMath.progress(locationY: 186, track: 200, thumb: 28) - 1) < 0.001, "thumb bottom is 1")
+expect(abs(ChatScrollMath.progress(locationY: 40, grabOffset: 40, track: 200, thumb: 28) - 0) < 0.001, "grab at thumb top stays 0")
+expect(abs(ChatScrollMath.progress(locationY: 40 + 172, grabOffset: 40, track: 200, thumb: 28) - 1) < 0.001, "grab drag to end is 1")
+expect(abs(ChatScrollMath.thumbTop(progress: 0, track: 200, thumb: 28) - 0) < 0.001, "thumb top at start")
+expect(abs(ChatScrollMath.thumbTop(progress: 1, track: 200, thumb: 28) - 172) < 0.001, "thumb top at end")
 
 let timeoutDir = FileManager.default.temporaryDirectory.appendingPathComponent("gd-timeout-\(UUID().uuidString)", isDirectory: true)
 try! FileManager.default.createDirectory(at: timeoutDir, withIntermediateDirectories: true)

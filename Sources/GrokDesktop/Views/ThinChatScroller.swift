@@ -15,12 +15,16 @@ struct ChatScrollMetrics: Equatable {
 
 final class ScrollKnobView: NSView {
     var metrics = ChatScrollMetrics() {
-        didSet { needsDisplay = true }
+        didSet {
+            if !dragging { needsDisplay = true }
+        }
     }
     var isDark = false {
         didSet { needsDisplay = true }
     }
+    var onBegan: () -> Void = {}
     var onSeek: (CGFloat) -> Void = { _ in }
+    var onEnded: (CGFloat) -> Void = { _ in }
 
     private var dragging = false {
         didSet { needsDisplay = true }
@@ -28,6 +32,8 @@ final class ScrollKnobView: NSView {
     private var hovering = false {
         didSet { needsDisplay = true }
     }
+    private var grabOffset: CGFloat = 0
+    private var dragProgress: CGFloat = 0
     nonisolated(unsafe) private var monitor: Any?
 
     override var isFlipped: Bool { true }
@@ -76,13 +82,16 @@ final class ScrollKnobView: NSView {
     override func mouseUp(with event: NSEvent) { _ = consume(event) }
 
     override func draw(_ dirtyRect: NSRect) {
-        guard metrics.canScroll else { return }
-        let inset: CGFloat = 8
-        let track = max(bounds.height - inset * 2, 1)
-        let thumb = min(max(metrics.visible / max(metrics.content, 1) * track, 28), track)
-        let y = inset + metrics.progress * (track - thumb)
+        guard metrics.canScroll || dragging else { return }
+        let geometry = trackGeometry()
+        let progress = dragging ? dragProgress : metrics.progress
+        let y = geometry.inset + ChatScrollMath.thumbTop(
+            progress: progress,
+            track: geometry.track,
+            thumb: geometry.thumb
+        )
         let width: CGFloat = (dragging || hovering) ? 6 : 4
-        let rect = NSRect(x: (bounds.width - width) / 2, y: y, width: width, height: thumb)
+        let rect = NSRect(x: (bounds.width - width) / 2, y: y, width: width, height: geometry.thumb)
         let color = isDark
             ? NSColor.white.withAlphaComponent(dragging || hovering ? 0.50 : 0.32)
             : NSColor.black.withAlphaComponent(dragging || hovering ? 0.38 : 0.22)
@@ -112,20 +121,18 @@ final class ScrollKnobView: NSView {
         switch event.type {
         case .leftMouseDown:
             guard let local = localPoint(for: event, requireInside: true) else { return false }
-            dragging = true
-            seek(at: local)
+            beginDrag(at: local)
             return true
         case .leftMouseDragged:
             guard dragging, let local = localPoint(for: event, requireInside: false) else { return false }
-            seek(at: local)
+            updateDrag(at: local)
             return true
         case .leftMouseUp:
             guard dragging else { return false }
             if let local = localPoint(for: event, requireInside: false) {
-                seek(at: local)
+                updateDrag(at: local)
             }
-            dragging = false
-            hovering = localPoint(for: event, requireInside: true) != nil
+            endDrag()
             return true
         default:
             return false
@@ -137,13 +144,13 @@ final class ScrollKnobView: NSView {
     private func localPoint(for event: NSEvent, requireInside: Bool) -> NSPoint? {
         let frame = convert(bounds, to: nil)
         let p = event.locationInWindow
-        let slop: CGFloat = 4
+        let slop: CGFloat = 8
         if requireInside {
             let hit = NSRect(
                 x: frame.minX - slop,
-                y: frame.minY,
+                y: frame.minY - slop,
                 width: frame.width + slop * 2,
-                height: frame.height
+                height: frame.height + slop * 2
             )
             guard hit.contains(p) else { return nil }
         }
@@ -151,31 +158,70 @@ final class ScrollKnobView: NSView {
         return NSPoint(x: p.x - frame.minX, y: yFromTop)
     }
 
-    private func seek(at point: NSPoint) {
+    private func trackGeometry() -> (inset: CGFloat, track: CGFloat, thumb: CGFloat) {
         let inset: CGFloat = 8
         let track = max(bounds.height - inset * 2, 1)
         let thumb = min(max(metrics.visible / max(metrics.content, 1) * track, 28), track)
-        onSeek(ChatScrollMath.progress(locationY: point.y - inset, track: track, thumb: thumb))
+        return (inset, track, thumb)
+    }
+
+    private func beginDrag(at point: NSPoint) {
+        let geometry = trackGeometry()
+        let thumbTop = geometry.inset + ChatScrollMath.thumbTop(
+            progress: metrics.progress,
+            track: geometry.track,
+            thumb: geometry.thumb
+        )
+        let onThumb = point.y >= thumbTop && point.y <= thumbTop + geometry.thumb
+        grabOffset = onThumb ? point.y - thumbTop : geometry.thumb / 2
+        dragging = true
+        onBegan()
+        updateDrag(at: point)
+    }
+
+    private func updateDrag(at point: NSPoint) {
+        let geometry = trackGeometry()
+        dragProgress = ChatScrollMath.progress(
+            locationY: point.y - geometry.inset,
+            grabOffset: grabOffset,
+            track: geometry.track,
+            thumb: geometry.thumb
+        )
+        needsDisplay = true
+        onSeek(dragProgress)
+    }
+
+    private func endDrag() {
+        let progress = dragProgress
+        dragging = false
+        onEnded(progress)
+        needsDisplay = true
     }
 }
 
 struct OverlayScrollbar: NSViewRepresentable {
     var metrics: ChatScrollMetrics
     var isDark: Bool
+    var onBegan: () -> Void = {}
     var onSeek: (CGFloat) -> Void
+    var onEnded: (CGFloat) -> Void = { _ in }
 
     func makeNSView(context: Context) -> ScrollKnobView {
         let view = ScrollKnobView()
-        view.metrics = metrics
-        view.isDark = isDark
-        view.onSeek = onSeek
+        apply(view)
         return view
     }
 
     func updateNSView(_ view: ScrollKnobView, context: Context) {
+        apply(view)
+    }
+
+    private func apply(_ view: ScrollKnobView) {
         view.metrics = metrics
         view.isDark = isDark
+        view.onBegan = onBegan
         view.onSeek = onSeek
+        view.onEnded = onEnded
     }
 }
 

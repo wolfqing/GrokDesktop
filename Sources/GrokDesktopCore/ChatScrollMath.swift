@@ -14,7 +14,20 @@ public enum ChatScrollMath {
     }
 
     public static func progress(locationY: CGFloat, track: CGFloat, thumb: CGFloat) -> CGFloat {
+        progress(locationY: locationY, grabOffset: thumb / 2, track: track, thumb: thumb)
+    }
+
+    public static func progress(
+        locationY: CGFloat,
+        grabOffset: CGFloat,
+        track: CGFloat,
+        thumb: CGFloat
+    ) -> CGFloat {
         let usable = max(track - thumb, 1)
-        return min(max((locationY - thumb / 2) / usable, 0), 1)
+        return min(max((locationY - grabOffset) / usable, 0), 1)
+    }
+
+    public static func thumbTop(progress: CGFloat, track: CGFloat, thumb: CGFloat) -> CGFloat {
+        min(max(progress, 0), 1) * max(track - thumb, 0)
     }
 }

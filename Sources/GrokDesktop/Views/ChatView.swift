@@ -22,6 +22,16 @@ private struct ChatScrollGeometryReader: ViewModifier {
     }
 }
 
+private struct ChatDefaultBottomAnchor: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 15.0, *) {
+            content.defaultScrollAnchor(.bottom)
+        } else {
+            content
+        }
+    }
+}
+
 
 
 struct ChatScrollBottomMonitor: NSViewRepresentable {
@@ -195,10 +205,15 @@ struct ChatView: View {
     @Environment(\.palette) private var palette
     @Environment(\.l10n) private var l10n
     @State private var stickToLatest = true
+    @State private var pinningToLatest = false
+    @State private var pinToken = 0
+    @State private var bottomHits = 0
+    @State private var pinStarted = Date.distantPast
     @State private var copiedPromptID: String?
     @State private var ignoreScrollUntil = Date.distantPast
     @State private var scrollMetrics = ChatScrollMetrics()
     @State private var scrollDriver = ChatScrollDriver()
+    @State private var scrollbarDragging = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -279,7 +294,7 @@ struct ChatView: View {
                                         .id(row.id)
                                 }
                                 Color.clear
-                                    .frame(height: 1)
+                                    .frame(height: 8)
                                     .id("latest-anchor")
                             }
                             .frame(maxWidth: GrokTheme.contentWidth)
@@ -287,6 +302,7 @@ struct ChatView: View {
                             .frame(maxWidth: .infinity)
                         }
                         .scrollIndicators(.never)
+                        .modifier(ChatDefaultBottomAnchor())
                         .modifier(ChatScrollGeometryReader { applyScrollMetrics($0) })
                         .background(
                             ChatScrollBottomMonitor(
@@ -309,6 +325,13 @@ struct ChatView: View {
                         .overlay(alignment: .trailing) {
                             chatScrollbar(proxy)
                         }
+                        .overlay {
+                            if pinningToLatest {
+                                palette.canvas
+                                    .overlay { ProgressView() }
+                                    .transition(.opacity)
+                            }
+                        }
                         .overlay(alignment: .bottom) {
                             if showJumpToLatest {
                                 Button {
@@ -330,13 +353,18 @@ struct ChatView: View {
                         }
                     }
                     .id(model.client.sessionID ?? "none")
-                    .onAppear { pinToBottom(proxy) }
+                    .onAppear { pinToLatestOnOpen(proxy) }
                     .onChange(of: model.client.sessionID) { _, _ in
-                        pinToBottom(proxy)
+                        pinToLatestOnOpen(proxy)
+                    }
+                    .onChange(of: model.client.items.isEmpty) { wasEmpty, isEmpty in
+                        if wasEmpty, !isEmpty {
+                            pinToLatestOnOpen(proxy)
+                        }
                     }
                     .onChange(of: followToken) { _, _ in
-                        if stickToLatest {
-                            jumpToLatest(proxy)
+                        if pinningToLatest || stickToLatest {
+                            snapToLatest(proxy)
                         }
                     }
                     .onChange(of: model.jumpTarget) { _, target in
@@ -344,6 +372,7 @@ struct ChatView: View {
                             if target == lastDisplayID {
                                 jumpToLatest(proxy)
                             } else {
+                                pinningToLatest = false
                                 stickToLatest = false
                                 proxy.scrollTo(target, anchor: .center)
                             }
@@ -636,10 +665,13 @@ struct ChatView: View {
     }
 
     private var showJumpToLatest: Bool {
-        scrollMetrics.canScroll && (!stickToLatest || !scrollMetrics.isNearBottom)
+        !pinningToLatest
+            && scrollMetrics.canScroll
+            && (!stickToLatest || !scrollMetrics.isNearBottom)
     }
 
     private func applyNearBottom(_ near: Bool) {
+        guard !pinningToLatest, !scrollbarDragging else { return }
         guard Date() >= ignoreScrollUntil else { return }
         if stickToLatest != near {
             stickToLatest = near
@@ -647,8 +679,23 @@ struct ChatView: View {
     }
 
     private func applyScrollMetrics(_ metrics: ChatScrollMetrics) {
+        if scrollbarDragging { return }
         if scrollMetrics != metrics {
             scrollMetrics = metrics
+        }
+        if pinningToLatest {
+            stickToLatest = true
+            let waited = Date().timeIntervalSince(pinStarted) >= 0.2
+            if metrics.isNearBottom {
+                bottomHits += 1
+                if bottomHits >= 3, waited, metrics.canScroll || Date().timeIntervalSince(pinStarted) >= 0.35 {
+                    pinningToLatest = false
+                }
+            } else {
+                bottomHits = 0
+                scrollDriver.seek(to: 1)
+            }
+            return
         }
         applyNearBottom(metrics.isNearBottom)
     }
@@ -657,42 +704,31 @@ struct ChatView: View {
         OverlayScrollbar(
             metrics: scrollMetrics,
             isDark: palette.isDark,
+            onBegan: {
+                pinningToLatest = false
+                scrollbarDragging = true
+            },
             onSeek: { progress in
-                seekConversation(proxy, to: progress)
+                scrollDriver.seek(to: progress)
+            },
+            onEnded: { progress in
+                scrollbarDragging = false
+                var next = scrollMetrics
+                next.offset = min(max(progress, 0), 1) * next.travel
+                scrollMetrics = next
+                ignoreScrollUntil = Date().addingTimeInterval(0.2)
+                stickToLatest = progress >= 0.985
+                if progress >= 0.985 {
+                    jumpToLatest(proxy)
+                }
             }
         )
         .frame(width: 14)
         .padding(.vertical, 6)
     }
 
-    private var scrollableIDs: [String] {
-        displayedRows.map(\.id) + ["latest-anchor"]
-    }
-
-    private func seekConversation(_ proxy: ScrollViewProxy, to progress: CGFloat) {
-        stickToLatest = progress >= 0.985
-        ignoreScrollUntil = Date().addingTimeInterval(0.25)
-        scrollDriver.seek(to: progress)
-        let ids = scrollableIDs
-        guard !ids.isEmpty else { return }
-        if progress >= 0.985 {
-            jumpToLatest(proxy)
-            return
-        }
-        let maxIndex = max(ids.count - 1, 0)
-        let index = min(max(Int((progress * CGFloat(maxIndex)).rounded()), 0), maxIndex)
-        proxy.scrollTo(ids[index], anchor: .top)
-    }
-
     private var lastDisplayID: String? {
-        switch displayedRows.last {
-        case .message(let item):
-            return item.id
-        case .tools(_, let items):
-            return items.last?.id
-        case .none:
-            return nil
-        }
+        displayedRows.last?.id
     }
 
     private func canMerge(title: String, status: String, onto pending: [ConversationItem]) -> Bool {
@@ -727,23 +763,45 @@ struct ChatView: View {
         return "\(model.client.sessionID ?? "")-\(model.client.items.count)-\(tail)-\(todoFingerprint)-\(model.client.isTurnRunning)-\(model.client.isStopping)"
     }
 
-    private func pinToBottom(_ proxy: ScrollViewProxy) {
+    private func pinToLatestOnOpen(_ proxy: ScrollViewProxy) {
+        pinToken += 1
+        let token = pinToken
+        pinningToLatest = true
+        bottomHits = 0
+        pinStarted = Date()
         stickToLatest = true
-        jumpToLatest(proxy)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { jumpToLatest(proxy) }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { jumpToLatest(proxy) }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { jumpToLatest(proxy) }
+        ignoreScrollUntil = Date().addingTimeInterval(2.6)
+        snapToLatest(proxy)
+        for delay in [0.05, 0.12, 0.24, 0.4, 0.7, 1.1, 1.6, 2.2] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                guard token == pinToken, pinningToLatest else { return }
+                snapToLatest(proxy)
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.6) {
+            guard token == pinToken else { return }
+            pinningToLatest = false
+            stickToLatest = scrollMetrics.isNearBottom || !scrollMetrics.canScroll
+        }
     }
 
     private func jumpToLatest(_ proxy: ScrollViewProxy) {
+        pinningToLatest = false
         stickToLatest = true
         ignoreScrollUntil = Date().addingTimeInterval(0.8)
+        snapToLatest(proxy)
+    }
+
+    private func snapToLatest(_ proxy: ScrollViewProxy) {
+        stickToLatest = true
+        scrollDriver.seek(to: 1)
         let lastID = lastDisplayID
         DispatchQueue.main.async {
             if let lastID {
                 proxy.scrollTo(lastID, anchor: .bottom)
             }
             proxy.scrollTo("latest-anchor", anchor: .bottom)
+            scrollDriver.seek(to: 1)
         }
     }
 
