@@ -614,7 +614,7 @@ struct SettingsView: View {
             ))
             .foregroundStyle(palette.secondary)
             HStack {
-                Text("Grok Desktop 0.1.14")
+                Text("Grok Desktop 0.1.15")
                 Spacer()
                 Text(model.client.grokVersion ?? "grok ?")
                     .foregroundStyle(palette.secondary)
@@ -787,7 +787,7 @@ struct SettingsView: View {
             HStack {
                 Text("App")
                 Spacer()
-                Text("0.1.14")
+                Text("0.1.15")
             }
             HStack {
                 Text("grok")

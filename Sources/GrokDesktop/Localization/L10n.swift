@@ -59,6 +59,8 @@ struct L10n {
     var skillsAndConnectors: String { t("Skills and Connectors", "技能与连接器") }
     var projects: String { t("Projects", "项目") }
     var history: String { t("History", "历史") }
+    var otherProject: String { t("Other", "其他") }
+    var openProject: String { t("Open project", "打开项目") }
     var addProject: String { t("Add project", "添加项目") }
     var noProjects: String { t("No projects yet", "还没有项目") }
     var collapseSidebar: String { t("Collapse sidebar", "收起侧栏") }

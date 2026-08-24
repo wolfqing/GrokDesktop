@@ -205,18 +205,8 @@ struct SidebarView: View {
                     }
 
                     disclosure(title: l10n.history, expanded: $model.historyExpanded) {
-                        ForEach(model.filteredSessions) { session in
-                            historyRow(session, selected: model.client.sessionID == session.id) {
-                                model.open(session)
-                            }
-                            .contextMenu {
-                                Button(l10n.t("Rename", "重命名")) {
-                                    model.renamingSession = session
-                                    model.renameDraft = session.title
-                                }
-                                Button(l10n.t("Export", "导出")) { model.export(session) }
-                                Button(l10n.t("Delete", "删除"), role: .destructive) { model.delete(session) }
-                            }
+                        ForEach(model.historyFolders) { folder in
+                            historyFolder(folder)
                         }
                     }
                 }
@@ -398,10 +388,64 @@ struct SidebarView: View {
         }
     }
 
+    private func historyFolder(_ folder: HistoryFolder) -> some View {
+        let expanded = model.isHistoryFolderExpanded(folder)
+        let current = model.isCurrentHistoryFolder(folder)
+        return VStack(alignment: .leading, spacing: 2) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.16)) {
+                    model.toggleHistoryFolder(folder)
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .semibold))
+                        .rotationEffect(.degrees(expanded ? 0 : -90))
+                        .frame(width: 10)
+                    Image(systemName: current ? "folder.fill" : "folder")
+                        .font(.system(size: 12, weight: .medium))
+                    Text(folder.name)
+                        .font(.system(size: 13, weight: .medium))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(current ? palette.text : palette.secondary)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 5)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(folder.path.isEmpty ? folder.name : folder.path)
+            .contextMenu {
+                Button(l10n.openProject) {
+                    model.openProject(NamedProject(id: folder.id, name: folder.name, path: folder.path))
+                }
+                .disabled(folder.path.isEmpty)
+            }
+            if expanded {
+                ForEach(folder.sessions) { session in
+                    historyRow(session, selected: model.client.sessionID == session.id, indented: true) {
+                        model.open(session)
+                    }
+                    .contextMenu {
+                        Button(l10n.t("Rename", "重命名")) {
+                            model.renamingSession = session
+                            model.renameDraft = session.title
+                        }
+                        Button(l10n.t("Export", "导出")) { model.export(session) }
+                        Button(l10n.t("Delete", "删除"), role: .destructive) { model.delete(session) }
+                    }
+                }
+            }
+        }
+    }
+
     private func historyRow(
         _ session: SessionRecord,
         selected: Bool,
         live: Bool = false,
+        indented: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
         let chinese = model.language.resolved() == .chinese
@@ -424,14 +468,15 @@ struct SidebarView: View {
                             .foregroundStyle(palette.secondary)
                             .lineLimit(1)
                     }
-                    Text(RelativeTime.meta(session, chinese: chinese))
+                    Text(RelativeTime.meta(session, chinese: chinese, includeFolder: !indented))
                         .font(.system(size: 11))
                         .foregroundStyle(palette.secondary)
                         .lineLimit(1)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 16)
+            .padding(.leading, indented ? 32 : 16)
+            .padding(.trailing, 16)
             .padding(.vertical, 7)
             .background(selected ? palette.selected : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         }

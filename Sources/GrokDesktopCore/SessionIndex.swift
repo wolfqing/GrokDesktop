@@ -173,6 +173,71 @@ public struct SessionIndex {
 
 }
 
+public struct HistoryFolder: Identifiable, Hashable, Sendable {
+    public var id: String
+    public var name: String
+    public var path: String
+    public var sessions: [SessionRecord]
+
+    public init(id: String, name: String, path: String, sessions: [SessionRecord]) {
+        self.id = id
+        self.name = name
+        self.path = path
+        self.sessions = sessions
+    }
+
+    public static func standardizedPath(_ path: String) -> String {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        return URL(fileURLWithPath: trimmed).standardizedFileURL.path
+    }
+
+    public static func group(
+        _ sessions: [SessionRecord],
+        namedProjects: [NamedProject] = [],
+        untitled: String = "Other"
+    ) -> [HistoryFolder] {
+        var names: [String: String] = [:]
+        for project in namedProjects {
+            let key = project.standardizedPath
+            guard !key.isEmpty, names[key] == nil else { continue }
+            names[key] = project.name
+        }
+
+        var buckets: [String: [SessionRecord]] = [:]
+        var order: [String] = []
+        for session in sessions {
+            let key = standardizedPath(session.cwd)
+            if buckets[key] == nil {
+                order.append(key)
+                buckets[key] = []
+            }
+            buckets[key, default: []].append(session)
+        }
+
+        let folders = order.map { key -> HistoryFolder in
+            let grouped = buckets[key] ?? []
+            let name: String
+            if key.isEmpty {
+                name = untitled
+            } else if let named = names[key], !named.isEmpty {
+                name = named
+            } else {
+                let last = URL(fileURLWithPath: key).lastPathComponent
+                name = last.isEmpty ? untitled : last
+            }
+            return HistoryFolder(id: key, name: name, path: key, sessions: grouped)
+        }
+
+        return folders.sorted { lhs, rhs in
+            let left = lhs.sessions.first?.updatedAt ?? .distantPast
+            let right = rhs.sessions.first?.updatedAt ?? .distantPast
+            if left != right { return left > right }
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+    }
+}
+
 public enum SessionSearch {
     public static func matches(
         _ session: SessionRecord,

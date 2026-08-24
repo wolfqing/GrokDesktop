@@ -586,18 +586,20 @@ expect(attached["u1"]?.first?.lastPathComponent == "image-1.png", "attach disk i
 
 expect(RelativeTime.format(now.addingTimeInterval(-10), now: now, chinese: true) == "刚刚", "relative just now")
 expect(RelativeTime.format(now.addingTimeInterval(-180), now: now, chinese: false) == "3m", "relative minutes")
-expect(RelativeTime.meta(
-    SessionRecord(
-        id: "s",
-        cwd: "/tmp/Demo",
-        title: "Demo",
-        updatedAt: now.addingTimeInterval(-120),
-        model: nil,
-        directory: URL(fileURLWithPath: "/tmp")
-    ),
-    now: now,
-    chinese: true
-).contains("Demo"), "session meta includes folder")
+let demoSession = SessionRecord(
+    id: "s",
+    cwd: "/tmp/Demo",
+    title: "Demo",
+    updatedAt: now.addingTimeInterval(-120),
+    model: nil,
+    directory: URL(fileURLWithPath: "/tmp")
+)
+expect(RelativeTime.meta(demoSession, now: now, chinese: true).contains("Demo"), "session meta includes folder")
+expect(
+    RelativeTime.meta(demoSession, now: now, chinese: true, includeFolder: false)
+        == RelativeTime.format(demoSession.updatedAt, now: now, chinese: true),
+    "grouped meta hides folder name"
+)
 
 expect(SlashBuiltins.handles("/model grok-4.6"), "model with args is builtin")
 expect(SlashBuiltins.handles("/effort high"), "effort is builtin")
@@ -920,6 +922,43 @@ let agentDef = AgentCatalog.parseAgent(
     scope: "bundled"
 )
 expect(agentDef?.slug == "explore", "agent slug")
+let mixedProjects = NamedProject.merged(
+    named: [NamedProject(id: "p1", name: "NewApp", path: "/Users/ada/Projects/NewApp")],
+    sessionPaths: [
+        (path: "/Users/ada/Projects/OldApp", name: "OldApp"),
+        (path: "/Users/ada/Projects/NewApp/", name: "NewApp")
+    ]
+)
+expect(mixedProjects.map(\.name) == ["NewApp", "OldApp"], "adding a named project keeps session projects")
+expect(mixedProjects.count == 2, "same path is not listed twice")
+let inferredOnly = NamedProject.merged(named: [], sessionPaths: [(path: "/tmp/a", name: "a")])
+expect(inferredOnly.map(\.name) == ["a"], "empty named list still shows session projects")
+
+func historySession(_ id: String, cwd: String, title: String, age: TimeInterval, at now: Date) -> SessionRecord {
+    SessionRecord(
+        id: id,
+        cwd: cwd,
+        title: title,
+        updatedAt: now.addingTimeInterval(-age),
+        model: nil,
+        directory: URL(fileURLWithPath: "/tmp/\(id)")
+    )
+}
+let grouped = HistoryFolder.group(
+    [
+        historySession("a1", cwd: "/tmp/Alpha", title: "Latest Alpha", age: 0, at: now),
+        historySession("a2", cwd: "/tmp/Alpha/", title: "Older Alpha", age: 10, at: now),
+        historySession("b1", cwd: "/tmp/Beta/", title: "Beta", age: 20, at: now),
+        historySession("u1", cwd: "", title: "Loose", age: 5, at: now)
+    ],
+    namedProjects: [NamedProject(id: "n1", name: "Alpha App", path: "/tmp/Alpha")],
+    untitled: "Other"
+)
+expect(grouped.map(\.name) == ["Alpha App", "Other", "Beta"], "history folders recency + named title")
+expect(grouped[0].sessions.map(\.id) == ["a1", "a2"], "same path including trailing slash is one folder")
+expect(grouped[1].sessions.map(\.id) == ["u1"], "empty cwd is Other")
+expect(HistoryFolder.standardizedPath("/tmp/Beta/") == HistoryFolder.standardizedPath("/tmp/Beta"), "folder path standardizes")
+expect(grouped[2].path == HistoryFolder.standardizedPath("/tmp/Beta/"), "folder id is standardized path")
 expect(agentDef?.permissionMode == "plan", "agent permission")
 expect(agentDef?.detail.contains("research") == true, "agent detail")
 

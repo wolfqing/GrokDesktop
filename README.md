@@ -20,7 +20,7 @@ Community project. Not an official xAI / SpaceXAI product.
 
 ## Install
 
-**Download:** [Grok-Desktop-0.1.14.zip](https://github.com/wolfqing/GrokDesktop/releases/download/v0.1.14/Grok-Desktop-0.1.14.zip) · [All releases](https://github.com/wolfqing/GrokDesktop/releases)
+**Download:** [Grok-Desktop-0.1.15.zip](https://github.com/wolfqing/GrokDesktop/releases/download/v0.1.15/Grok-Desktop-0.1.15.zip) · [All releases](https://github.com/wolfqing/GrokDesktop/releases)
 
 1. macOS 14+
 2. Unzip and move `Grok Desktop.app` to Applications
@@ -44,7 +44,7 @@ If it won't install, won't open, or you want a feature: [open an issue](https://
 
 - Sidebar switch: **Chat** | **Build** (`⌘1` / `⌘2`)
 - **Chat**: grok.com. History stays on the web, not mixed with Build sessions.
-- **Build left**: new session, search, Imagine, live agents, history from `~/.grok/sessions`. Opening a past chat shows right away; long sessions load in the background.
+- **Build left**: new session, search, Imagine, live agents, history grouped by project folder from `~/.grok/sessions` (Codex / Claude style). Opening a past chat shows right away; long sessions load in the background. Adding a named project keeps the folders already inferred from sessions.
 - **Imagine**: local image and short video through the grok agent (`/imagine`, `/imagine-video`). Recents come from session `images/` folders. This is not grok.com/imagine inside Chat.
 - **Build center**: conversation, Markdown, clickable files/links. Scroll away and a down arrow jumps back to the latest message. The latest prompt can be put back in the composer.
 - **Build inspector**: context, tasks, plan, diffs, live terminals

@@ -82,6 +82,7 @@ final class AppModel: ObservableObject {
     @Published var sidebarCollapsed = false
     @Published var projectsExpanded = true
     @Published var historyExpanded = true
+    @Published var historyFolderExpanded: [String: Bool] = [:]
     @Published var destination: MainDestination = .build
     @Published var lastBuildDestination: MainDestination = .build
     @Published var didOpenWebChat = false
@@ -594,9 +595,51 @@ final class AppModel: ObservableObject {
         return visible.filter { SessionSearch.matches($0, query: query, chinese: chinese) }
     }
 
+    var historyFolders: [HistoryFolder] {
+        HistoryFolder.group(filteredSessions, namedProjects: namedProjects, untitled: copy.otherProject)
+    }
+
+    func isHistoryFolderExpanded(_ folder: HistoryFolder) -> Bool {
+        if !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return true
+        }
+        if let override = historyFolderExpanded[folder.id] {
+            return override
+        }
+        if historyFolders.count <= 1 {
+            return true
+        }
+        if folder.id == historyFolders.first?.id {
+            return true
+        }
+        let current = client.workingDirectory.standardizedFileURL.path
+        if !folder.path.isEmpty, folder.path == current {
+            return true
+        }
+        if let sessionID = client.sessionID, folder.sessions.contains(where: { $0.id == sessionID }) {
+            return true
+        }
+        return false
+    }
+
+    func toggleHistoryFolder(_ folder: HistoryFolder) {
+        guard search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        historyFolderExpanded[folder.id] = !isHistoryFolderExpanded(folder)
+    }
+
+    func expandHistoryFolder(path: String) {
+        let key = HistoryFolder.standardizedPath(path)
+        guard !key.isEmpty else { return }
+        historyFolderExpanded[key] = true
+    }
+
+    func isCurrentHistoryFolder(_ folder: HistoryFolder) -> Bool {
+        !folder.path.isEmpty
+            && folder.path == client.workingDirectory.standardizedFileURL.path
+    }
+
     var visibleProjects: [NamedProject] {
-        if !namedProjects.isEmpty { return namedProjects }
-        return projectPaths.map { NamedProject(id: $0.path, name: $0.name, path: $0.path) }
+        NamedProject.merged(named: namedProjects, sessionPaths: projectPaths)
     }
 
     var projectPaths: [(path: String, name: String)] {
@@ -723,6 +766,7 @@ final class AppModel: ObservableObject {
 
     func startNewSession(cwd: URL) {
         destination = .build
+        expandHistoryFolder(path: cwd.path)
         rememberWorkingDirectory(cwd)
         Task {
             do {
@@ -768,6 +812,11 @@ final class AppModel: ObservableObject {
         let folder = newProjectFolder ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Projects/\(name)")
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let project = NamedProject(name: name, path: folder.path)
+        let key = project.standardizedPath
+        if namedProjects.isEmpty {
+            namedProjects = projectPaths.map { NamedProject(id: $0.path, name: $0.name, path: $0.path) }
+        }
+        namedProjects.removeAll { $0.standardizedPath == key }
         namedProjects.insert(project, at: 0)
         projectStore.save(namedProjects)
         showCreateProject = false
@@ -781,6 +830,7 @@ final class AppModel: ObservableObject {
         isPrivateChat = false
         firstRunReason = nil
         sidebarNotice = nil
+        expandHistoryFolder(path: record.cwd)
         if client.focusIfLoaded(record.id) {
             refreshWorkspace()
             Task { await client.refreshGit() }
@@ -2027,7 +2077,7 @@ final class AppModel: ObservableObject {
 
     func exportDiagnostics() {
         let text = DiagnosticExport.make(
-            version: "0.1.14",
+            version: "0.1.15",
             grokVersion: client.grokVersion,
             state: String(describing: client.state),
             lastError: client.lastError,

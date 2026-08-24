@@ -27,7 +27,15 @@ public enum RelativeTime {
         return formatter.string(from: date)
     }
 
-    public static func meta(_ session: SessionRecord, now: Date = Date(), chinese: Bool) -> String {
-        "\(format(session.updatedAt, now: now, chinese: chinese)) · \(session.cwdName)"
+    public static func meta(
+        _ session: SessionRecord,
+        now: Date = Date(),
+        chinese: Bool,
+        includeFolder: Bool = true
+    ) -> String {
+        let time = format(session.updatedAt, now: now, chinese: chinese)
+        guard includeFolder else { return time }
+        let folder = session.cwdName
+        return folder.isEmpty ? time : "\(time) · \(folder)"
     }
 }

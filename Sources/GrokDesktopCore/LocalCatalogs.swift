@@ -257,6 +257,29 @@ public struct NamedProject: Identifiable, Hashable, Codable, Sendable {
         self.name = name
         self.path = path
     }
+
+    public var standardizedPath: String {
+        URL(fileURLWithPath: path).standardizedFileURL.path
+    }
+
+    public static func merged(
+        named: [NamedProject],
+        sessionPaths: [(path: String, name: String)]
+    ) -> [NamedProject] {
+        var seen = Set<String>()
+        var result: [NamedProject] = []
+        for project in named {
+            let key = project.standardizedPath
+            guard !key.isEmpty, seen.insert(key).inserted else { continue }
+            result.append(project)
+        }
+        for entry in sessionPaths {
+            let key = URL(fileURLWithPath: entry.path).standardizedFileURL.path
+            guard !key.isEmpty, seen.insert(key).inserted else { continue }
+            result.append(NamedProject(id: entry.path, name: entry.name, path: entry.path))
+        }
+        return result
+    }
 }
 
 public struct ProjectStore: Sendable {
