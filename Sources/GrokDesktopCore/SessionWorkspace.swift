@@ -22,7 +22,9 @@ public final class SessionWorkspace: Identifiable {
     public var hydratedFromDisk = false
     public var allowEditsThisSession = false
     public var itemDates: [String: Date] = [:]
+    public var itemDurations: [String: TimeInterval] = [:]
     public var itemImages: [String: [URL]] = [:]
+    public var turnStartedAt: Date?
     public var todos: [AgentTodo] = []
     public var tasks: [AgentTask] = []
     public var recap = ""
@@ -50,11 +52,34 @@ public final class SessionWorkspace: Identifiable {
 
     public func markWorkStopped() {
         stopRequested = true
-        isTurnRunning = false
         promptQueue.removeAll()
         var next = snapshot()
         SessionFold.cancelActiveWork(onto: &next)
         adopt(next)
+        finishTurn()
+    }
+
+    public func beginTurn(at date: Date = Date()) {
+        turnStartedAt = date
+        isTurnRunning = true
+        stopRequested = false
+    }
+
+    public func finishTurn(at date: Date = Date()) {
+        isTurnRunning = false
+        for index in items.indices {
+            if case .assistant(let id, let text, false) = items[index] {
+                items[index] = .assistant(id: id, text: text, done: true)
+            }
+        }
+        TurnTiming.stamp(
+            onto: &itemDurations,
+            items: items,
+            dates: itemDates,
+            startedAt: turnStartedAt,
+            endedAt: date
+        )
+        turnStartedAt = nil
     }
 
     public var runningTools: Int {

@@ -164,11 +164,18 @@ public enum PromptTimestamp {
         return max((end ?? Date()).timeIntervalSince(start), 0)
     }
 
-    public static func formatElapsed(_ value: TimeInterval) -> String {
+    public static func formatElapsed(_ value: TimeInterval, chinese: Bool = false) -> String {
         let total = max(Int(value.rounded()), 0)
         let hours = total / 3600
         let minutes = (total % 3600) / 60
         let seconds = total % 60
+        if chinese {
+            if hours > 0 { return "\(hours)小时\(minutes)分" }
+            if minutes > 0 {
+                return seconds > 0 ? "\(minutes)分\(seconds)秒" : "\(minutes)分"
+            }
+            return "\(seconds)秒"
+        }
         if hours > 0 { return "\(hours)h \(minutes)m" }
         if minutes > 0 { return "\(minutes)m \(seconds)s" }
         return "\(seconds)s"

@@ -28,7 +28,8 @@ enum TranscriptCache {
             tasks: decodeTasks(object["tasks"]),
             recap: object["recap"] as? String ?? "",
             compacted: bool(object["compacted"]),
-            subagents: decodeSubagents(object["subagents"])
+            subagents: decodeSubagents(object["subagents"]),
+            itemDurations: decodeDurations(object["itemDurations"])
         )
     }
 
@@ -50,7 +51,8 @@ enum TranscriptCache {
             "tasks": transcript.tasks.map(encodeTask),
             "recap": transcript.recap,
             "compacted": transcript.compacted,
-            "subagents": transcript.subagents.map(encodeSubagent)
+            "subagents": transcript.subagents.map(encodeSubagent),
+            "itemDurations": transcript.itemDurations
         ]
         let folder = cacheRoot()
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -155,6 +157,17 @@ enum TranscriptCache {
             }
         }
         return dates
+    }
+
+    private static func decodeDurations(_ raw: Any?) -> [String: TimeInterval] {
+        var durations: [String: TimeInterval] = [:]
+        guard let map = raw as? [String: Any] else { return durations }
+        for (id, value) in map {
+            if let interval = double(value), interval >= 0.5 {
+                durations[id] = interval
+            }
+        }
+        return durations
     }
 
     private static func decodeImages(_ raw: Any?) -> [String: [URL]] {

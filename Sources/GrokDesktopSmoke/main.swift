@@ -343,6 +343,23 @@ expect(abs((tasks[0].elapsed ?? 0) - 18) < 0.01, "task elapsed")
 expect(PromptTimestamp.formatElapsed(36) == "36s", "elapsed seconds")
 expect(PromptTimestamp.formatElapsed(72) == "1m 12s", "elapsed minutes")
 expect(PromptTimestamp.formatElapsed(3723) == "1h 2m", "elapsed hours")
+expect(PromptTimestamp.formatElapsed(36, chinese: true) == "36秒", "elapsed seconds zh")
+expect(PromptTimestamp.formatElapsed(72, chinese: true) == "1分12秒", "elapsed minutes zh")
+
+let turnStart = Date(timeIntervalSince1970: 1_000)
+let turnEnd = Date(timeIntervalSince1970: 1_012)
+let turnItems: [ConversationItem] = [
+    .user(id: "u-turn", text: "go"),
+    .thought(id: "h-turn", text: "thinking"),
+    .assistant(id: "a-turn", text: "done", done: true)
+]
+let turnDates = ["u-turn": turnStart, "a-turn": turnEnd]
+expect(TurnTiming.isTurnAnswer("a-turn", in: turnItems), "assistant is turn answer")
+expect(abs((TurnTiming.seconds(forAssistant: "a-turn", items: turnItems, dates: turnDates, stored: [:]) ?? 0) - 12) < 0.01, "derived turn duration")
+var turnDurations: [String: TimeInterval] = [:]
+TurnTiming.stamp(onto: &turnDurations, items: turnItems, dates: turnDates, startedAt: turnStart, endedAt: turnEnd)
+expect(abs((turnDurations["a-turn"] ?? 0) - 12) < 0.01, "stamped turn duration")
+expect(TurnTiming.seconds(forAssistant: "h-turn", items: turnItems, dates: turnDates, stored: turnDurations) == nil, "thought has no duration")
 
 let imageURL = FileManager.default.temporaryDirectory.appendingPathComponent("grok-media-test.png")
 try? Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]).write(to: imageURL)

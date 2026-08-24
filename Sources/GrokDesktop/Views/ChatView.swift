@@ -815,6 +815,19 @@ struct ChatView: View {
         }
     }
 
+    private func turnDurationLabel(for id: String) -> String? {
+        if model.client.isTurnRunning, isLatestAssistant(id) { return nil }
+        guard let seconds = TurnTiming.seconds(
+            forAssistant: id,
+            items: model.client.items,
+            dates: model.client.itemDates,
+            stored: model.client.itemDurations
+        ) else { return nil }
+        let chinese = l10n.language == .chinese
+        let clock = PromptTimestamp.formatElapsed(seconds, chinese: chinese)
+        return l10n.t(clock, "用时 \(clock)")
+    }
+
     private func isLatestAssistant(_ id: String) -> Bool {
         model.client.items.last(where: {
             if case .assistant = $0 { return true }
@@ -936,6 +949,10 @@ struct ChatView: View {
                         .fill(palette.secondary)
                         .frame(width: 6, height: 6)
                         .opacity(0.7)
+                } else if let label = turnDurationLabel(for: id) {
+                    Text(label)
+                        .font(.system(size: 11))
+                        .foregroundStyle(palette.secondary)
                 }
             }
             .padding(.horizontal, model.compactChat ? 16 : 28)

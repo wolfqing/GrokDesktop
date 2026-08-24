@@ -29,6 +29,7 @@ public struct SessionSnapshot: Equatable, Sendable {
     public var recap: String = ""
     public var compacted: Bool = false
     public var subagents: [AgentSubagent] = []
+    public var itemDurations: [String: TimeInterval] = [:]
 
     public init(
         items: [ConversationItem] = [],
@@ -41,7 +42,8 @@ public struct SessionSnapshot: Equatable, Sendable {
         thoughtID: String? = nil,
         recap: String = "",
         compacted: Bool = false,
-        subagents: [AgentSubagent] = []
+        subagents: [AgentSubagent] = [],
+        itemDurations: [String: TimeInterval] = [:]
     ) {
         self.items = items
         self.planEntries = planEntries
@@ -54,6 +56,7 @@ public struct SessionSnapshot: Equatable, Sendable {
         self.recap = recap
         self.compacted = compacted
         self.subagents = subagents
+        self.itemDurations = itemDurations
     }
 
     public var lastUserPreview: String {
@@ -99,6 +102,14 @@ public enum SessionFold {
         case .sessionRecap:
             let summary = update.text.trimmingCharacters(in: .whitespacesAndNewlines)
             if !summary.isEmpty { snapshot.recap = summary }
+        case .turnCompleted:
+            TurnTiming.stamp(
+                onto: &snapshot.itemDurations,
+                items: snapshot.items,
+                dates: snapshot.itemDates,
+                startedAt: nil,
+                endedAt: update.timestamp ?? Date()
+            )
         case .autoCompactCompleted:
             snapshot.compacted = true
         case .subagentSpawned, .subagentFinished:
@@ -193,7 +204,8 @@ public extension SessionWorkspace {
             thoughtID: thoughtBufferID,
             recap: recap,
             compacted: compacted,
-            subagents: subagents
+            subagents: subagents,
+            itemDurations: itemDurations
         )
     }
 
@@ -209,6 +221,7 @@ public extension SessionWorkspace {
         recap = snapshot.recap
         compacted = snapshot.compacted
         subagents = snapshot.subagents
+        itemDurations = snapshot.itemDurations
     }
 
     func adopt(_ transcript: Transcript) {

@@ -41,6 +41,7 @@ public struct Transcript: Sendable {
     public var recap: String
     public var compacted: Bool
     public var subagents: [AgentSubagent]
+    public var itemDurations: [String: TimeInterval]
 
     public init(
         items: [ConversationItem] = [],
@@ -53,7 +54,8 @@ public struct Transcript: Sendable {
         tasks: [AgentTask] = [],
         recap: String = "",
         compacted: Bool = false,
-        subagents: [AgentSubagent] = []
+        subagents: [AgentSubagent] = [],
+        itemDurations: [String: TimeInterval] = [:]
     ) {
         self.items = items
         self.planEntries = planEntries
@@ -66,6 +68,7 @@ public struct Transcript: Sendable {
         self.recap = recap
         self.compacted = compacted
         self.subagents = subagents
+        self.itemDurations = itemDurations
     }
 
     public var snapshot: SessionSnapshot {
@@ -78,7 +81,8 @@ public struct Transcript: Sendable {
             tasks: tasks,
             recap: recap,
             compacted: compacted,
-            subagents: subagents
+            subagents: subagents,
+            itemDurations: itemDurations
         )
     }
 }
@@ -121,7 +125,8 @@ public enum TranscriptLoader {
             tasks: snapshot.tasks,
             recap: snapshot.recap,
             compacted: snapshot.compacted,
-            subagents: snapshot.subagents
+            subagents: snapshot.subagents,
+            itemDurations: snapshot.itemDurations
         )
         TranscriptCache.save(transcript, sessionDirectory: sessionDirectory, limit: limit)
         return transcript

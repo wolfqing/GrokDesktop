@@ -183,58 +183,74 @@ public enum SessionReplay {
         let kind = jsonString(header, key: "sessionUpdate")
             ?? jsonString(header, key: "session_update")
             ?? ""
+        let timestamp = PromptTimestamp.parse(jsonNumber(header, key: "timestamp"))
+        func pack(_ update: SessionUpdate) -> (SessionUpdate, String) {
+            var next = update
+            if next.timestamp == nil {
+                next.timestamp = timestamp
+            }
+            return (next, kind)
+        }
         switch kind {
         case "tool_call_update":
             let id = jsonString(header, key: "toolCallId") ?? jsonString(header, key: "tool_call_id")
             guard let id, !id.isEmpty else { return nil }
-            return (
+            return pack(
                 SessionUpdate(
                     kind: .toolCallUpdate,
                     title: jsonString(header, key: "title") ?? "",
                     toolCallId: id,
-                    status: SessionUpdate.normalizedStatus(jsonString(header, key: "status"))
-                ),
-                kind
+                    status: SessionUpdate.normalizedStatus(jsonString(header, key: "status")),
+                    timestamp: timestamp
+                )
             )
         case "tool_call":
             let id = jsonString(header, key: "toolCallId") ?? jsonString(header, key: "tool_call_id")
-            return (
+            return pack(
                 SessionUpdate(
                     kind: .toolCall,
                     title: jsonString(header, key: "title") ?? "Tool",
                     toolCallId: id,
-                    status: SessionUpdate.normalizedStatus(jsonString(header, key: "status")) ?? "running"
-                ),
-                kind
+                    status: SessionUpdate.normalizedStatus(jsonString(header, key: "status")) ?? "running",
+                    timestamp: timestamp
+                )
             )
         case "user_message_chunk":
             if jsonString(header, key: "type") == "image" {
                 let uri = jsonString(header, key: "uri").flatMap(Self.fileURL)
-                return (
+                return pack(
                     SessionUpdate(
                         kind: .userMessageChunk,
+                        timestamp: timestamp,
                         imageURLs: uri.map { [$0] } ?? []
-                    ),
-                    kind
+                    )
                 )
             }
-            return (
+            return pack(
                 SessionUpdate(
                     kind: .userMessageChunk,
-                    text: jsonString(header, key: "text") ?? ""
-                ),
-                kind
+                    text: jsonString(header, key: "text") ?? "",
+                    timestamp: timestamp
+                )
             )
         case "agent_message_chunk":
-            return (
-                SessionUpdate(kind: .agentMessageChunk, text: jsonString(header, key: "text") ?? ""),
-                kind
+            return pack(
+                SessionUpdate(
+                    kind: .agentMessageChunk,
+                    text: jsonString(header, key: "text") ?? "",
+                    timestamp: timestamp
+                )
             )
         case "agent_thought_chunk":
-            return (
-                SessionUpdate(kind: .agentThoughtChunk, text: jsonString(header, key: "text") ?? ""),
-                kind
+            return pack(
+                SessionUpdate(
+                    kind: .agentThoughtChunk,
+                    text: jsonString(header, key: "text") ?? "",
+                    timestamp: timestamp
+                )
             )
+        case "turn_completed":
+            return pack(SessionUpdate(kind: .turnCompleted, timestamp: timestamp))
         default:
             return nil
         }
@@ -244,6 +260,37 @@ public enum SessionReplay {
         if raw.hasPrefix("file://"), let url = URL(string: raw) { return url }
         if raw.hasPrefix("/") { return URL(fileURLWithPath: raw) }
         return URL(string: raw)
+    }
+
+    static func jsonNumber(_ text: String, key: String) -> Double? {
+        let needle = "\"\(key)\""
+        var searchFrom = text.startIndex
+        while let keyRange = text.range(of: needle, range: searchFrom..<text.endIndex) {
+            var index = keyRange.upperBound
+            while index < text.endIndex, text[index].isWhitespace {
+                index = text.index(after: index)
+            }
+            guard index < text.endIndex, text[index] == ":" else {
+                searchFrom = keyRange.upperBound
+                continue
+            }
+            index = text.index(after: index)
+            while index < text.endIndex, text[index].isWhitespace {
+                index = text.index(after: index)
+            }
+            let start = index
+            if index < text.endIndex, text[index] == "-" {
+                index = text.index(after: index)
+            }
+            while index < text.endIndex, text[index].isNumber || text[index] == "." {
+                index = text.index(after: index)
+            }
+            if start < index, let value = Double(String(text[start..<index])) {
+                return value
+            }
+            searchFrom = keyRange.upperBound
+        }
+        return nil
     }
 
     static func jsonString(_ text: String, key: String) -> String? {

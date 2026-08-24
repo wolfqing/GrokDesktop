@@ -37,6 +37,7 @@ public final class ACPClient: ObservableObject {
     @Published public private(set) var authPresence: AuthPresence = .signedOut
     @Published public private(set) var authChallenge: AuthChallenge?
     @Published public private(set) var itemDates: [String: Date] = [:]
+    @Published public private(set) var itemDurations: [String: TimeInterval] = [:]
     @Published public private(set) var itemImages: [String: [URL]] = [:]
     @Published public private(set) var todos: [AgentTodo] = []
     @Published public private(set) var tasks: [AgentTask] = []
@@ -278,6 +279,8 @@ public final class ACPClient: ObservableObject {
         workspace.mode = mode
         workspace.loadedOnAgent = true
         workspace.itemDates = [:]
+        workspace.itemDurations = [:]
+        workspace.turnStartedAt = nil
         workspace.itemImages = [:]
         workspace.todos = []
         workspace.tasks = []
@@ -430,9 +433,8 @@ public final class ACPClient: ObservableObject {
         if lastUser != trimmed {
             workspace.fold(SessionFold.userTurn(trimmed))
         }
-        workspace.stopRequested = false
+        workspace.beginTurn()
         isStopping = false
-        workspace.isTurnRunning = true
         workspace.assistantBufferID = nil
         workspace.thoughtBufferID = nil
         workspace.lastError = nil
@@ -463,7 +465,7 @@ public final class ACPClient: ObservableObject {
                 lastError = error.localizedDescription
             }
         }
-        workspace.isTurnRunning = false
+        workspace.finishTurn()
         workspace.refreshArtifacts()
         syncFromCurrent()
         if workspace.stopRequested {
@@ -670,6 +672,7 @@ public final class ACPClient: ObservableObject {
         sessionAllowTitles = []
         sessionDirectory = nil
         itemDates = [:]
+        itemDurations = [:]
         itemImages = [:]
         todos = []
         tasks = []
@@ -995,7 +998,7 @@ public final class ACPClient: ObservableObject {
             workspace.markWorkStopped()
         }
         if update.kind == .turnCompleted {
-            workspace.isTurnRunning = false
+            workspace.finishTurn(at: update.timestamp ?? Date())
         }
         if update.kind == .plan {
             workspace.refreshArtifacts()
@@ -1066,6 +1069,7 @@ public final class ACPClient: ObservableObject {
             mode = workspace.mode
             allowEditsThisSession = workspace.allowEditsThisSession
             itemDates = workspace.itemDates
+            itemDurations = workspace.itemDurations
             itemImages = workspace.itemImages
             todos = workspace.todos
             tasks = workspace.tasks
