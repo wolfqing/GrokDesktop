@@ -984,6 +984,14 @@ let missingPreview = FilePreview.load(previewDir.appendingPathComponent("gone.md
 expect(!missingPreview.exists, "missing md")
 expect(missingPreview.kind == .markdown, "missing keeps md kind")
 
+expect(!SelectionCopyPolicy.shouldCopyOnMouseUp(dragDistance: 0, clickCount: 1, selected: "hi"), "click does not copy")
+expect(SelectionCopyPolicy.shouldCopyOnMouseUp(dragDistance: 5, clickCount: 1, selected: "hi"), "drag copies")
+expect(SelectionCopyPolicy.shouldCopyOnMouseUp(dragDistance: 0, clickCount: 2, selected: "word"), "double-click copies")
+expect(!SelectionCopyPolicy.shouldCopyOnMouseUp(dragDistance: 20, clickCount: 1, selected: "   \n"), "whitespace does not copy")
+expect(!SelectionCopyPolicy.shouldCopyOnMouseUp(dragDistance: 8, clickCount: 1, selected: ""), "empty does not copy")
+expect(SelectionCopyPolicy.substring("hello", location: 1, length: 3) == "ell", "selection substring")
+expect(SelectionCopyPolicy.substring("hello", location: 4, length: 3) == nil, "selection substring overflow")
+
 expect(!ChatLinkDetector.likelyContainsLinks("plain hello"), "plain text is not linky")
 expect(ChatLinkDetector.likelyContainsLinks("see https://x.ai/build"), "http is linky")
 expect(ChatLinkDetector.likelyContainsLinks("open Sources/App.swift"), "relative file is linky")

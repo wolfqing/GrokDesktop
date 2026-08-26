@@ -125,6 +125,7 @@ final class AppModel: ObservableObject {
     @Published var promptHistory: [String] = UserDefaults.standard.stringArray(forKey: "promptHistory") ?? []
     private var escapeArmedAt: Date?
     private var loginPollTask: Task<Void, Never>?
+    private var toastToken = UUID()
     @Published var sidebarNotice: String?
     @Published var needsFolderPick = false
     @Published var personas: [String] = []
@@ -563,11 +564,19 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func flash(_ text: String) {
+    func flash(_ text: String, duration: TimeInterval = 2.6) {
         toast = text
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.6) { [weak self] in
-            if self?.toast == text { self?.toast = nil }
+        let token = UUID()
+        toastToken = token
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
+            guard let self, self.toastToken == token else { return }
+            self.toast = nil
         }
+    }
+
+    func copySelection(_ text: String) {
+        copyText(text)
+        flash(copy.copied, duration: 1.2)
     }
 
     private static func loadPersonas() -> [String] {
@@ -2077,7 +2086,7 @@ final class AppModel: ObservableObject {
 
     func exportDiagnostics() {
         let text = DiagnosticExport.make(
-            version: "0.1.15",
+            version: "0.1.16",
             grokVersion: client.grokVersion,
             state: String(describing: client.state),
             lastError: client.lastError,

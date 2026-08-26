@@ -143,6 +143,8 @@ struct RootView: View {
                     .overlay(Capsule().stroke(palette.hairline))
                     .padding(.bottom, 28)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .allowsHitTesting(false)
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
                     .zIndex(8)
             }
         }
@@ -164,6 +166,7 @@ struct RootView: View {
         .environment(\.l10n, model.copy)
         .foregroundStyle(palette.text)
         .background(palette.canvas)
+        .animation(.easeInOut(duration: 0.16), value: model.toast)
         .animation(.easeInOut(duration: 0.18), value: model.showInAppLogin)
         .animation(.easeInOut(duration: 0.18), value: model.showSettings)
         .animation(.easeInOut(duration: 0.18), value: model.showAbout)

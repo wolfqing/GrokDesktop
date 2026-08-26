@@ -18,7 +18,7 @@ struct LinkedText: View {
     var live = false
 
     var body: some View {
-        if live || !Self.shouldUseNativeView(text, baseDirectory: model.client.workingDirectory) {
+        if live {
             plainText
         } else {
             LinkedTextNSView(
@@ -51,11 +51,6 @@ struct LinkedText: View {
         .foregroundStyle(color ?? palette.text)
         .textSelection(.enabled)
         .frame(maxWidth: fillsWidth ? .infinity : nil, alignment: .leading)
-    }
-
-    private static func shouldUseNativeView(_ text: String, baseDirectory: URL) -> Bool {
-        guard ChatLinkDetector.likelyContainsLinks(text) else { return false }
-        return !ChatLinkDetector.detect(in: text, baseDirectory: baseDirectory).isEmpty
     }
 
     private static func swiftUIMarkdown(_ text: String) -> AttributedString {
@@ -278,6 +273,7 @@ private struct LinkedTextNSView: NSViewRepresentable {
 final class ChatTextView: NSTextView {
     var chinese = false
     var appliedFingerprint = ""
+    private var mouseDownPoint: NSPoint?
 
     override var intrinsicContentSize: NSSize {
         guard let container = textContainer, let manager = layoutManager else {
@@ -286,6 +282,23 @@ final class ChatTextView: NSTextView {
         manager.ensureLayout(for: container)
         let used = manager.usedRect(for: container)
         return NSSize(width: NSView.noIntrinsicMetric, height: ceil(used.height))
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        mouseDownPoint = event.locationInWindow
+        super.mouseDown(with: event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        super.mouseUp(with: event)
+        let selected = SelectionCopyAction.selectedString(in: self) ?? ""
+        let start = mouseDownPoint ?? event.locationInWindow
+        let distance = hypot(event.locationInWindow.x - start.x, event.locationInWindow.y - start.y)
+        mouseDownPoint = nil
+        let count = event.clickCount
+        Task { @MainActor in
+            SelectionCopyAction.emit(selected, dragDistance: distance, clickCount: count)
+        }
     }
 
     override func scrollWheel(with event: NSEvent) {

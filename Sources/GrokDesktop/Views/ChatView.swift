@@ -315,6 +315,7 @@ struct ChatView: View {
                                 driver: scrollDriver
                             )
                         )
+                        .background(CopyOnSelectMonitor())
                         .simultaneousGesture(
                             TapGesture().onEnded {
                                 if model.mentionQuery != nil || model.showPalette {
@@ -413,6 +414,11 @@ struct ChatView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(palette.canvas)
         .animation(.easeOut(duration: 0.16), value: stickToLatest)
+        .onReceive(NotificationCenter.default.publisher(for: .grokCopyOnSelect)) { note in
+            if let text = note.object as? String {
+                model.copySelection(text)
+            }
+        }
     }
 
     private func compactContext(_ value: Int) -> String {
