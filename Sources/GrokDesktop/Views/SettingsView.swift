@@ -614,7 +614,7 @@ struct SettingsView: View {
             ))
             .foregroundStyle(palette.secondary)
             HStack {
-                Text("Grok Desktop 0.1.16")
+                Text("Grok Desktop 0.1.17")
                 Spacer()
                 Text(model.client.grokVersion ?? "grok ?")
                     .foregroundStyle(palette.secondary)
@@ -662,7 +662,10 @@ struct SettingsView: View {
                 Button(l10n.t("Add MCP", "添加 MCP")) { model.showAddMCP = true }
                     .buttonStyle(GrokPrimaryButtonStyle())
             }
-            Text(l10n.t("Adds and removes servers with `grok mcp`, writing ~/.grok/config.toml.", "通过 `grok mcp` 增删，写入 ~/.grok/config.toml。"))
+            Text(l10n.t(
+                "Grok-native servers can be added here. Inherited Claude/plugin connectors are listed but edited at their source.",
+                "这里可以增删 grok 自己的 MCP。从 Claude / 插件继承的连接器只列出，要在原处改。"
+            ))
                 .font(.system(size: 12))
                 .foregroundStyle(palette.secondary)
             if model.mcpServers.isEmpty {
@@ -680,23 +683,25 @@ struct SettingsView: View {
                                 .lineLimit(2)
                         }
                         Spacer()
-                        Toggle("", isOn: Binding(
-                            get: { server.enabled },
-                            set: { _ in model.toggleMCPServer(server) }
-                        ))
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        Button(role: .destructive) {
-                            model.removeMCPServer(server)
-                        } label: {
-                            Image(systemName: "trash")
+                        if server.managed {
+                            Toggle("", isOn: Binding(
+                                get: { server.enabled },
+                                set: { _ in model.toggleMCPServer(server) }
+                            ))
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            Button(role: .destructive) {
+                                model.removeMCPServer(server)
+                            } label: {
+                                Image(systemName: "trash")
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
                     .padding(.vertical, 6)
                 }
             }
-            labeledList("Skills", model.skills.prefix(8).map(\.title))
+            labeledList("Skills", ["\(model.skills.count)"])
             labeledList("Plugins", model.extensions.plugins.isEmpty ? [l10n.t("None installed", "未安装")] : model.extensions.plugins)
             labeledList("Hooks", model.extensions.hooks.isEmpty ? [l10n.t("None", "无")] : model.extensions.hooks)
             HStack {
@@ -718,7 +723,7 @@ struct SettingsView: View {
         }
         .padding(.top, 8)
         .onAppear {
-            model.mcpServers = model.mcpCatalog.load(locator: model.locator, cwd: model.client.workingDirectory)
+            model.refreshCatalogs()
         }
     }
 
@@ -787,7 +792,7 @@ struct SettingsView: View {
             HStack {
                 Text("App")
                 Spacer()
-                Text("0.1.16")
+                Text("0.1.17")
             }
             HStack {
                 Text("grok")

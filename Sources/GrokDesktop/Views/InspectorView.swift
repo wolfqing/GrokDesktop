@@ -31,7 +31,7 @@ struct InspectorView: View {
                         if let story = liveStory {
                             turnSection(story)
                         }
-                        if model.inspectorPaneVisible(.context) {
+                        if showsContext, model.inspectorPaneVisible(.context) {
                             contextSection
                         }
                         if showsWork, model.inspectorPaneVisible(.work) {
@@ -42,12 +42,6 @@ struct InspectorView: View {
                         }
                         if showsChanges, model.inspectorPaneVisible(.changes) {
                             changesSection
-                        }
-                        if !model.officialWorkflows.isEmpty, model.inspectorPaneVisible(.workflows) {
-                            workflowsSection
-                        }
-                        if !model.personas.isEmpty, model.inspectorPaneVisible(.personas) {
-                            personasSection
                         }
                     }
                     .padding(14)
@@ -134,12 +128,10 @@ struct InspectorView: View {
 
     private var hasVisiblePanes: Bool {
         liveStory != nil
-            || model.inspectorPaneVisible(.context)
+            || (showsContext && model.inspectorPaneVisible(.context))
             || (showsWork && model.inspectorPaneVisible(.work))
             || (showsTerminals && model.inspectorPaneVisible(.terminals))
             || (showsChanges && model.inspectorPaneVisible(.changes))
-            || (!model.officialWorkflows.isEmpty && model.inspectorPaneVisible(.workflows))
-            || (!model.personas.isEmpty && model.inspectorPaneVisible(.personas))
     }
 
     private var liveStory: TurnStory? {
@@ -155,6 +147,12 @@ struct InspectorView: View {
 
     private var showsTerminals: Bool {
         !model.client.terminals.isEmpty
+    }
+
+    private var showsContext: Bool {
+        model.displayedContextUsed > 0
+            || !model.client.items.isEmpty
+            || showsConnection
     }
 
     private func turnSection(_ story: TurnStory) -> some View {
@@ -406,116 +404,92 @@ struct InspectorView: View {
                     .buttonStyle(GrokSecondaryButtonStyle())
                 }
             }
-            let liveTasks = model.client.tasks.filter(\.isRunning)
-            let finishedTasks = model.client.tasks.filter { !$0.isRunning }
-            if !liveTasks.isEmpty {
-                Text(l10n.t("Live tasks", "进行中的任务"))
+            if !liveWorkItems.isEmpty {
+                Text(l10n.t("Now", "进行中"))
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(palette.secondary)
-                    .padding(.top, 4)
-                ForEach(liveTasks) { task in
-                    taskRow(task)
-                }
-            }
-            if !model.client.backgroundLiveTasks.isEmpty {
-                Text(l10n.t("Other sessions", "其他会话"))
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(palette.secondary)
-                    .padding(.top, 4)
-                ForEach(model.client.backgroundLiveTasks, id: \.task.id) { row in
-                    Button {
-                        _ = model.client.focusIfLoaded(row.sessionID)
-                    } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(row.task.title)
-                                .font(.system(size: 12))
-                                .lineLimit(2)
-                            HStack(spacing: 6) {
-                                Text(row.title)
-                                ElapsedDurationText(
-                                    start: row.task.startedAt,
-                                    end: row.task.endedAt,
-                                    running: row.task.isRunning,
-                                    worked: !row.task.isRunning
-                                )
-                            }
-                            .font(.system(size: 10))
-                            .foregroundStyle(palette.secondary)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            if !model.client.subagents.isEmpty {
-                Text(l10n.subagents)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(palette.secondary)
-                    .padding(.top, 4)
-                ForEach(model.client.subagents) { agent in
-                    HStack(alignment: .top, spacing: 6) {
-                        RunningStatusIcon(
-                            active: agent.isRunning,
-                            idleSystemImage: agent.status == "cancelled" ? "xmark.circle" : "checkmark.circle",
-                            color: agent.isRunning ? Color.orange : palette.secondary,
-                            size: 12
-                        )
-                        .padding(.top, 2)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(agent.detail.isEmpty ? agent.type : agent.detail)
-                                .font(.system(size: 12))
-                                .lineLimit(2)
-                            HStack(spacing: 6) {
-                                Text(agent.isRunning ? l10n.running : l10n.completed)
-                                ElapsedDurationText(
-                                    start: agent.startedAt,
-                                    end: nil,
-                                    duration: agent.elapsed,
-                                    running: agent.isRunning,
-                                    worked: !agent.isRunning
-                                )
-                            }
-                            .font(.system(size: 10))
-                            .foregroundStyle(palette.secondary)
-                        }
-                    }
-                }
-            }
-            if !finishedTasks.isEmpty {
-                Text(l10n.backgroundTasks)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(palette.secondary)
-                    .padding(.top, 4)
-                ForEach(Array(finishedTasks.suffix(8))) { task in
-                    taskRow(task)
+                    .padding(.top, checklist.isEmpty ? 0 : 4)
+                ForEach(liveWorkItems) { item in
+                    liveWorkRow(item)
                 }
             }
         }
     }
 
-    private func taskRow(_ task: AgentTask) -> some View {
-        HStack(alignment: .top, spacing: 6) {
-            RunningStatusIcon(
-                active: task.isRunning,
-                idleSystemImage: task.status == "cancelled" ? "xmark.circle" : "checkmark.circle",
-                color: task.isRunning ? Color.orange : palette.secondary,
-                size: 12
-            )
-            .padding(.top, 2)
+    private struct LiveWorkItem: Identifiable {
+        var id: String
+        var title: String
+        var detail: String
+        var start: Date?
+        var end: Date? = nil
+        var duration: TimeInterval? = nil
+        var sessionID: String? = nil
+        var taskID: String? = nil
+    }
+
+    private var liveWorkItems: [LiveWorkItem] {
+        let checklistTitles = Set(checklist.map { $0.content.lowercased() })
+        var items: [LiveWorkItem] = []
+        var seen = Set<String>()
+        func add(_ item: LiveWorkItem) {
+            let key = item.title.lowercased()
+            guard seen.insert(key).inserted else { return }
+            items.append(item)
+        }
+        for task in model.client.tasks where task.isRunning {
+            if checklistTitles.contains(task.title.lowercased()) { continue }
+            add(LiveWorkItem(
+                id: "task-\(task.id)",
+                title: task.title,
+                detail: l10n.running,
+                start: task.startedAt,
+                end: task.endedAt,
+                taskID: task.id
+            ))
+        }
+        for agent in model.client.subagents where agent.isRunning {
+            add(LiveWorkItem(
+                id: "sub-\(agent.id)",
+                title: agent.detail.isEmpty ? agent.type : agent.detail,
+                detail: l10n.running,
+                start: agent.startedAt,
+                duration: agent.elapsed
+            ))
+        }
+        for row in model.client.backgroundLiveTasks {
+            add(LiveWorkItem(
+                id: "bg-\(row.sessionID)-\(row.task.id)",
+                title: row.task.title,
+                detail: row.title,
+                start: row.task.startedAt,
+                end: row.task.endedAt,
+                sessionID: row.sessionID
+            ))
+        }
+        return items
+    }
+
+    @ViewBuilder
+    private func liveWorkRow(_ item: LiveWorkItem) -> some View {
+        let row = HStack(alignment: .top, spacing: 6) {
+            RunningStatusIcon(active: true, idleSystemImage: "circle", color: .orange, size: 12)
+                .padding(.top, 2)
             VStack(alignment: .leading, spacing: 2) {
-                Text(task.title)
+                Text(item.title)
                     .font(.system(size: 12))
                     .lineLimit(2)
                 HStack(spacing: 6) {
-                    Text(task.isRunning ? l10n.running : (task.status == "cancelled" ? l10n.t("Cancelled", "已取消") : l10n.completed))
+                    Text(item.detail)
                     ElapsedDurationText(
-                        start: task.startedAt,
-                        end: task.endedAt,
-                        running: task.isRunning,
-                        worked: !task.isRunning
+                        start: item.start,
+                        end: item.end,
+                        duration: item.duration,
+                        running: true,
+                        worked: false
                     )
-                    if task.isRunning {
+                    if let taskID = item.taskID {
                         Button(l10n.stop) {
-                            model.client.killTask(task.id)
+                            model.client.killTask(taskID)
                         }
                         .buttonStyle(.plain)
                         .foregroundStyle(Color.orange)
@@ -525,13 +499,21 @@ struct InspectorView: View {
                 .foregroundStyle(palette.secondary)
             }
         }
+        if let sessionID = item.sessionID {
+            Button {
+                _ = model.client.focusIfLoaded(sessionID)
+            } label: {
+                row
+            }
+            .buttonStyle(.plain)
+        } else {
+            row
+        }
     }
 
     private var showsWork: Bool {
         !checklist.isEmpty
-            || !model.client.tasks.isEmpty
-            || !model.client.subagents.isEmpty
-            || !model.client.backgroundLiveTasks.isEmpty
+            || !liveWorkItems.isEmpty
             || model.client.mode == .plan
     }
 
@@ -642,48 +624,6 @@ struct InspectorView: View {
                     .buttonStyle(.plain)
                     .help(hunk.path)
                     .contextMenu { ChatLinkContextButtons(url: url) }
-                }
-            }
-        }
-    }
-
-    private var workflowsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            paneHeader(.workflows, title: l10n.t("Workflows", "工作流")) { EmptyView() }
-            if model.officialWorkflows.isEmpty {
-                Button(l10n.t("Open workflows", "打开工作流")) {
-                    model.destination = .automations
-                }
-                .buttonStyle(GrokSecondaryButtonStyle())
-            } else {
-                ForEach(model.officialWorkflows.prefix(8)) { item in
-                    Button {
-                        model.runWorkflow(item)
-                    } label: {
-                        Text(item.name).font(.system(size: 12))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-    }
-
-    private var personasSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            paneHeader(.personas, title: l10n.t("Agents / personas", "Agent / 人设")) { EmptyView() }
-            if model.personas.isEmpty {
-                Text(l10n.t("None on disk.", "磁盘上没有人设。"))
-                    .font(.system(size: 12))
-                    .foregroundStyle(palette.secondary)
-            } else {
-                ForEach(model.personas.prefix(8), id: \.self) { name in
-                    Button {
-                        model.agentsTab = 1
-                        model.showAgents = true
-                    } label: {
-                        Text(name).font(.system(size: 12))
-                    }
-                    .buttonStyle(.plain)
                 }
             }
         }

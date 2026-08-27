@@ -142,7 +142,7 @@ final class AppModel: ObservableObject {
     @Published var showContextSheet = false
     @Published var contextBreakdown = ContextBreakdown()
     @Published var workflowRuns: [WorkflowRun] = []
-    @Published var automationsTab = 0
+    @Published var automationsTab = 1
     @Published var agentDefinitions: [AgentDefinition] = []
     @Published var personaDefinitions: [PersonaDefinition] = []
     @Published var newPersonaName = ""
@@ -512,16 +512,32 @@ final class AppModel: ObservableObject {
     func refreshAll() {
         refreshSessions()
         account = AccountProfile.load()
-        skills = skillCatalog.load()
         automations = automationStore.load()
         namedProjects = projectStore.load()
         grokConfig = configStore.load()
         showThinkingBlocks = grokConfig.showThinking
-        extensions = ExtensionInventory.load(mcpNames: grokConfig.mcpNames)
         officialWorkflows = workflowCatalog.load(cwd: client.workingDirectory)
-        mcpServers = mcpCatalog.load(locator: locator, cwd: client.workingDirectory)
-        workflowRuns = workflowRunStore.load()
+        refreshWorkflowRuns()
+        refreshCatalogs()
         refreshAgentCatalog()
+    }
+
+    func refreshCatalogs() {
+        if DemoStudio.isEnabled { return }
+        let inspect = GrokInspect.load(locator: locator, cwd: client.workingDirectory)
+        if let skills = inspect?.skills, !skills.isEmpty {
+            self.skills = skills
+        } else {
+            skills = skillCatalog.load(cwd: client.workingDirectory)
+        }
+        let listed = mcpCatalog.load(locator: locator, cwd: client.workingDirectory)
+        if let mcp = inspect?.mcp, !mcp.isEmpty {
+            mcpServers = MCPCatalog.merge(inspect: mcp, listed: listed)
+        } else {
+            mcpServers = listed
+        }
+        grokConfig = configStore.load()
+        extensions = ExtensionInventory.load(mcpNames: grokConfig.mcpNames)
     }
 
     func refreshAgentCatalog() {
@@ -674,7 +690,32 @@ final class AppModel: ObservableObject {
         let query = skillsQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return skills }
         return skills.filter {
-            $0.title.localizedCaseInsensitiveContains(query) || $0.detail.localizedCaseInsensitiveContains(query)
+            $0.title.localizedCaseInsensitiveContains(query)
+                || $0.detail.localizedCaseInsensitiveContains(query)
+                || $0.slug.localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    var skillGroups: [(id: String, title: String, items: [SkillRecord])] {
+        let chinese = language.resolved() == .chinese
+        let order: [(String, String)] = [
+            ("project", chinese ? "项目" : "Project"),
+            ("user", chinese ? "个人" : "Personal"),
+            ("bundled", chinese ? "内置" : "Bundled"),
+            ("plugin", chinese ? "插件" : "Plugins")
+        ]
+        return order.compactMap { key, title in
+            let items = filteredSkills.filter { $0.sourceKind == key }
+            guard !items.isEmpty else { return nil }
+            return (key, title, items)
+        }
+    }
+
+    var filteredMCPServers: [MCPServerRecord] {
+        let query = skillsQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return mcpServers }
+        return mcpServers.filter {
+            $0.name.localizedCaseInsensitiveContains(query) || $0.detail.localizedCaseInsensitiveContains(query)
         }
     }
 
@@ -1040,6 +1081,7 @@ final class AppModel: ObservableObject {
                     refreshSessions()
                 }
                 refreshWorkspace()
+                refreshWorkflowRuns()
             } catch {
                 present(error)
             }
@@ -1142,7 +1184,8 @@ final class AppModel: ObservableObject {
 
     func runSkill(_ skill: SkillRecord) {
         destination = .build
-        insertSlashPrompt("/\(skill.slug)")
+        draft = "/\(skill.slug)"
+        sendDraft()
     }
 
     func insertSlashPrompt(_ command: String) {
@@ -1212,6 +1255,26 @@ final class AppModel: ObservableObject {
         let line = extra.isEmpty ? "/workflow \(name)" : "/workflow \(name) \(extra)"
         draft = line
         sendDraft()
+        refreshWorkflowRuns()
+    }
+
+    func refreshWorkflowRuns() {
+        if DemoStudio.isEnabled { return }
+        let overlay = workflowRunStore.load()
+        let disk = WorkflowRunStore.scan(
+            sessionsRoot: sessionIndex.sessionsRoot,
+            currentSession: client.sessionDirectory
+        )
+        let liveTitles = client.tasks.filter(\.isRunning).map(\.title)
+            + client.subagents.filter(\.isRunning).map { $0.detail.isEmpty ? $0.type : $0.detail }
+        let reconciled = WorkflowRunStore.reconcile(
+            overlay: overlay,
+            disk: disk,
+            liveTitles: liveTitles,
+            turnRunning: client.isTurnRunning
+        )
+        workflowRuns = reconciled
+        workflowRunStore.save(reconciled)
     }
 
     func controlWorkflow(name: String, verb: String) {
@@ -1227,6 +1290,7 @@ final class AppModel: ObservableObject {
         destination = .build
         draft = "/workflow \(verb) \(name)"
         sendDraft()
+        refreshWorkflowRuns()
     }
 
     func uniqueWorkflowName(_ name: String) -> String {
@@ -1301,8 +1365,9 @@ final class AppModel: ObservableObject {
             showAddWorkflow = false
             newWorkflowName = ""
             newWorkflowDetail = ""
+            automationsTab = 1
+            destination = .automations
             flash(copy.t("Saved \(record.name).rhai", "已保存 \(record.name).rhai"))
-            runWorkflow(record)
         } catch {
             flash(error.localizedDescription)
         }
@@ -1327,12 +1392,12 @@ final class AppModel: ObservableObject {
                 args: args,
                 locator: locator
             )
-            mcpServers = mcpCatalog.load(locator: locator, cwd: client.workingDirectory)
             grokConfig = configStore.load()
             showAddMCP = false
             mcpName = ""
             mcpCommand = ""
             mcpArgs = ""
+            refreshCatalogs()
             flash(copy.t("Added MCP server", "已添加 MCP"))
         } catch {
             flash(error.localizedDescription)
@@ -1340,18 +1405,26 @@ final class AppModel: ObservableObject {
     }
 
     func removeMCPServer(_ record: MCPServerRecord) {
+        guard record.managed else {
+            flash(copy.t("This connector is inherited. Edit it in the plugin or Claude MCP config.", "这个连接器是继承来的。请在插件或 Claude MCP 配置里改。"))
+            return
+        }
         do {
             try mcpCatalog.remove(name: record.name, locator: locator)
-            mcpServers = mcpCatalog.load(locator: locator, cwd: client.workingDirectory)
+            refreshCatalogs()
         } catch {
             flash(error.localizedDescription)
         }
     }
 
     func toggleMCPServer(_ record: MCPServerRecord) {
+        guard record.managed else {
+            flash(copy.t("This connector is inherited. Edit it in the plugin or Claude MCP config.", "这个连接器是继承来的。请在插件或 Claude MCP 配置里改。"))
+            return
+        }
         do {
             try mcpCatalog.setEnabled(record.name, enabled: !record.enabled, locator: locator)
-            mcpServers = mcpCatalog.load(locator: locator, cwd: client.workingDirectory)
+            refreshCatalogs()
         } catch {
             flash(error.localizedDescription)
         }
@@ -2086,7 +2159,7 @@ final class AppModel: ObservableObject {
 
     func exportDiagnostics() {
         let text = DiagnosticExport.make(
-            version: "0.1.16",
+            version: "0.1.17",
             grokVersion: client.grokVersion,
             state: String(describing: client.state),
             lastError: client.lastError,

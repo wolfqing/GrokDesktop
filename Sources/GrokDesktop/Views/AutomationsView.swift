@@ -19,8 +19,11 @@ struct AutomationsView: View {
                         "运行是正在进行的工作流。已保存脚本在 ~/.grok/workflows 和项目 .grok/workflows。"
                     )
                 ) {
-                    Button(l10n.t("New workflow", "新建工作流")) { model.showAddWorkflow = true }
-                        .buttonStyle(GrokPrimaryButtonStyle())
+                    Button(l10n.t("New workflow", "新建工作流")) {
+                        model.automationsTab = 1
+                        model.showAddWorkflow = true
+                    }
+                    .buttonStyle(GrokPrimaryButtonStyle())
                 }
 
                 Picker("", selection: $model.automationsTab) {
@@ -33,8 +36,19 @@ struct AutomationsView: View {
                 if model.automationsTab == 0 {
                     runsSection
                 } else if model.officialWorkflows.isEmpty {
-                    Text(l10n.t("No saved workflows yet.", "还没有已保存的工作流。"))
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(l10n.t("No saved workflows yet.", "还没有已保存的工作流。"))
+                            .foregroundStyle(palette.secondary)
+                        Text(l10n.t(
+                            "Put a .rhai script in ~/.grok/workflows or the project .grok/workflows folder, or create one here.",
+                            "把 .rhai 脚本放到 ~/.grok/workflows 或项目 .grok/workflows，也可以在这里新建。"
+                        ))
+                        .font(.system(size: 13))
                         .foregroundStyle(palette.secondary)
+                        Button(l10n.t("New workflow", "新建工作流")) { model.showAddWorkflow = true }
+                            .buttonStyle(GrokPrimaryButtonStyle())
+                    }
+                    .padding(.top, 8)
                 } else {
                     LazyVGrid(columns: columns, spacing: 16) {
                         ForEach(model.officialWorkflows) { item in
@@ -60,15 +74,21 @@ struct AutomationsView: View {
         .background(palette.canvas)
         .onAppear {
             model.officialWorkflows = model.workflowCatalog.load(cwd: model.client.workingDirectory)
-            model.workflowRuns = model.workflowRunStore.load()
+            model.refreshWorkflowRuns()
         }
     }
 
     private var runsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             if model.workflowRuns.isEmpty {
-                Text(l10n.t("No workflow runs yet. Launch one from Saved.", "还没有运行。到「已保存」里启动一个。"))
-                    .foregroundStyle(palette.secondary)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(l10n.t("No workflow runs yet.", "还没有运行。"))
+                        .foregroundStyle(palette.secondary)
+                    Button(l10n.t("Open saved workflows", "打开已保存")) {
+                        model.automationsTab = 1
+                    }
+                    .buttonStyle(GrokSecondaryButtonStyle())
+                }
             } else {
                 ForEach(model.workflowRuns) { run in
                     HStack(alignment: .top, spacing: 12) {

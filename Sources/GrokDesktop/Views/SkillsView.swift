@@ -53,43 +53,28 @@ struct SkillsView: View {
             }
 
             if model.skillsTab == 0 {
-                Text(l10n.personal)
-                    .font(.system(size: 15, weight: .semibold))
-                ScrollView {
-                    LazyVGrid(columns: columns, spacing: 14) {
-                        ForEach(model.filteredSkills) { skill in
-                            Button {
-                                model.runSkill(skill)
-                            } label: {
-                                HStack(alignment: .top, spacing: 12) {
-                                    Image(systemName: skill.icon)
-                                        .font(.system(size: 16))
-                                        .foregroundStyle(palette.secondary)
-                                        .frame(width: 28, height: 28)
-                                        .background(palette.chip, in: RoundedRectangle(cornerRadius: 8))
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(skill.title)
-                                            .font(.system(size: 15, weight: .semibold))
-                                            .foregroundStyle(palette.text)
-                                        Text(skill.detail)
-                                            .font(.system(size: 13))
-                                            .foregroundStyle(palette.secondary)
-                                            .lineLimit(2)
-                                            .multilineTextAlignment(.leading)
+                if model.filteredSkills.isEmpty {
+                    Text(l10n.t("No skills match.", "没有匹配的技能。"))
+                        .foregroundStyle(palette.secondary)
+                        .padding(.top, 20)
+                    Spacer()
+                } else {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 22) {
+                            ForEach(model.skillGroups, id: \.id) { group in
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text("\(group.title) · \(group.items.count)")
+                                        .font(.system(size: 15, weight: .semibold))
+                                    LazyVGrid(columns: columns, spacing: 14) {
+                                        ForEach(group.items) { skill in
+                                            skillCard(skill)
+                                        }
                                     }
-                                    Spacer()
                                 }
-                                .padding(16)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                        .stroke(palette.hairline, lineWidth: 1)
-                                )
                             }
-                            .buttonStyle(.plain)
                         }
+                        .padding(.bottom, 24)
                     }
-                    .padding(.bottom, 24)
                 }
             } else {
                 HStack {
@@ -103,47 +88,16 @@ struct SkillsView: View {
                     Button(l10n.t("Add MCP", "添加 MCP")) { model.showAddMCP = true }
                         .buttonStyle(GrokPrimaryButtonStyle())
                 }
-                if model.mcpServers.isEmpty {
-                    Text(l10n.noConnectors)
+                if model.filteredMCPServers.isEmpty {
+                    Text(model.mcpServers.isEmpty ? l10n.noConnectors : l10n.t("No connectors match.", "没有匹配的连接器。"))
                         .foregroundStyle(palette.secondary)
                         .padding(.top, 20)
                     Spacer()
                 } else {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 10) {
-                            ForEach(model.mcpServers) { server in
-                                HStack(alignment: .top, spacing: 12) {
-                                    Image(systemName: "server.rack")
-                                        .foregroundStyle(palette.secondary)
-                                        .frame(width: 28, height: 28)
-                                        .background(palette.chip, in: RoundedRectangle(cornerRadius: 8))
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(server.name)
-                                            .font(.system(size: 15, weight: .semibold))
-                                        Text(server.detail)
-                                            .font(.system(size: 13))
-                                            .foregroundStyle(palette.secondary)
-                                            .lineLimit(2)
-                                    }
-                                    Spacer()
-                                    Toggle("", isOn: Binding(
-                                        get: { server.enabled },
-                                        set: { _ in model.toggleMCPServer(server) }
-                                    ))
-                                    .labelsHidden()
-                                    .toggleStyle(.switch)
-                                    Button(role: .destructive) {
-                                        model.removeMCPServer(server)
-                                    } label: {
-                                        Image(systemName: "trash")
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                                .padding(16)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                        .stroke(palette.hairline, lineWidth: 1)
-                                )
+                            ForEach(model.filteredMCPServers) { server in
+                                connectorRow(server)
                             }
                         }
                         .padding(.bottom, 24)
@@ -155,6 +109,77 @@ struct SkillsView: View {
         .frame(maxWidth: 1100)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(palette.canvas)
+        .onAppear { model.refreshCatalogs() }
+    }
+
+    private func skillCard(_ skill: SkillRecord) -> some View {
+        Button {
+            model.runSkill(skill)
+        } label: {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: skill.icon)
+                    .font(.system(size: 16))
+                    .foregroundStyle(palette.secondary)
+                    .frame(width: 28, height: 28)
+                    .background(palette.chip, in: RoundedRectangle(cornerRadius: 8))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(skill.title)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(palette.text)
+                    Text(skill.detail)
+                        .font(.system(size: 13))
+                        .foregroundStyle(palette.secondary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                }
+                Spacer()
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(palette.hairline, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .help("/\(skill.slug)")
+    }
+
+    private func connectorRow(_ server: MCPServerRecord) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "server.rack")
+                .foregroundStyle(palette.secondary)
+                .frame(width: 28, height: 28)
+                .background(palette.chip, in: RoundedRectangle(cornerRadius: 8))
+            VStack(alignment: .leading, spacing: 4) {
+                Text(server.name)
+                    .font(.system(size: 15, weight: .semibold))
+                Text(server.detail)
+                    .font(.system(size: 13))
+                    .foregroundStyle(palette.secondary)
+                    .lineLimit(2)
+            }
+            Spacer()
+            if server.managed {
+                Toggle("", isOn: Binding(
+                    get: { server.enabled },
+                    set: { _ in model.toggleMCPServer(server) }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                Button(role: .destructive) {
+                    model.removeMCPServer(server)
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(16)
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(palette.hairline, lineWidth: 1)
+        )
     }
 
     private func tab(_ title: String, index: Int) -> some View {

@@ -209,6 +209,76 @@ let parsedMCP = MCPCatalog.parseTOML(mcpTOML)
 expect(parsedMCP.count == 1, "mcp parse count")
 expect(parsedMCP[0].name == "github", "mcp name")
 expect(parsedMCP[0].args.contains("-y"), "mcp args")
+expect(parsedMCP[0].managed, "toml mcp is managed")
+
+let inspectObject: [String: Any] = [
+    "skills": [
+        [
+            "name": "agent-browser",
+            "description": "Drive a browser.",
+            "userInvocable": true,
+            "source": ["type": "user", "path": "/Users/ada/.agents/skills/agent-browser/SKILL.md"]
+        ],
+        [
+            "name": "docx",
+            "description": "Word files.",
+            "userInvocable": false,
+            "source": ["type": "bundled", "path": "/Users/ada/.grok/bundled/skills/docx/SKILL.md"]
+        ],
+        [
+            "name": "agents-sdk",
+            "description": "Cloudflare agents.",
+            "userInvocable": true,
+            "source": ["type": "plugin", "plugin_name": "cloudflare", "path": "/tmp/cloudflare/skills/agents-sdk/SKILL.md"]
+        ]
+    ],
+    "mcpServers": [
+        [
+            "name": "reddit",
+            "transport": "stdio",
+            "target": "uvx",
+            "compatibilityStatus": "enabled",
+            "source": ["type": "claudeJson", "path": "/Users/ada/.claude.json"]
+        ],
+        [
+            "name": "context7",
+            "transport": "http",
+            "target": "https://mcp.context7.com/mcp",
+            "source": ["type": "plugin", "plugin_name": "context7"]
+        ],
+        [
+            "name": "github",
+            "transport": "stdio",
+            "target": "npx",
+            "source": ["type": "user"]
+        ]
+    ]
+]
+let inspectSkills = GrokInspect.parseSkills(inspectObject)
+expect(inspectSkills.contains(where: { $0.slug == "agent-browser" && $0.sourceKind == "user" }), "inspect user skill")
+expect(inspectSkills.contains(where: { $0.slug == "docx" && $0.sourceKind == "bundled" }), "inspect bundled skill")
+expect(inspectSkills.contains(where: { $0.slug == "agents-sdk" && $0.sourceKind == "plugin" && $0.pluginName == "cloudflare" }), "inspect plugin skill")
+let inspectMCP = GrokInspect.parseMCP(inspectObject)
+expect(inspectMCP.count == 3, "inspect mcp count")
+expect(inspectMCP.contains(where: { $0.name == "reddit" && $0.scope == "claude" && !$0.managed }), "claude mcp unmanaged")
+expect(inspectMCP.contains(where: { $0.name == "context7" && $0.scope == "plugin" }), "plugin mcp")
+let mergedMCP = MCPCatalog.merge(inspect: inspectMCP, listed: parsedMCP)
+expect(mergedMCP.contains(where: { $0.name == "github" && $0.managed }), "listed github stays managed")
+expect(mergedMCP.contains(where: { $0.name == "reddit" && !$0.managed }), "inherited reddit stays unmanaged")
+
+let tmpSkills = FileManager.default.temporaryDirectory.appendingPathComponent("gd-skills-\(UUID().uuidString)", isDirectory: true)
+let userSkill = tmpSkills.appendingPathComponent(".agents/skills/review-pr", isDirectory: true)
+try! FileManager.default.createDirectory(at: userSkill, withIntermediateDirectories: true)
+try! """
+---
+name: review-pr
+description: Review a pull request.
+---
+# Review
+""".write(to: userSkill.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8)
+let scannedSkills = SkillCatalog().load(cwd: tmpSkills)
+expect(scannedSkills.contains(where: { $0.slug == "review-pr" && $0.sourceKind == "project" }), "disk scan finds project skill")
+
 
 let rhai = """
 let meta = #{
@@ -966,6 +1036,30 @@ let runURL = FileManager.default.temporaryDirectory.appendingPathComponent("gd-r
 let store = WorkflowRunStore(url: runURL)
 store.save([WorkflowRun(name: "review-changes", status: "running")])
 expect(store.load().first?.name == "review-changes", "workflow run persist")
+
+let stale = WorkflowRun(name: "review-changes", status: "running", startedAt: Date().addingTimeInterval(-30))
+let staleDone = WorkflowRunStore.reconcile(overlay: [stale], disk: [], liveTitles: [], turnRunning: false)
+expect(staleDone.first?.status == "completed", "stale running overlay completes")
+let liveKeep = WorkflowRunStore.reconcile(overlay: [stale], disk: [], liveTitles: ["workflow review-changes"], turnRunning: true)
+expect(liveKeep.first?.status == "running", "live title keeps overlay running")
+let pausedKeep = WorkflowRunStore.reconcile(
+    overlay: [WorkflowRun(name: "review-changes", status: "paused", startedAt: Date().addingTimeInterval(-30))],
+    disk: [],
+    liveTitles: [],
+    turnRunning: false
+)
+expect(pausedKeep.first?.status == "paused", "paused overlay stays paused")
+expect(WorkflowRunStore.normalizedStatus("in_progress") == "running", "normalize running")
+expect(WorkflowRunStore.normalizedStatus("Interrupted") == "stopped", "normalize interrupted")
+
+let diskRoot = FileManager.default.temporaryDirectory.appendingPathComponent("gd-wf-\(UUID().uuidString)", isDirectory: true)
+let runDir = diskRoot.appendingPathComponent("review-changes", isDirectory: true)
+try! FileManager.default.createDirectory(at: runDir, withIntermediateDirectories: true)
+try! """
+{"display_name":"review-changes","status":"paused","started_at":"2026-08-20T12:00:00Z","phase":"Review"}
+""".write(to: runDir.appendingPathComponent("status.json"), atomically: true, encoding: .utf8)
+let diskRuns = WorkflowRunStore.scanFolder(diskRoot)
+expect(diskRuns.contains(where: { $0.name == "review-changes" && $0.status == "paused" }), "scan folder status.json")
 
 expect(FilePreview.kind(for: URL(fileURLWithPath: "/tmp/note.md")) == .markdown, "md is markdown")
 expect(FilePreview.kind(for: URL(fileURLWithPath: "/tmp/page.HTML")) == .html, "html kind")

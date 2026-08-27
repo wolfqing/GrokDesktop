@@ -8,6 +8,8 @@ public struct MCPServerRecord: Identifiable, Hashable, Sendable {
     public var args: [String]
     public var enabled: Bool
     public var scope: String
+    public var managed: Bool
+    public var sourceLabel: String
 
     public init(
         name: String,
@@ -15,7 +17,9 @@ public struct MCPServerRecord: Identifiable, Hashable, Sendable {
         commandOrURL: String = "",
         args: [String] = [],
         enabled: Bool = true,
-        scope: String = "user"
+        scope: String = "user",
+        managed: Bool = true,
+        sourceLabel: String = ""
     ) {
         self.name = name
         self.transport = transport
@@ -23,11 +27,17 @@ public struct MCPServerRecord: Identifiable, Hashable, Sendable {
         self.args = args
         self.enabled = enabled
         self.scope = scope
+        self.managed = managed
+        self.sourceLabel = sourceLabel
     }
 
     public var detail: String {
         let tail = args.isEmpty ? "" : " " + args.joined(separator: " ")
-        return "\(transport) · \(commandOrURL)\(tail)"
+        var line = "\(transport) · \(commandOrURL)\(tail)"
+        if !sourceLabel.isEmpty {
+            line += " · \(sourceLabel)"
+        }
+        return line
     }
 }
 
@@ -60,6 +70,22 @@ public struct MCPCatalog: Sendable {
             return fromCLI
         }
         return Self.parseTOML((try? String(contentsOf: configURL, encoding: .utf8)) ?? "")
+    }
+
+    public static func merge(inspect: [MCPServerRecord], listed: [MCPServerRecord]) -> [MCPServerRecord] {
+        let listedNames = Set(listed.map(\.name))
+        var byName: [String: MCPServerRecord] = [:]
+        for item in inspect {
+            var rec = item
+            rec.managed = listedNames.contains(item.name)
+            byName[rec.name] = rec
+        }
+        for item in listed where byName[item.name] == nil {
+            var rec = item
+            rec.managed = true
+            byName[rec.name] = rec
+        }
+        return byName.values.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
     public func add(

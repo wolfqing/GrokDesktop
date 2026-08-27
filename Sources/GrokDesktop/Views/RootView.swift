@@ -267,7 +267,7 @@ struct RootView: View {
                     .lineLimit(2...4)
                     .padding(10)
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.hairline))
-                Text(model.copy.t("Saves ~/.grok/workflows/<name>.rhai and runs /workflow <name>.", "保存到 ~/.grok/workflows/<name>.rhai，并运行 /workflow <name>。"))
+                Text(model.copy.t("Saves ~/.grok/workflows/<name>.rhai. Run it later from Saved.", "保存到 ~/.grok/workflows/<name>.rhai。之后在「已保存」里运行。"))
                     .font(.system(size: 12))
                     .foregroundStyle(palette.secondary)
                 HStack {

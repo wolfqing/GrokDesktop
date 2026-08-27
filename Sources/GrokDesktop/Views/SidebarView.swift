@@ -149,6 +149,18 @@ struct SidebarView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     disclosure(title: l10n.projects, expanded: $model.projectsExpanded) {
+                        Button {
+                            model.showCreateProject = true
+                        } label: {
+                            Image(systemName: "plus")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(palette.secondary)
+                                .frame(width: 20, height: 20)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help(l10n.addProject)
+                    } content: {
                         if model.visibleProjects.isEmpty {
                             Text(l10n.noProjects)
                                 .font(.system(size: 13))
@@ -174,16 +186,6 @@ struct SidebarView: View {
                                 .buttonStyle(.plain)
                             }
                         }
-                        Button {
-                            model.showCreateProject = true
-                        } label: {
-                            Text(l10n.addProject)
-                                .font(.system(size: 13.5))
-                                .foregroundStyle(palette.secondary)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 6)
-                        }
-                        .buttonStyle(.plain)
                     }
 
                     if !model.liveSessions.isEmpty {
@@ -364,24 +366,41 @@ struct SidebarView: View {
         .padding(.horizontal, 8)
     }
 
-    private func disclosure<Content: View>(title: String, expanded: Binding<Bool>, @ViewBuilder content: () -> Content) -> some View {
+    private func disclosure<Content: View>(
+        title: String,
+        expanded: Binding<Bool>,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        disclosure(title: title, expanded: expanded, accessory: { EmptyView() }, content: content)
+    }
+
+    private func disclosure<Content: View, Accessory: View>(
+        title: String,
+        expanded: Binding<Bool>,
+        @ViewBuilder accessory: () -> Accessory,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Button {
-                expanded.wrappedValue.toggle()
-            } label: {
-                HStack(spacing: 6) {
-                    Text(title)
-                        .font(.system(size: 13, weight: .semibold))
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 9, weight: .semibold))
-                        .rotationEffect(.degrees(expanded.wrappedValue ? 0 : -90))
-                    Spacer()
+            HStack(spacing: 4) {
+                Button {
+                    expanded.wrappedValue.toggle()
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(title)
+                            .font(.system(size: 13, weight: .semibold))
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 9, weight: .semibold))
+                            .rotationEffect(.degrees(expanded.wrappedValue ? 0 : -90))
+                        Spacer(minLength: 0)
+                    }
+                    .contentShape(Rectangle())
                 }
-                .foregroundStyle(palette.text)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 4)
+                .buttonStyle(.plain)
+                accessory()
             }
-            .buttonStyle(.plain)
+            .foregroundStyle(palette.text)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 4)
             if expanded.wrappedValue {
                 content()
             }
