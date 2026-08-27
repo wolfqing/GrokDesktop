@@ -1,6 +1,6 @@
 import Foundation
 
-public struct MCPServerRecord: Identifiable, Hashable, Sendable {
+public struct MCPServerRecord: Identifiable, Hashable, Sendable, Codable {
     public var id: String { name }
     public var name: String
     public var transport: String

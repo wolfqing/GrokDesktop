@@ -1,10 +1,64 @@
 import Foundation
 
 public enum GrokInspect {
+    public static let freshInterval: TimeInterval = 90
+
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var memory: Snapshot?
+
+    private struct Snapshot: Codable {
+        var cwd: String
+        var savedAt: Date
+        var skills: [SkillRecord]
+        var mcp: [MCPServerRecord]
+    }
+
+    private static var cacheURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".grok/desktop/catalog-cache.json")
+    }
+
+    public static func cached(
+        cwd: URL?,
+        now: Date = Date(),
+        fileURL: URL? = nil
+    ) -> (skills: [SkillRecord], mcp: [MCPServerRecord])? {
+        let key = cwd?.standardizedFileURL.path ?? ""
+        lock.lock()
+        let mem = memory
+        lock.unlock()
+        if let mem, mem.cwd == key {
+            return (mem.skills, mem.mcp)
+        }
+        let url = fileURL ?? cacheURL
+        guard let data = try? Data(contentsOf: url),
+              let file = try? JSONDecoder().decode(Snapshot.self, from: data),
+              file.cwd == key,
+              now.timeIntervalSince(file.savedAt) < 7 * 24 * 3600
+        else { return nil }
+        lock.lock()
+        memory = file
+        lock.unlock()
+        return (file.skills, file.mcp)
+    }
+
+    public static func isFresh(cwd: URL?, now: Date = Date()) -> Bool {
+        let key = cwd?.standardizedFileURL.path ?? ""
+        lock.lock()
+        let mem = memory
+        lock.unlock()
+        guard let mem, mem.cwd == key else { return false }
+        return now.timeIntervalSince(mem.savedAt) < freshInterval
+    }
+
     public static func load(
         locator: GrokBinaryLocator = GrokBinaryLocator(),
-        cwd: URL? = nil
+        cwd: URL? = nil,
+        force: Bool = false
     ) -> (skills: [SkillRecord], mcp: [MCPServerRecord])? {
+        if !force, isFresh(cwd: cwd), let hit = cached(cwd: cwd) {
+            return hit
+        }
         guard let grok = locator.locate() else { return nil }
         let directory = cwd ?? FileManager.default.homeDirectoryForCurrentUser
         guard let text = TimedProcess.run(
@@ -19,7 +73,31 @@ public enum GrokInspect {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return nil
         }
-        return (parseSkills(object, cwd: cwd), parseMCP(object))
+        let snapshot = (parseSkills(object, cwd: cwd), parseMCP(object))
+        store(cwd: cwd, skills: snapshot.0, mcp: snapshot.1)
+        return snapshot
+    }
+
+    public static func store(
+        cwd: URL?,
+        skills: [SkillRecord],
+        mcp: [MCPServerRecord],
+        fileURL: URL? = nil
+    ) {
+        let snapshot = Snapshot(
+            cwd: cwd?.standardizedFileURL.path ?? "",
+            savedAt: Date(),
+            skills: skills,
+            mcp: mcp
+        )
+        lock.lock()
+        memory = snapshot
+        lock.unlock()
+        let url = fileURL ?? cacheURL
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if let data = try? JSONEncoder().encode(snapshot) {
+            try? data.write(to: url, options: .atomic)
+        }
     }
 
     public static func parseSkills(_ object: [String: Any], cwd: URL? = nil) -> [SkillRecord] {

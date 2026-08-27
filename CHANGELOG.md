@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.18 - 2026-08-27
+
+Opening Skills and Connectors no longer stalls the window.
+
+- Catalog load moved off the main thread, with a 90s memory cache and `~/.grok/desktop/catalog-cache.json`.
+- Switching back to the page reuses the cache instead of running `grok inspect` again.
+- Skill cards render in lazy rows instead of building the whole grid at once.
+
 ## 0.1.17 - 2026-08-27
 
 Skills, connectors, workflows, and the inspector now follow what grok actually loads.

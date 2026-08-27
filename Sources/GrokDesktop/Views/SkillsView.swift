@@ -6,8 +6,6 @@ struct SkillsView: View {
     @Environment(\.palette) private var palette
     @Environment(\.l10n) private var l10n
 
-    private let columns = [GridItem(.adaptive(minimum: 320), spacing: 14)]
-
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .firstTextBaseline) {
@@ -54,20 +52,28 @@ struct SkillsView: View {
 
             if model.skillsTab == 0 {
                 if model.filteredSkills.isEmpty {
-                    Text(l10n.t("No skills match.", "没有匹配的技能。"))
-                        .foregroundStyle(palette.secondary)
-                        .padding(.top, 20)
+                    if model.catalogsLoading {
+                        ProgressView()
+                            .padding(.top, 24)
+                    } else {
+                        Text(l10n.t("No skills match.", "没有匹配的技能。"))
+                            .foregroundStyle(palette.secondary)
+                            .padding(.top, 20)
+                    }
                     Spacer()
                 } else {
                     ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 22) {
+                        LazyVStack(alignment: .leading, spacing: 18) {
                             ForEach(model.skillGroups, id: \.id) { group in
-                                VStack(alignment: .leading, spacing: 10) {
-                                    Text("\(group.title) · \(group.items.count)")
-                                        .font(.system(size: 15, weight: .semibold))
-                                    LazyVGrid(columns: columns, spacing: 14) {
-                                        ForEach(group.items) { skill in
-                                            skillCard(skill)
+                                Text("\(group.title) · \(group.items.count)")
+                                    .font(.system(size: 15, weight: .semibold))
+                                ForEach(Array(stride(from: 0, to: group.items.count, by: 2)), id: \.self) { index in
+                                    HStack(alignment: .top, spacing: 14) {
+                                        skillCard(group.items[index])
+                                        if index + 1 < group.items.count {
+                                            skillCard(group.items[index + 1])
+                                        } else {
+                                            Color.clear
                                         }
                                     }
                                 }

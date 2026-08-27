@@ -90,7 +90,7 @@ public struct AccountProfile: Sendable, Equatable {
     }
 }
 
-public struct SkillRecord: Identifiable, Hashable, Sendable {
+public struct SkillRecord: Identifiable, Hashable, Sendable, Codable {
     public var id: String { slug }
     public var slug: String
     public var title: String

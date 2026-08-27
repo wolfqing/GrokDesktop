@@ -94,6 +94,7 @@ final class AppModel: ObservableObject {
     @Published var firstRunReason: FirstRunReason?
     @Published var account = AccountProfile()
     @Published var skills: [SkillRecord] = []
+    @Published var catalogsLoading = false
     @Published var automations: [AutomationRecord] = []
     @Published var namedProjects: [NamedProject] = []
     @Published var skillsQuery = ""
@@ -126,6 +127,8 @@ final class AppModel: ObservableObject {
     private var escapeArmedAt: Date?
     private var loginPollTask: Task<Void, Never>?
     private var toastToken = UUID()
+    private var catalogsTask: Task<Void, Never>?
+    private var catalogsCwd: String?
     @Published var sidebarNotice: String?
     @Published var needsFolderPick = false
     @Published var personas: [String] = []
@@ -522,20 +525,53 @@ final class AppModel: ObservableObject {
         refreshAgentCatalog()
     }
 
-    func refreshCatalogs() {
+    func refreshCatalogs(force: Bool = false) {
         if DemoStudio.isEnabled { return }
-        let inspect = GrokInspect.load(locator: locator, cwd: client.workingDirectory)
-        if let skills = inspect?.skills, !skills.isEmpty {
-            self.skills = skills
-        } else {
-            skills = skillCatalog.load(cwd: client.workingDirectory)
+        let cwd = client.workingDirectory
+        let key = cwd.standardizedFileURL.path
+        if !force, GrokInspect.isFresh(cwd: cwd), catalogsCwd == key, !skills.isEmpty {
+            return
         }
-        let listed = mcpCatalog.load(locator: locator, cwd: client.workingDirectory)
-        if let mcp = inspect?.mcp, !mcp.isEmpty {
+        if skills.isEmpty, let cached = GrokInspect.cached(cwd: cwd) {
+            applyCatalogs(skills: cached.skills, mcp: cached.mcp, listed: [], cwd: key)
+        }
+        if catalogsTask != nil, !force { return }
+        catalogsLoading = skills.isEmpty
+        let grokLocator = locator
+        catalogsTask = Task { [weak self] in
+            let snapshot = await Task.detached(priority: .userInitiated) { () -> (skills: [SkillRecord], mcp: [MCPServerRecord], listed: [MCPServerRecord]) in
+                if let inspect = GrokInspect.load(locator: grokLocator, cwd: cwd, force: force) {
+                    let listed = MCPCatalog().load(locator: grokLocator, cwd: cwd)
+                    return (inspect.skills, inspect.mcp, listed)
+                }
+                let disk = SkillCatalog().load(cwd: cwd)
+                let listed = MCPCatalog().load(locator: grokLocator, cwd: cwd)
+                return (disk, listed, listed)
+            }.value
+            await MainActor.run {
+                guard let self else { return }
+                self.catalogsTask = nil
+                self.catalogsLoading = false
+                self.applyCatalogs(skills: snapshot.skills, mcp: snapshot.mcp, listed: snapshot.listed, cwd: key)
+            }
+        }
+    }
+
+    private func applyCatalogs(
+        skills: [SkillRecord],
+        mcp: [MCPServerRecord],
+        listed: [MCPServerRecord],
+        cwd: String
+    ) {
+        if !skills.isEmpty {
+            self.skills = skills
+        }
+        if !mcp.isEmpty {
             mcpServers = MCPCatalog.merge(inspect: mcp, listed: listed)
-        } else {
+        } else if !listed.isEmpty {
             mcpServers = listed
         }
+        catalogsCwd = cwd
         grokConfig = configStore.load()
         extensions = ExtensionInventory.load(mcpNames: grokConfig.mcpNames)
     }
@@ -1397,7 +1433,7 @@ final class AppModel: ObservableObject {
             mcpName = ""
             mcpCommand = ""
             mcpArgs = ""
-            refreshCatalogs()
+            refreshCatalogs(force: true)
             flash(copy.t("Added MCP server", "已添加 MCP"))
         } catch {
             flash(error.localizedDescription)
@@ -1411,7 +1447,7 @@ final class AppModel: ObservableObject {
         }
         do {
             try mcpCatalog.remove(name: record.name, locator: locator)
-            refreshCatalogs()
+            refreshCatalogs(force: true)
         } catch {
             flash(error.localizedDescription)
         }
@@ -1424,7 +1460,7 @@ final class AppModel: ObservableObject {
         }
         do {
             try mcpCatalog.setEnabled(record.name, enabled: !record.enabled, locator: locator)
-            refreshCatalogs()
+            refreshCatalogs(force: true)
         } catch {
             flash(error.localizedDescription)
         }
@@ -2159,7 +2195,7 @@ final class AppModel: ObservableObject {
 
     func exportDiagnostics() {
         let text = DiagnosticExport.make(
-            version: "0.1.17",
+            version: "0.1.18",
             grokVersion: client.grokVersion,
             state: String(describing: client.state),
             lastError: client.lastError,

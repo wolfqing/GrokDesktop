@@ -254,6 +254,19 @@ let inspectObject: [String: Any] = [
         ]
     ]
 ]
+let cacheCwd = FileManager.default.temporaryDirectory.appendingPathComponent("gd-inspect-\(UUID().uuidString)")
+let cacheFile = cacheCwd.appendingPathComponent("catalog-cache.json")
+GrokInspect.store(
+    cwd: cacheCwd,
+    skills: [
+        SkillRecord(slug: "cached-skill", title: "Cached", detail: "from cache", icon: "puzzlepiece.extension")
+    ],
+    mcp: [],
+    fileURL: cacheFile
+)
+expect(GrokInspect.isFresh(cwd: cacheCwd), "stored inspect cache is fresh")
+expect(GrokInspect.cached(cwd: cacheCwd, fileURL: cacheFile)?.skills.first?.slug == "cached-skill", "inspect cache round-trip")
+
 let inspectSkills = GrokInspect.parseSkills(inspectObject)
 expect(inspectSkills.contains(where: { $0.slug == "agent-browser" && $0.sourceKind == "user" }), "inspect user skill")
 expect(inspectSkills.contains(where: { $0.slug == "docx" && $0.sourceKind == "bundled" }), "inspect bundled skill")
