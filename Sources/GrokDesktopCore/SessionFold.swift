@@ -30,6 +30,9 @@ public struct SessionSnapshot: Equatable, Sendable {
     public var compacted: Bool = false
     public var subagents: [AgentSubagent] = []
     public var itemDurations: [String: TimeInterval] = [:]
+    public var hookEvents: [HookEvent] = []
+    public var checkpoints: [CompactionCheckpoint] = []
+    public var scheduledTasks: [ScheduledTask] = []
 
     public init(
         items: [ConversationItem] = [],
@@ -43,7 +46,10 @@ public struct SessionSnapshot: Equatable, Sendable {
         recap: String = "",
         compacted: Bool = false,
         subagents: [AgentSubagent] = [],
-        itemDurations: [String: TimeInterval] = [:]
+        itemDurations: [String: TimeInterval] = [:],
+        hookEvents: [HookEvent] = [],
+        checkpoints: [CompactionCheckpoint] = [],
+        scheduledTasks: [ScheduledTask] = []
     ) {
         self.items = items
         self.planEntries = planEntries
@@ -57,6 +63,9 @@ public struct SessionSnapshot: Equatable, Sendable {
         self.compacted = compacted
         self.subagents = subagents
         self.itemDurations = itemDurations
+        self.hookEvents = hookEvents
+        self.checkpoints = checkpoints
+        self.scheduledTasks = scheduledTasks
     }
 
     public var lastUserPreview: String {
@@ -117,10 +126,27 @@ public enum SessionFold {
         case .retryState:
             appendNotice(retryText(update), onto: &snapshot, at: update.timestamp)
         case .scheduledTaskCreated:
-            let prompt = update.raw["prompt"] as? String ?? update.text
-            let schedule = update.raw["human_schedule"] as? String ?? ""
-            let label = schedule.isEmpty ? prompt : "\(schedule): \(prompt)"
-            appendNotice(String(label.prefix(180)), onto: &snapshot, at: update.timestamp)
+            let task = HarnessEvents.scheduledTask(from: update)
+            if !snapshot.scheduledTasks.contains(where: { $0.id == task.id }) {
+                snapshot.scheduledTasks.insert(task, at: 0)
+                if snapshot.scheduledTasks.count > 20 {
+                    snapshot.scheduledTasks = Array(snapshot.scheduledTasks.prefix(20))
+                }
+            }
+            appendNotice(String(task.title.prefix(180)), onto: &snapshot, at: update.timestamp)
+        case .scheduledTaskDeleted:
+            let id = HarnessEvents.scheduledTaskID(from: update)
+            snapshot.scheduledTasks.removeAll { $0.id == id }
+        case .hookExecution:
+            snapshot.hookEvents.insert(HarnessEvents.hookEvent(from: update), at: 0)
+            if snapshot.hookEvents.count > 40 {
+                snapshot.hookEvents = Array(snapshot.hookEvents.prefix(40))
+            }
+        case .compactionCheckpoint:
+            let point = HarnessEvents.checkpoint(from: update)
+            if !snapshot.checkpoints.contains(where: { $0.id == point.id }) {
+                snapshot.checkpoints.insert(point, at: 0)
+            }
         default:
             break
         }
@@ -205,7 +231,10 @@ public extension SessionWorkspace {
             recap: recap,
             compacted: compacted,
             subagents: subagents,
-            itemDurations: itemDurations
+            itemDurations: itemDurations,
+            hookEvents: hookEvents,
+            checkpoints: checkpoints,
+            scheduledTasks: scheduledTasks
         )
     }
 
@@ -222,6 +251,9 @@ public extension SessionWorkspace {
         compacted = snapshot.compacted
         subagents = snapshot.subagents
         itemDurations = snapshot.itemDurations
+        hookEvents = snapshot.hookEvents
+        checkpoints = snapshot.checkpoints
+        scheduledTasks = snapshot.scheduledTasks
     }
 
     func adopt(_ transcript: Transcript) {

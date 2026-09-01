@@ -244,7 +244,8 @@ enum TranscriptCache {
             "toolCalls": item.toolCalls,
             "turns": item.turns,
             "durationMs": item.durationMs,
-            "output": item.output
+            "output": item.output,
+            "isolation": item.isolation
         ]
         if let startedAt = item.startedAt { row["startedAt"] = startedAt.timeIntervalSince1970 }
         return row
@@ -264,7 +265,8 @@ enum TranscriptCache {
                 turns: int(row["turns"]),
                 durationMs: int(row["durationMs"]),
                 output: row["output"] as? String ?? "",
-                startedAt: date(row["startedAt"])
+                startedAt: date(row["startedAt"]),
+                isolation: row["isolation"] as? String ?? ""
             )
         }
     }

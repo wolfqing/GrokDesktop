@@ -43,6 +43,9 @@ struct InspectorView: View {
                         if showsChanges, model.inspectorPaneVisible(.changes) {
                             changesSection
                         }
+                        if showsHooks, model.inspectorPaneVisible(.hooks) {
+                            hooksSection
+                        }
                     }
                     .padding(14)
                 }
@@ -132,6 +135,7 @@ struct InspectorView: View {
             || (showsWork && model.inspectorPaneVisible(.work))
             || (showsTerminals && model.inspectorPaneVisible(.terminals))
             || (showsChanges && model.inspectorPaneVisible(.changes))
+            || (showsHooks && model.inspectorPaneVisible(.hooks))
     }
 
     private var liveStory: TurnStory? {
@@ -282,6 +286,40 @@ struct InspectorView: View {
             if showsConnection {
                 connectionLine
             }
+            Button {
+                Task { await model.client.compact() }
+            } label: {
+                Text(l10n.t("Compact now", "立即压缩"))
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(palette.secondary)
+            if !model.client.checkpoints.isEmpty {
+                Text(l10n.t("Checkpoints", "检查点"))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(palette.secondary)
+                    .padding(.top, 4)
+                ForEach(model.client.checkpoints.prefix(6)) { point in
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack {
+                            Text(point.createdAt.map { RelativeTime.format($0, chinese: l10n.language == .chinese) } ?? point.id)
+                                .font(.system(size: 11, weight: .medium))
+                            Spacer()
+                            if point.tokensBefore > 0 || point.tokensAfter > 0 {
+                                Text("\(compactTokens(point.tokensBefore)) → \(compactTokens(point.tokensAfter))")
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundStyle(palette.secondary)
+                            }
+                        }
+                        if !point.recap.isEmpty {
+                            Text(point.recap)
+                                .font(.system(size: 11))
+                                .foregroundStyle(palette.secondary)
+                                .lineLimit(3)
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -413,6 +451,63 @@ struct InspectorView: View {
                     liveWorkRow(item)
                 }
             }
+            if !model.client.scheduledTasks.isEmpty {
+                Text(l10n.t("Loops", "循环任务"))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(palette.secondary)
+                    .padding(.top, 4)
+                ForEach(model.client.scheduledTasks) { task in
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: "repeat")
+                            .font(.system(size: 11))
+                            .foregroundStyle(palette.secondary)
+                            .padding(.top, 2)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(task.title)
+                                .font(.system(size: 12))
+                                .lineLimit(2)
+                            Text(task.id)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(palette.secondary)
+                        }
+                        Spacer()
+                        Button(l10n.stop) {
+                            model.cancelScheduledTask(task)
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Color.orange)
+                    }
+                }
+            }
+            if !finishedSubagents.isEmpty {
+                Text(l10n.subagents)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(palette.secondary)
+                    .padding(.top, 4)
+                ForEach(finishedSubagents) { agent in
+                    Button {
+                        model.openSubagent(agent)
+                    } label: {
+                        HStack(alignment: .top, spacing: 6) {
+                            Image(systemName: "arrow.turn.down.right")
+                                .font(.system(size: 11))
+                                .foregroundStyle(palette.secondary)
+                                .padding(.top, 2)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(agent.detail.isEmpty ? agent.type : agent.detail)
+                                    .font(.system(size: 12))
+                                    .lineLimit(2)
+                                Text([agent.isolation, agent.status].filter { !$0.isEmpty }.joined(separator: " · "))
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(palette.secondary)
+                            }
+                            Spacer()
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
         }
     }
 
@@ -425,6 +520,7 @@ struct InspectorView: View {
         var duration: TimeInterval? = nil
         var sessionID: String? = nil
         var taskID: String? = nil
+        var subagent: AgentSubagent? = nil
     }
 
     private var liveWorkItems: [LiveWorkItem] {
@@ -451,9 +547,11 @@ struct InspectorView: View {
             add(LiveWorkItem(
                 id: "sub-\(agent.id)",
                 title: agent.detail.isEmpty ? agent.type : agent.detail,
-                detail: l10n.running,
+                detail: agent.isolation.isEmpty ? l10n.running : agent.isolation,
                 start: agent.startedAt,
-                duration: agent.elapsed
+                duration: agent.elapsed,
+                sessionID: agent.childSessionId.isEmpty ? agent.id : agent.childSessionId,
+                subagent: agent
             ))
         }
         for row in model.client.backgroundLiveTasks {
@@ -499,7 +597,14 @@ struct InspectorView: View {
                 .foregroundStyle(palette.secondary)
             }
         }
-        if let sessionID = item.sessionID {
+        if let agent = item.subagent {
+            Button {
+                model.openSubagent(agent)
+            } label: {
+                row
+            }
+            .buttonStyle(.plain)
+        } else if let sessionID = item.sessionID {
             Button {
                 _ = model.client.focusIfLoaded(sessionID)
             } label: {
@@ -511,10 +616,59 @@ struct InspectorView: View {
         }
     }
 
+    private var finishedSubagents: [AgentSubagent] {
+        model.client.subagents.filter { !$0.isRunning }
+    }
+
     private var showsWork: Bool {
         !checklist.isEmpty
             || !liveWorkItems.isEmpty
             || model.client.mode == .plan
+            || !model.client.scheduledTasks.isEmpty
+            || !finishedSubagents.isEmpty
+    }
+
+    private var showsHooks: Bool {
+        !model.client.hookEvents.isEmpty || !model.hookDefinitions.isEmpty
+    }
+
+    private var hooksSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            paneHeader(.hooks, title: l10n.t("Hooks", "钩子")) {
+                EmptyView()
+            }
+            if !model.client.hookEvents.isEmpty {
+                ForEach(model.client.hookEvents.prefix(12)) { event in
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack {
+                            Text(event.event)
+                                .font(.system(size: 12, weight: .medium))
+                            Spacer()
+                            Text(event.blocked ? l10n.t("blocked", "已拦截") : l10n.t("ran", "已运行"))
+                                .font(.system(size: 10))
+                                .foregroundStyle(event.blocked ? Color.orange : palette.secondary)
+                        }
+                        if !event.command.isEmpty {
+                            Text(event.command)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(palette.secondary)
+                                .lineLimit(2)
+                                .textSelection(.enabled)
+                        }
+                    }
+                }
+            } else {
+                ForEach(model.hookDefinitions.prefix(12)) { hook in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(hook.title)
+                            .font(.system(size: 12, weight: .medium))
+                        Text([hook.sourceKind, hook.pluginName, hook.matcher].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
+                            .font(.system(size: 10))
+                            .foregroundStyle(palette.secondary)
+                    }
+                }
+            }
+        }
     }
 
     private var checklist: [(id: String, content: String, status: String)] {

@@ -75,6 +75,7 @@ public struct AgentSubagent: Identifiable, Hashable, Sendable {
     public var durationMs: Int
     public var output: String
     public var startedAt: Date?
+    public var isolation: String
 
     public init(
         id: String,
@@ -86,7 +87,8 @@ public struct AgentSubagent: Identifiable, Hashable, Sendable {
         turns: Int = 0,
         durationMs: Int = 0,
         output: String = "",
-        startedAt: Date? = nil
+        startedAt: Date? = nil,
+        isolation: String = ""
     ) {
         self.id = id
         self.childSessionId = childSessionId
@@ -98,6 +100,7 @@ public struct AgentSubagent: Identifiable, Hashable, Sendable {
         self.durationMs = durationMs
         self.output = output
         self.startedAt = startedAt
+        self.isolation = isolation
     }
 
     public var isRunning: Bool { status == "running" || status == "in_progress" }
@@ -271,6 +274,7 @@ public enum PromptTimestamp {
         let child = raw["child_session_id"] as? String ?? id
         let type = raw["subagent_type"] as? String ?? ""
         let detail = raw["description"] as? String ?? raw["output"] as? String ?? ""
+        let isolation = raw["isolation"] as? String ?? raw["isolation_mode"] as? String ?? ""
         switch update.kind {
         case .subagentSpawned:
             upsertSubagent(
@@ -280,7 +284,8 @@ public enum PromptTimestamp {
                     type: type,
                     detail: detail,
                     status: "running",
-                    startedAt: update.timestamp ?? Date()
+                    startedAt: update.timestamp ?? Date(),
+                    isolation: isolation
                 ),
                 into: &subagents
             )
@@ -296,7 +301,8 @@ public enum PromptTimestamp {
                     turns: raw["turns"] as? Int ?? 0,
                     durationMs: raw["duration_ms"] as? Int ?? 0,
                     output: raw["output"] as? String ?? "",
-                    startedAt: update.timestamp
+                    startedAt: update.timestamp,
+                    isolation: isolation
                 ),
                 into: &subagents
             )
@@ -381,6 +387,7 @@ public enum PromptTimestamp {
             if subagent.durationMs > 0 { next.durationMs = subagent.durationMs }
             if !subagent.output.isEmpty { next.output = subagent.output }
             if next.startedAt == nil { next.startedAt = subagent.startedAt }
+            if !subagent.isolation.isEmpty { next.isolation = subagent.isolation }
             subagents[index] = next
         } else {
             subagents.append(subagent)

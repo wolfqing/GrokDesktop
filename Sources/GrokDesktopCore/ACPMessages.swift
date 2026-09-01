@@ -124,7 +124,9 @@ public enum SessionUpdateKind: String, Sendable {
     var needsRaw: Bool {
         switch self {
         case .toolCall, .toolCallUpdate, .taskBackgrounded, .taskCompleted,
-             .subagentSpawned, .subagentFinished, .retryState, .scheduledTaskCreated:
+             .subagentSpawned, .subagentFinished, .retryState,
+             .scheduledTaskCreated, .scheduledTaskDeleted,
+             .hookExecution, .compactionCheckpoint:
             return true
         default:
             return false

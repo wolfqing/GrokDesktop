@@ -414,3 +414,166 @@ struct ContextSheet: View {
         return CGFloat(min(max(tokens, 0), total)) / CGFloat(total)
     }
 }
+
+struct MemorySheet: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.palette) private var palette
+    @Environment(\.l10n) private var l10n
+
+    var body: some View {
+        OverlaySheet(width: 560, onDismiss: { model.showMemory = false }) {
+            HStack {
+                Text(l10n.t("Memory files", "记忆文件"))
+                    .font(.system(size: 16, weight: .semibold))
+                Spacer()
+                Toggle(l10n.t("Memory", "记忆"), isOn: Binding(
+                    get: { model.grokConfig.memoryEnabled },
+                    set: { value in
+                        try? model.configStore.set(section: "memory", key: "enabled", bool: value)
+                        model.grokConfig = model.configStore.load()
+                    }
+                ))
+                .toggleStyle(.switch)
+            }
+            Text(l10n.t("Markdown under ~/.grok/memory. Open a file to preview or edit.", "文件在 ~/.grok/memory。点开可预览或编辑。"))
+                .font(.system(size: 12))
+                .foregroundStyle(palette.secondary)
+            if model.memoryFiles.isEmpty {
+                Text(l10n.t("No memory files yet. Turn memory on, then /remember or /flush.", "还没有记忆文件。打开记忆后用 /remember 或 /flush。"))
+                    .font(.system(size: 13))
+                    .foregroundStyle(palette.secondary)
+                    .padding(.vertical, 12)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(model.memoryFiles) { file in
+                            Button {
+                                model.openMemoryFile(file)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(file.title)
+                                        .font(.system(size: 13, weight: .medium))
+                                    Text(file.scope)
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(palette.secondary)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(8)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .frame(height: 280)
+            }
+            HStack {
+                Button(l10n.t("Open folder", "打开文件夹")) {
+                    let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".grok/memory")
+                    try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+                    NSWorkspace.shared.open(url)
+                }
+                .buttonStyle(GrokSecondaryButtonStyle())
+                Spacer()
+            }
+        }
+        .onAppear { model.refreshMemoryFiles() }
+    }
+}
+
+struct WorktreeSheet: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.palette) private var palette
+    @Environment(\.l10n) private var l10n
+
+    var body: some View {
+        OverlaySheet(width: 560, onDismiss: { model.showWorktrees = false }) {
+            Text(l10n.t("Worktrees", "Worktree"))
+                .font(.system(size: 16, weight: .semibold))
+            Text(l10n.t("Isolated checkouts for this repo. Opening one starts a new session there.", "当前仓库的隔离 checkout。打开会在那个目录开新会话。"))
+                .font(.system(size: 12))
+                .foregroundStyle(palette.secondary)
+            HStack(spacing: 8) {
+                TextField(l10n.t("branch name", "分支名"), text: $model.newWorktreeName)
+                    .textFieldStyle(.plain)
+                    .padding(10)
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.hairline))
+                Button(l10n.t("Create", "创建")) { model.createWorktree() }
+                    .buttonStyle(GrokPrimaryButtonStyle())
+                    .disabled(model.newWorktreeName.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            if model.worktrees.isEmpty {
+                Text(l10n.t("No worktrees yet.", "还没有 worktree。"))
+                    .font(.system(size: 13))
+                    .foregroundStyle(palette.secondary)
+                    .padding(.vertical, 12)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(model.worktrees) { tree in
+                            HStack {
+                                Button {
+                                    model.openWorktree(tree)
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(tree.name)
+                                            .font(.system(size: 13, weight: .medium))
+                                        Text([tree.branch, tree.path].filter { !$0.isEmpty }.joined(separator: " · "))
+                                            .font(.system(size: 11))
+                                            .foregroundStyle(palette.secondary)
+                                            .lineLimit(1)
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                .buttonStyle(.plain)
+                                Button(role: .destructive) {
+                                    model.removeWorktree(tree)
+                                } label: {
+                                    Image(systemName: "trash")
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            .padding(8)
+                        }
+                    }
+                }
+                .frame(height: 240)
+            }
+        }
+        .onAppear { model.refreshWorktrees() }
+    }
+}
+
+struct PluginTrustSheet: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.palette) private var palette
+    @Environment(\.l10n) private var l10n
+
+    var body: some View {
+        OverlaySheet(width: 480, onDismiss: { model.pluginPending = nil }) {
+            Text(l10n.t("Trust this plugin?", "信任这个插件？"))
+                .font(.system(size: 16, weight: .semibold))
+            if let plugin = model.pluginPending {
+                Text(plugin.name)
+                    .font(.system(size: 14, weight: .medium))
+                if !plugin.detail.isEmpty {
+                    Text(plugin.detail)
+                        .font(.system(size: 12))
+                        .foregroundStyle(palette.secondary)
+                }
+                Text(l10n.t(
+                    "Installing enables its skills, MCP servers, and hooks. Only install plugins you trust.",
+                    "安装后会启用它的技能、MCP 和钩子。只装你信任的来源。"
+                ))
+                .font(.system(size: 12))
+                .foregroundStyle(palette.secondary)
+            }
+            HStack {
+                Spacer()
+                Button(l10n.t("Cancel", "取消")) { model.pluginPending = nil }
+                    .buttonStyle(GrokSecondaryButtonStyle())
+                Button(l10n.t("Trust & install", "信任并安装")) { model.installPendingPlugin() }
+                    .buttonStyle(GrokPrimaryButtonStyle())
+            }
+        }
+    }
+}

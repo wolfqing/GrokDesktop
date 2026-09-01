@@ -68,6 +68,7 @@ enum InspectorPane: String, CaseIterable, Identifiable {
     case work
     case terminals
     case changes
+    case hooks
 
     var id: String { rawValue }
 
@@ -77,6 +78,7 @@ enum InspectorPane: String, CaseIterable, Identifiable {
         case .work: return chinese ? "任务" : "Tasks"
         case .terminals: return chinese ? "终端" : "Terminals"
         case .changes: return chinese ? "变更" : "Changes"
+        case .hooks: return chinese ? "钩子" : "Hooks"
         }
     }
 }

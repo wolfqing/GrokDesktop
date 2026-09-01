@@ -1,7 +1,7 @@
 # Grok Build features Desktop has not shipped as first-class UI
 
-Research date: 2026-08-30  
-Grok Desktop baseline: `main` at v0.1.18 (`e7ccadd`).  
+Research date: 2026-08-30. High-leverage UI shipped in v0.1.19.  
+Grok Desktop baseline: `main` at v0.1.19.  
 Sources: `~/.grok/docs/user-guide/` (27 guides), `grok --help` and subcommands, Desktop `AppModel.handleCommand`, Settings, Skills, Automations, Dashboard, Inspector.
 
 This is a product inventory, not a build plan. Desktop is an ACP client for the local `grok` CLI. The query loop, tools, sandbox, and most compaction already live in grok. Desktop should not grow a second agent runtime. The question is which Build surfaces deserve a native window versus a slash that already reaches the CLI.
@@ -79,12 +79,18 @@ ACP already delivers unused signal: `hook_execution`, `compaction_checkpoint`. S
 
 ### High leverage
 
-1. **Plugin marketplace + trust** — browse sources, `install --trust`, enable / disable, show bundled skills / MCP / hooks. Today: CLI dump.
-2. **Memory file browser** — list `~/.grok/memory/MEMORY.md` and per-project dirs; open / edit. Today: boolean only. Grok memory is markdown files, not a vector DB.
-3. **Hook timeline + editor** — render `hook_execution` (blocked?, duration); add / remove; trust project hooks. Today: filename list.
-4. **Compaction as an object** — checkpoint list, tokens before / after, what was kept; one-click `/compact` from the context pane. Today: one chip + short recap.
-5. **Subagent = child session** — open the child transcript; badge isolation (in-process vs worktree); parent chat keeps the summary. Today: type / status / elapsed.
-6. **Permission provenance** — say why a call was allowed: session / config / hook / mode / classifier. Settings omit `acceptEdits` and `dontAsk`. Composer has Plan; the Settings permission menu does not.
+Shipped as native UI (2026-09-01):
+
+1. **Plugin marketplace + trust** — Skills page Plugins tab; `grok plugin list --json --available`; Trust & install (`--trust`); enable / disable / uninstall; add marketplace source.
+2. **Memory file browser** — `/memory` lists `~/.grok/memory` (global / workspace / session); preview in the inspector.
+3. **Hook timeline** — inspector Hooks pane from `hook_execution` plus inspect catalog. Not a full hook editor / folder-trust UI yet.
+4. **Compaction checkpoints** — inspector Context lists session `compaction_checkpoints/` and live ACP events; Compact now.
+5. **Subagent = child session** — click a subagent to open its transcript; isolation string when the CLI sends it.
+6. **Worktree / skill disable / `/loop`** — `/worktree` sheet (list, create git worktree, open as session); skill cards toggle `[skills].disabled` and send qualified `/plugin:slug`; inspector Loops from `scheduled_task_*`.
+
+Still open:
+
+- **Permission provenance** — say why a call was allowed: session / config / hook / mode / classifier. Settings omit `acceptEdits` and `dontAsk`. Composer has Plan; the Settings permission menu does not.
 
 ### Medium
 

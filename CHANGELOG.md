@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.19 - 2026-09-01
+
+Grok Build surfaces that were CLI dumps now have native UI.
+
+- Skills page has a Plugins tab: marketplace browse, trust-and-install, enable, disable, uninstall.
+- `/memory` lists `~/.grok/memory` files and opens them in the inspector.
+- Inspector shows hook timeline, compaction checkpoints with Compact now, clickable subagent transcripts, and `/loop` jobs.
+- `/worktree` lists isolated checkouts and can create a git worktree.
+- Skill cards toggle `[skills].disabled` and send qualified `/plugin:slug` names.
+
 ## 0.1.18 - 2026-08-27
 
 Opening Skills and Connectors no longer stalls the window.

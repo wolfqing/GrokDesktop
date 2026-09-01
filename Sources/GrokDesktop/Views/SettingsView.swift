@@ -614,7 +614,7 @@ struct SettingsView: View {
             ))
             .foregroundStyle(palette.secondary)
             HStack {
-                Text("Grok Desktop 0.1.18")
+                Text("Grok Desktop 0.1.19")
                 Spacer()
                 Text(model.client.grokVersion ?? "grok ?")
                     .foregroundStyle(palette.secondary)
@@ -702,17 +702,28 @@ struct SettingsView: View {
                 }
             }
             labeledList("Skills", ["\(model.skills.count)"])
-            labeledList("Plugins", model.extensions.plugins.isEmpty ? [l10n.t("None installed", "未安装")] : model.extensions.plugins)
-            labeledList("Hooks", model.extensions.hooks.isEmpty ? [l10n.t("None", "无")] : model.extensions.hooks)
+            labeledList(
+                "Plugins",
+                model.plugins.filter(\.isInstalled).isEmpty
+                    ? [l10n.t("None installed", "未安装")]
+                    : model.plugins.filter(\.isInstalled).map(\.name)
+            )
+            labeledList(
+                "Hooks",
+                model.hookDefinitions.isEmpty
+                    ? [l10n.t("None", "无")]
+                    : model.hookDefinitions.prefix(12).map(\.title)
+            )
             HStack {
                 Button(l10n.t("MCP doctor", "MCP 诊断")) {
                     model.showSettings = false
                     model.handleCommand("/mcps doctor")
                 }
                 .buttonStyle(GrokSecondaryButtonStyle())
-                Button(l10n.t("List plugins", "列出插件")) {
+                Button(l10n.t("Open plugins", "打开插件")) {
                     model.showSettings = false
-                    model.handleCommand("/plugins list")
+                    model.destination = .skills
+                    model.skillsTab = 2
                 }
                 .buttonStyle(GrokSecondaryButtonStyle())
             }
@@ -763,6 +774,18 @@ struct SettingsView: View {
                     }
                 )
             )
+            Button(l10n.t("Browse memory files", "浏览记忆文件")) {
+                model.showSettings = false
+                model.refreshMemoryFiles()
+                model.showMemory = true
+            }
+            .buttonStyle(GrokSecondaryButtonStyle())
+            Button(l10n.t("Worktrees", "Worktree")) {
+                model.showSettings = false
+                model.refreshWorktrees()
+                model.showWorktrees = true
+            }
+            .buttonStyle(GrokSecondaryButtonStyle())
             toggle(
                 l10n.t("Codebase indexing", "代码索引"),
                 isOn: Binding(
@@ -792,7 +815,7 @@ struct SettingsView: View {
             HStack {
                 Text("App")
                 Spacer()
-                Text("0.1.18")
+                Text("0.1.19")
             }
             HStack {
                 Text("grok")

@@ -44,6 +44,9 @@ public final class ACPClient: ObservableObject {
     @Published public private(set) var recap = ""
     @Published public private(set) var compacted = false
     @Published public private(set) var subagents: [AgentSubagent] = []
+    @Published public private(set) var hookEvents: [HookEvent] = []
+    @Published public private(set) var checkpoints: [CompactionCheckpoint] = []
+    @Published public private(set) var scheduledTasks: [ScheduledTask] = []
     @Published public private(set) var events: [ACPEvent] = []
     @Published public private(set) var terminals: [TerminalSnapshot] = []
     @Published public var allowEditsThisSession = false
@@ -211,7 +214,7 @@ public final class ACPClient: ObservableObject {
                 "protocolVersion": 1,
                 "clientInfo": [
                     "name": "GrokDesktop",
-                    "version": "0.1.18"
+                    "version": "0.1.19"
                 ],
                 "clientCapabilities": [
                     "fs": [
@@ -287,6 +290,9 @@ public final class ACPClient: ObservableObject {
         workspace.recap = ""
         workspace.compacted = false
         workspace.subagents = []
+        workspace.hookEvents = []
+        workspace.checkpoints = []
+        workspace.scheduledTasks = []
         workspace.stopRequested = false
         workspace.isTurnRunning = false
         workspace.hydratedFromDisk = false
@@ -679,6 +685,9 @@ public final class ACPClient: ObservableObject {
         recap = ""
         compacted = false
         subagents = []
+        hookEvents = []
+        checkpoints = []
+        scheduledTasks = []
         if process?.isRunning == true {
             state = .initialized
         }
@@ -1076,6 +1085,9 @@ public final class ACPClient: ObservableObject {
             recap = workspace.recap
             compacted = workspace.compacted
             subagents = workspace.subagents
+            hookEvents = workspace.hookEvents
+            checkpoints = workspace.checkpoints
+            scheduledTasks = workspace.scheduledTasks
         }
         terminals = terminalsHost.snapshots
         refreshLive()

@@ -19,6 +19,7 @@ public struct GrokConfig: Equatable, Sendable {
     public var heavyEffort: String
     public var mcpHint: String
     public var mcpNames: [String]
+    public var disabledSkills: [String]
     public var raw: String
 
     public init(
@@ -40,6 +41,7 @@ public struct GrokConfig: Equatable, Sendable {
         heavyEffort: String = "xhigh",
         mcpHint: String = "",
         mcpNames: [String] = [],
+        disabledSkills: [String] = [],
         raw: String = ""
     ) {
         self.defaultModel = defaultModel
@@ -60,6 +62,7 @@ public struct GrokConfig: Equatable, Sendable {
         self.heavyEffort = heavyEffort
         self.mcpHint = mcpHint
         self.mcpNames = mcpNames
+        self.disabledSkills = disabledSkills
         self.raw = raw
     }
 
@@ -114,6 +117,7 @@ public struct ConfigStore: Sendable {
         config.heavyModel = string(raw, section: "grok_desktop", key: "heavy_model") ?? config.heavyModel
         config.heavyEffort = string(raw, section: "grok_desktop", key: "heavy_effort") ?? config.heavyEffort
         config.mcpNames = mcpNames(in: raw)
+        config.disabledSkills = stringArray(raw, section: "skills", key: "disabled")
         if !config.mcpNames.isEmpty || raw.contains("[mcp") || raw.contains("[[mcp") {
             config.mcpHint = config.mcpNames.isEmpty
                 ? "MCP servers are declared in ~/.grok/config.toml"
@@ -152,6 +156,13 @@ public struct ConfigStore: Sendable {
     public func set(section: String, key: String, int value: Int) throws {
         var raw = (try? String(contentsOf: fileURL, encoding: .utf8)) ?? ""
         raw = upsert(raw, section: section, key: key, value: String(value))
+        try write(raw)
+    }
+
+    public func set(section: String, key: String, array value: [String]) throws {
+        var raw = (try? String(contentsOf: fileURL, encoding: .utf8)) ?? ""
+        let rendered = "[" + value.map { quoted($0) }.joined(separator: ", ") + "]"
+        raw = upsert(raw, section: section, key: key, value: rendered)
         try write(raw)
     }
 
@@ -211,6 +222,37 @@ public struct ConfigStore: Sendable {
 
     private func int(_ raw: String, section: String, key: String) -> Int? {
         string(raw, section: section, key: key).flatMap(Int.init)
+    }
+
+    private func stringArray(_ raw: String, section: String, key: String) -> [String] {
+        guard let body = sectionBody(raw, section: section) else { return [] }
+        for line in body.split(separator: "\n", omittingEmptySubsequences: false) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.hasPrefix("#"), trimmed.hasPrefix("\(key)") else { continue }
+            let parts = trimmed.split(separator: "=", maxSplits: 1)
+            guard parts.count == 2 else { continue }
+            var value = parts[1].trimmingCharacters(in: .whitespaces)
+            if let comment = value.firstIndex(of: "#"), !value.hasPrefix("[") {
+                value = String(value[..<comment]).trimmingCharacters(in: .whitespaces)
+            }
+            guard value.hasPrefix("[") else { return [] }
+            var names: [String] = []
+            var current = ""
+            var inQuote = false
+            for character in value.dropFirst().dropLast() {
+                if character == "\"" {
+                    if inQuote {
+                        names.append(current)
+                        current = ""
+                    }
+                    inQuote.toggle()
+                } else if inQuote {
+                    current.append(character)
+                }
+            }
+            return names
+        }
+        return []
     }
 
     private func sectionBody(_ raw: String, section: String) -> String? {

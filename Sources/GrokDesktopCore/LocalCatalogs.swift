@@ -100,6 +100,7 @@ public struct SkillRecord: Identifiable, Hashable, Sendable, Codable {
     public var sourceKind: String
     public var userInvocable: Bool
     public var pluginName: String?
+    public var enabled: Bool
 
     public init(
         slug: String,
@@ -109,7 +110,8 @@ public struct SkillRecord: Identifiable, Hashable, Sendable, Codable {
         directory: URL? = nil,
         sourceKind: String = "user",
         userInvocable: Bool = true,
-        pluginName: String? = nil
+        pluginName: String? = nil,
+        enabled: Bool = true
     ) {
         self.slug = slug
         self.title = title
@@ -119,6 +121,40 @@ public struct SkillRecord: Identifiable, Hashable, Sendable, Codable {
         self.sourceKind = sourceKind
         self.userInvocable = userInvocable
         self.pluginName = pluginName
+        self.enabled = enabled
+    }
+
+    public var invocation: String {
+        if let pluginName, !pluginName.isEmpty {
+            return "/\(pluginName):\(slug)"
+        }
+        if SlashBuiltins.handles("/\(slug)") {
+            return sourceKind == "project" ? "/local:\(slug)" : "/user:\(slug)"
+        }
+        return "/\(slug)"
+    }
+
+    public func marking(enabled: Bool) -> SkillRecord {
+        var next = self
+        next.enabled = enabled
+        return next
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case slug, title, detail, icon, directory, sourceKind, userInvocable, pluginName, enabled
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        slug = try container.decode(String.self, forKey: .slug)
+        title = try container.decode(String.self, forKey: .title)
+        detail = try container.decode(String.self, forKey: .detail)
+        icon = try container.decode(String.self, forKey: .icon)
+        directory = try container.decodeIfPresent(URL.self, forKey: .directory)
+        sourceKind = try container.decodeIfPresent(String.self, forKey: .sourceKind) ?? "user"
+        userInvocable = try container.decodeIfPresent(Bool.self, forKey: .userInvocable) ?? true
+        pluginName = try container.decodeIfPresent(String.self, forKey: .pluginName)
+        enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
     }
 }
 

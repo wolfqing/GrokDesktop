@@ -118,6 +118,18 @@ struct RootView: View {
                 addMCPSheet
                     .zIndex(6)
             }
+            if model.showMemory {
+                MemorySheet()
+                    .zIndex(6)
+            }
+            if model.showWorktrees {
+                WorktreeSheet()
+                    .zIndex(6)
+            }
+            if model.pluginPending != nil {
+                PluginTrustSheet()
+                    .zIndex(7)
+            }
             if model.showFind {
                 FindSheet()
                     .zIndex(6)

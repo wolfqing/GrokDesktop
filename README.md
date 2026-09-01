@@ -20,7 +20,7 @@ Community project. Not an official xAI / SpaceXAI product.
 
 ## Install
 
-**Download:** [Grok-Desktop-0.1.18.zip](https://github.com/wolfqing/GrokDesktop/releases/download/v0.1.18/Grok-Desktop-0.1.18.zip) · [All releases](https://github.com/wolfqing/GrokDesktop/releases)
+**Download:** [Grok-Desktop-0.1.19.zip](https://github.com/wolfqing/GrokDesktop/releases/download/v0.1.19/Grok-Desktop-0.1.19.zip) · [All releases](https://github.com/wolfqing/GrokDesktop/releases)
 
 1. macOS 14+
 2. Unzip and move `Grok Desktop.app` to Applications

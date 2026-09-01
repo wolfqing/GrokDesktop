@@ -93,6 +93,23 @@ public struct SessionIndex {
         return fileManager.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue
     }
 
+    public func record(id: String) -> SessionRecord? {
+        guard !id.isEmpty,
+              let cwdDirs = try? fileManager.contentsOfDirectory(
+                at: sessionsRoot,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+              )
+        else { return nil }
+        for cwdDir in cwdDirs {
+            let summary = cwdDir.appendingPathComponent(id, isDirectory: true).appendingPathComponent("summary.json")
+            if let record = decode(summaryURL: summary) {
+                return record
+            }
+        }
+        return nil
+    }
+
     public func directory(cwd: String, id: String) -> URL {
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
         let encoded = cwd.addingPercentEncoding(withAllowedCharacters: allowed) ?? cwd

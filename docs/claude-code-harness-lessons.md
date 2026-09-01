@@ -6,7 +6,7 @@ Grok Desktop baseline: `main` at v0.1.15 (`c0e30d7`).
 
 This note is product research, not a source dump. It does not reproduce leaked TypeScript, system prompts, classifier templates, or internal flags.
 
-Related: [Grok Build feature gap](build-feature-gap.md) — inventory of TUI/CLI surfaces Desktop has not shipped as first-class UI (v0.1.18).
+Related: [Grok Build feature gap](build-feature-gap.md) — inventory of TUI/CLI surfaces Desktop has not shipped as first-class UI (updated through v0.1.19).
 
 ## What leaked, and what it actually proves
 

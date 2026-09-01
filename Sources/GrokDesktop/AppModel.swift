@@ -134,6 +134,17 @@ final class AppModel: ObservableObject {
     @Published var personas: [String] = []
     @Published var officialWorkflows: [WorkflowRecord] = []
     @Published var mcpServers: [MCPServerRecord] = []
+    @Published var plugins: [PluginRecord] = []
+    @Published var marketplaces: [MarketplaceSource] = []
+    @Published var hookDefinitions: [HookDefinition] = []
+    @Published var memoryFiles: [MemoryFile] = []
+    @Published var worktrees: [WorktreeRecord] = []
+    @Published var showMemory = false
+    @Published var showWorktrees = false
+    @Published var pluginPending: PluginRecord?
+    @Published var pluginSource = ""
+    @Published var pluginBusy = false
+    @Published var newWorktreeName = ""
     @Published var showAddWorkflow = false
     @Published var showAddMCP = false
     @Published var showFind = false
@@ -539,20 +550,42 @@ final class AppModel: ObservableObject {
         catalogsLoading = skills.isEmpty
         let grokLocator = locator
         catalogsTask = Task { [weak self] in
-            let snapshot = await Task.detached(priority: .userInitiated) { () -> (skills: [SkillRecord], mcp: [MCPServerRecord], listed: [MCPServerRecord]) in
+            let snapshot = await Task.detached(priority: .userInitiated) { () -> (
+                skills: [SkillRecord],
+                mcp: [MCPServerRecord],
+                listed: [MCPServerRecord],
+                plugins: [PluginRecord],
+                hooks: [HookDefinition],
+                marketplaces: [MarketplaceSource]
+            ) in
+                let listed = MCPCatalog().load(locator: grokLocator, cwd: cwd)
+                let catalog = PluginCatalog.load(locator: grokLocator, cwd: cwd)
                 if let inspect = GrokInspect.load(locator: grokLocator, cwd: cwd, force: force) {
-                    let listed = MCPCatalog().load(locator: grokLocator, cwd: cwd)
-                    return (inspect.skills, inspect.mcp, listed)
+                    return (
+                        inspect.skills,
+                        inspect.mcp,
+                        listed,
+                        PluginCatalog.merge(inspect: inspect.plugins, listed: catalog.plugins),
+                        inspect.hooks,
+                        catalog.marketplaces
+                    )
                 }
                 let disk = SkillCatalog().load(cwd: cwd)
-                let listed = MCPCatalog().load(locator: grokLocator, cwd: cwd)
-                return (disk, listed, listed)
+                return (disk, listed, listed, catalog.plugins, [], catalog.marketplaces)
             }.value
             await MainActor.run {
                 guard let self else { return }
                 self.catalogsTask = nil
                 self.catalogsLoading = false
-                self.applyCatalogs(skills: snapshot.skills, mcp: snapshot.mcp, listed: snapshot.listed, cwd: key)
+                self.applyCatalogs(
+                    skills: snapshot.skills,
+                    mcp: snapshot.mcp,
+                    listed: snapshot.listed,
+                    plugins: snapshot.plugins,
+                    hooks: snapshot.hooks,
+                    marketplaces: snapshot.marketplaces,
+                    cwd: key
+                )
             }
         }
     }
@@ -561,18 +594,31 @@ final class AppModel: ObservableObject {
         skills: [SkillRecord],
         mcp: [MCPServerRecord],
         listed: [MCPServerRecord],
+        plugins: [PluginRecord] = [],
+        hooks: [HookDefinition] = [],
+        marketplaces: [MarketplaceSource] = [],
         cwd: String
     ) {
+        grokConfig = configStore.load()
+        let disabled = Set(grokConfig.disabledSkills.map { $0.lowercased() })
         if !skills.isEmpty {
-            self.skills = skills
+            self.skills = skills.map { $0.marking(enabled: !disabled.contains($0.slug.lowercased())) }
         }
         if !mcp.isEmpty {
             mcpServers = MCPCatalog.merge(inspect: mcp, listed: listed)
         } else if !listed.isEmpty {
             mcpServers = listed
         }
+        if !plugins.isEmpty {
+            self.plugins = plugins
+        }
+        if !hooks.isEmpty {
+            hookDefinitions = hooks
+        }
+        if !marketplaces.isEmpty {
+            self.marketplaces = marketplaces
+        }
         catalogsCwd = cwd
-        grokConfig = configStore.load()
         extensions = ExtensionInventory.load(mcpNames: grokConfig.mcpNames)
     }
 
@@ -1219,8 +1265,198 @@ final class AppModel: ObservableObject {
     }
 
     func runSkill(_ skill: SkillRecord) {
+        guard skill.enabled else {
+            flash(copy.t("Skill is off. Turn it on first.", "这个技能关了。先打开。"))
+            return
+        }
         destination = .build
-        draft = "/\(skill.slug)"
+        draft = skill.invocation
+        sendDraft()
+    }
+
+    func toggleSkill(_ skill: SkillRecord) {
+        var disabled = Set(grokConfig.disabledSkills)
+        if skill.enabled {
+            disabled.insert(skill.slug)
+        } else {
+            disabled.remove(skill.slug)
+        }
+        let names = disabled.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+        do {
+            try configStore.set(section: "skills", key: "disabled", array: names)
+            grokConfig = configStore.load()
+            if let index = skills.firstIndex(where: { $0.slug == skill.slug }) {
+                skills[index].enabled = !skill.enabled
+            }
+        } catch {
+            flash(error.localizedDescription)
+        }
+    }
+
+    var filteredPlugins: [PluginRecord] {
+        let query = skillsQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let rows = plugins
+        guard !query.isEmpty else { return rows }
+        return rows.filter {
+            $0.name.localizedCaseInsensitiveContains(query)
+                || $0.detail.localizedCaseInsensitiveContains(query)
+                || $0.marketplace.localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    var installedPlugins: [PluginRecord] {
+        filteredPlugins.filter(\.isInstalled)
+    }
+
+    var availablePlugins: [PluginRecord] {
+        filteredPlugins.filter(\.isAvailable)
+    }
+
+    func confirmInstall(_ plugin: PluginRecord) {
+        pluginPending = plugin
+    }
+
+    func installPendingPlugin() {
+        guard let plugin = pluginPending else { return }
+        pluginPending = nil
+        runPlugin(
+            ["install", plugin.installSource, "--trust"],
+            success: copy.t("Installed \(plugin.name)", "已安装 \(plugin.name)")
+        )
+    }
+
+    func installPluginSource() {
+        let source = pluginSource.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !source.isEmpty else { return }
+        pluginSource = ""
+        runPlugin(
+            ["install", source, "--trust"],
+            success: copy.t("Installed plugin", "已安装插件")
+        )
+    }
+
+    func addMarketplaceSource() {
+        let source = pluginSource.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !source.isEmpty else { return }
+        pluginSource = ""
+        runPlugin(
+            ["marketplace", "add", source],
+            success: copy.t("Added marketplace", "已添加市场")
+        )
+    }
+
+    func togglePlugin(_ plugin: PluginRecord) {
+        let verb = plugin.enabled ? "disable" : "enable"
+        runPlugin(
+            [verb, plugin.name],
+            success: plugin.enabled
+                ? copy.t("Disabled \(plugin.name)", "已关闭 \(plugin.name)")
+                : copy.t("Enabled \(plugin.name)", "已打开 \(plugin.name)")
+        )
+    }
+
+    func uninstallPlugin(_ plugin: PluginRecord) {
+        runPlugin(
+            ["uninstall", plugin.name],
+            success: copy.t("Removed \(plugin.name)", "已卸载 \(plugin.name)")
+        )
+    }
+
+    func runPlugin(_ arguments: [String], success: String) {
+        pluginBusy = true
+        let cwd = client.workingDirectory
+        Task {
+            let output = await Task.detached { [locator] in
+                guard let binary = locator.locate() else { return (1 as Int32, "grok not found") }
+                let process = Process()
+                process.executableURL = binary
+                process.arguments = ["plugin"] + arguments
+                process.currentDirectoryURL = cwd
+                let pipe = Pipe()
+                process.standardOutput = pipe
+                process.standardError = pipe
+                do {
+                    try process.run()
+                    process.waitUntilExit()
+                } catch {
+                    return (1, error.localizedDescription)
+                }
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                let text = String(data: data, encoding: .utf8) ?? ""
+                return (process.terminationStatus, text)
+            }.value
+            pluginBusy = false
+            refreshCatalogs(force: true)
+            if output.0 == 0 {
+                flash(success)
+            } else {
+                cliReportTitle = "grok plugin \(arguments.joined(separator: " "))"
+                cliReportBody = output.1.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? copy.t("Command failed.", "命令失败。")
+                    : output.1
+                showCLIReport = true
+            }
+        }
+    }
+
+    func refreshMemoryFiles() {
+        memoryFiles = MemoryCatalog.load()
+    }
+
+    func openMemoryFile(_ file: MemoryFile) {
+        previewedFile = file.url
+        showInspector = true
+        destination = .build
+        showMemory = false
+    }
+
+    func refreshWorktrees() {
+        worktrees = WorktreeCatalog.load(locator: locator, cwd: client.workingDirectory)
+    }
+
+    func openWorktree(_ tree: WorktreeRecord) {
+        showWorktrees = false
+        startNewSession(cwd: tree.url)
+    }
+
+    func createWorktree() {
+        let name = newWorktreeName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        do {
+            let url = try WorktreeCatalog.create(named: name, cwd: client.workingDirectory)
+            newWorktreeName = ""
+            showWorktrees = false
+            startNewSession(cwd: url)
+            flash(copy.t("Opened worktree \(name)", "已打开 worktree \(name)"))
+        } catch {
+            flash(error.localizedDescription)
+        }
+    }
+
+    func removeWorktree(_ tree: WorktreeRecord) {
+        runGrokCLI(arguments: ["worktree", "rm", tree.path], title: "/worktree rm")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+            self?.refreshWorktrees()
+        }
+    }
+
+    func openSubagent(_ agent: AgentSubagent) {
+        let id = agent.childSessionId.isEmpty ? agent.id : agent.childSessionId
+        if client.focusIfLoaded(id) {
+            destination = .build
+            showInspector = true
+            return
+        }
+        if let record = sessions.first(where: { $0.id == id }) ?? sessionIndex.record(id: id) {
+            open(record)
+            return
+        }
+        flash(copy.t("No transcript for this subagent yet.", "这个子 agent 还没有 transcript。"))
+    }
+
+    func cancelScheduledTask(_ task: ScheduledTask) {
+        destination = .build
+        draft = "Cancel scheduled task \(task.id) (\(task.title))"
         sendDraft()
     }
 
@@ -1609,18 +1845,21 @@ final class AppModel: ObservableObject {
             destination = .skills
             skillsTab = 0
         case "/hooks", "/hooks-list", "/hooks-trust", "/hooks-add", "/hooks-remove", "/hooks-untrust":
-            settingsSection = .extensions
-            showSettings = true
+            destination = .build
+            showInspector = true
+            showInspectorPane(.hooks)
+            showSettings = false
         case "/plugins":
             if rest.isEmpty {
-                settingsSection = .extensions
-                showSettings = true
+                destination = .skills
+                skillsTab = 2
             } else {
                 let parts = rest.split(whereSeparator: \.isWhitespace).map(String.init)
-                runGrokCLI(arguments: ["plugin"] + parts, title: "/plugins")
+                runPlugin(parts, success: copy.t("Plugin command finished", "插件命令完成"))
             }
         case "/marketplace":
-            runGrokCLI(arguments: ["plugin", "marketplace", "list"], title: "/marketplace")
+            destination = .skills
+            skillsTab = 2
         case "/mcps":
             if rest.hasPrefix("doctor") {
                 let extra = rest.split(whereSeparator: \.isWhitespace).dropFirst().map(String.init)
@@ -1677,7 +1916,12 @@ final class AppModel: ObservableObject {
             presentClaudeImport()
         case "/worktree":
             let parts = rest.split(whereSeparator: \.isWhitespace).map(String.init)
-            runGrokCLI(arguments: ["worktree"] + (parts.isEmpty ? ["list"] : parts), title: "/worktree")
+            if parts.isEmpty || parts[0] == "list" || parts[0] == "ls" {
+                refreshWorktrees()
+                showWorktrees = true
+            } else {
+                runGrokCLI(arguments: ["worktree"] + parts, title: "/worktree")
+            }
         case "/quit", "/exit":
             NSApp.terminate(nil)
         default:
@@ -2017,8 +2261,8 @@ final class AppModel: ObservableObject {
         case "clear":
             runGrokCLI(arguments: ["memory", "clear", "--yes", "--workspace"], title: "/memory clear")
         default:
-            settingsSection = .agent
-            showSettings = true
+            refreshMemoryFiles()
+            showMemory = true
         }
     }
 
@@ -2195,7 +2439,7 @@ final class AppModel: ObservableObject {
 
     func exportDiagnostics() {
         let text = DiagnosticExport.make(
-            version: "0.1.18",
+            version: "0.1.19",
             grokVersion: client.grokVersion,
             state: String(describing: client.state),
             lastError: client.lastError,

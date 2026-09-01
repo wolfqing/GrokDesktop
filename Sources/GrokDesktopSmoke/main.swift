@@ -1152,5 +1152,87 @@ if case .tool(_, _, _, let detail)? = bulkyTool {
 let cached = TranscriptLoader.load(sessionDirectory: bulkyDir)
 expect(cached.items == bulky.items, "second load hits transcript cache")
 
+let pluginJSON = """
+[
+  {"status":"installed","name":"frontend-design","marketplace":"claude-plugins-official","path":"/tmp/p","source":"local"},
+  {"status":"available","name":"vercel","description":"Deploy to Vercel.","marketplace":"xAI Official","skill_count":3,"has_hooks":true,"has_mcp":true}
+]
+"""
+let listedPlugins = PluginCatalog.parseList(pluginJSON)
+expect(listedPlugins.contains(where: { $0.name == "frontend-design" && $0.isInstalled }), "parse installed plugin")
+expect(listedPlugins.contains(where: { $0.name == "vercel" && $0.isAvailable && $0.hasHooks && $0.skillCount == 3 }), "parse marketplace plugin")
+let inspectPlugins = PluginCatalog.parseInspect([
+    "plugins": [["name": "frontend-design", "enabled": false, "provides": ["skills": 1, "hooks": true]]]
+])
+let mergedPlugins = PluginCatalog.merge(inspect: inspectPlugins, listed: listedPlugins)
+expect(mergedPlugins.contains(where: { $0.name == "frontend-design" && !$0.enabled && $0.status == "disabled" }), "inspect disable merges")
+let markets = PluginCatalog.parseMarketplaces("""
+[{"name":"xAI Official","kind":"git","source":{"url":"https://github.com/xai-org/plugin-marketplace.git"}}]
+""")
+expect(markets.first?.name == "xAI Official", "parse marketplace source")
+
+let memRoot = FileManager.default.temporaryDirectory.appendingPathComponent("gd-mem-\(UUID().uuidString)", isDirectory: true)
+try! FileManager.default.createDirectory(at: memRoot, withIntermediateDirectories: true)
+try! "# global".write(to: memRoot.appendingPathComponent("MEMORY.md"), atomically: true, encoding: .utf8)
+let projectMem = memRoot.appendingPathComponent("app-abcd1234", isDirectory: true)
+try! FileManager.default.createDirectory(at: projectMem.appendingPathComponent("sessions"), withIntermediateDirectories: true)
+try! "# project".write(to: projectMem.appendingPathComponent("MEMORY.md"), atomically: true, encoding: .utf8)
+try! "# session".write(to: projectMem.appendingPathComponent("sessions/one.md"), atomically: true, encoding: .utf8)
+let memories = MemoryCatalog.load(home: memRoot)
+expect(memories.contains(where: { $0.scope == "global" }), "global memory file")
+expect(memories.contains(where: { $0.scope == "workspace" }), "workspace memory file")
+expect(memories.contains(where: { $0.scope == "session" }), "session memory file")
+
+let trees = WorktreeCatalog.parse("""
+[{"path":"/tmp/app-feat","branch":"feat","name":"feat"}]
+""")
+expect(trees.first?.name == "feat" && trees.first?.branch == "feat", "parse worktree json")
+
+let hookDefs = HarnessEvents.parseHooks([
+    "hooks": [[
+        "event": "PreToolUse",
+        "hookType": "command",
+        "target": "/tmp/hook.sh",
+        "source": ["type": "user"],
+        "compatibilityStatus": "enabled"
+    ]]
+])
+expect(hookDefs.first?.event == "PreToolUse", "parse hook definition")
+
+var harnessSnap = SessionSnapshot()
+SessionFold.apply(
+    SessionUpdate(kind: .hookExecution, raw: ["event": "PreToolUse", "command": "echo hi", "blocked": true]),
+    onto: &harnessSnap
+)
+SessionFold.apply(
+    SessionUpdate(kind: .compactionCheckpoint, text: "kept auth", raw: ["id": "cp1", "tokens_before": 8000, "tokens_after": 1200]),
+    onto: &harnessSnap
+)
+SessionFold.apply(
+    SessionUpdate(kind: .scheduledTaskCreated, text: "check deploy", raw: ["task_id": "loop-1", "prompt": "check deploy", "human_schedule": "30m"]),
+    onto: &harnessSnap
+)
+expect(harnessSnap.hookEvents.first?.blocked == true, "fold hook execution")
+expect(harnessSnap.checkpoints.first?.tokensBefore == 8000, "fold compaction checkpoint")
+expect(harnessSnap.scheduledTasks.first?.id == "loop-1", "fold scheduled task")
+SessionFold.apply(SessionUpdate(kind: .scheduledTaskDeleted, raw: ["task_id": "loop-1"]), onto: &harnessSnap)
+expect(harnessSnap.scheduledTasks.isEmpty, "fold scheduled delete")
+
+let builtinSkill = SkillRecord(slug: "compact", title: "Compact", detail: "skill", icon: "sparkles", sourceKind: "user")
+expect(builtinSkill.invocation == "/user:compact", "qualify skill that collides with builtin")
+let pluginSkill = SkillRecord(slug: "login", title: "Login", detail: "skill", icon: "sparkles", sourceKind: "plugin", pluginName: "acme")
+expect(pluginSkill.invocation == "/acme:login", "plugin skill uses qualified slash")
+let normalSkill = SkillRecord(slug: "review-pr", title: "Review", detail: "skill", icon: "sparkles")
+expect(normalSkill.invocation == "/review-pr", "plain skill keeps slug")
+
+let cfgURL = FileManager.default.temporaryDirectory.appendingPathComponent("gd-cfg-\(UUID().uuidString).toml")
+try! "[skills]\n".write(to: cfgURL, atomically: true, encoding: .utf8)
+let cfg = ConfigStore(fileURL: cfgURL)
+try! cfg.set(section: "skills", key: "disabled", array: ["review-pr", "wip"])
+expect(cfg.load().disabledSkills.contains("review-pr"), "config disabled skills")
+
+let foundByID = SessionIndex(sessionsRoot: indexRoot).record(id: "sid-fast")
+expect(foundByID != nil, "session index finds by folder id")
+
 print("GrokDesktopSmoke ok")
 

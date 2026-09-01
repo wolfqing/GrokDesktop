@@ -30,6 +30,9 @@ public final class SessionWorkspace: Identifiable {
     public var recap = ""
     public var compacted = false
     public var subagents: [AgentSubagent] = []
+    public var hookEvents: [HookEvent] = []
+    public var checkpoints: [CompactionCheckpoint] = []
+    public var scheduledTasks: [ScheduledTask] = []
     public var stopRequested = false
 
     public init(id: String, cwd: URL, directory: URL? = nil, title: String = "") {
@@ -105,6 +108,14 @@ public final class SessionWorkspace: Identifiable {
             planMarkdown = (try? String(contentsOf: plan, encoding: .utf8)) ?? planMarkdown
         }
         hunks = TranscriptLoader.loadHunks(sessionDirectory: directory)
+        let disk = HarnessEvents.loadCheckpoints(sessionDirectory: directory)
+        if !disk.isEmpty {
+            var merged = disk
+            for live in checkpoints where !merged.contains(where: { $0.id == live.id }) {
+                merged.insert(live, at: 0)
+            }
+            checkpoints = merged
+        }
     }
 }
 

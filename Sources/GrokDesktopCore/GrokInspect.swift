@@ -55,9 +55,9 @@ public enum GrokInspect {
         locator: GrokBinaryLocator = GrokBinaryLocator(),
         cwd: URL? = nil,
         force: Bool = false
-    ) -> (skills: [SkillRecord], mcp: [MCPServerRecord])? {
+    ) -> (skills: [SkillRecord], mcp: [MCPServerRecord], plugins: [PluginRecord], hooks: [HookDefinition])? {
         if !force, isFresh(cwd: cwd), let hit = cached(cwd: cwd) {
-            return hit
+            return (hit.skills, hit.mcp, [], [])
         }
         guard let grok = locator.locate() else { return nil }
         let directory = cwd ?? FileManager.default.homeDirectoryForCurrentUser
@@ -73,9 +73,18 @@ public enum GrokInspect {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return nil
         }
-        let snapshot = (parseSkills(object, cwd: cwd), parseMCP(object))
-        store(cwd: cwd, skills: snapshot.0, mcp: snapshot.1)
-        return snapshot
+        let skills = parseSkills(object, cwd: cwd)
+        let mcp = parseMCP(object)
+        store(cwd: cwd, skills: skills, mcp: mcp)
+        return (skills, mcp, parsePlugins(object), parseHooks(object))
+    }
+
+    public static func parsePlugins(_ object: [String: Any]) -> [PluginRecord] {
+        PluginCatalog.parseInspect(object)
+    }
+
+    public static func parseHooks(_ object: [String: Any]) -> [HookDefinition] {
+        HarnessEvents.parseHooks(object)
     }
 
     public static func store(
