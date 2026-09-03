@@ -252,7 +252,7 @@ struct CommandPalette: View {
             .init(command: "/du", title: l10n.t("Disk usage", "磁盘占用"), detail: l10n.t("Show ~/.grok disk use", "查看 ~/.grok 占用"), icon: "internaldrive", section: app),
             .init(command: "/models", title: l10n.t("Models list", "模型列表"), detail: l10n.t("List grok models", "列出 grok 模型"), icon: "square.stack.3d.up", section: app),
             .init(command: "/worktree", title: l10n.t("Worktrees", "Worktree"), detail: l10n.t("Open isolated checkouts", "打开隔离 checkout"), icon: "leaf", section: app),
-            .init(command: "/update", title: l10n.t("Update", "检查更新"), detail: l10n.t("Check the grok CLI for updates", "检查 grok CLI 更新"), icon: "arrow.down.circle", section: app),
+            .init(command: "/update", title: l10n.t("Update", "检查更新"), detail: l10n.t("Check and install grok CLI updates", "检查并安装 grok CLI 更新"), icon: "arrow.down.circle", section: app),
             .init(command: "/skills", title: l10n.skills, detail: l10n.t("Open installed skills", "打开已安装技能"), icon: "sparkles", section: app),
             .init(command: "/plugins", title: l10n.t("Plugins", "插件"), detail: l10n.t("Browse, trust, and install plugins", "浏览、信任并安装插件"), icon: "puzzlepiece.extension", section: app),
             .init(command: "/marketplace", title: l10n.t("Marketplace", "插件市场"), detail: l10n.t("Open the plugin marketplace", "打开插件市场"), icon: "storefront", section: app),

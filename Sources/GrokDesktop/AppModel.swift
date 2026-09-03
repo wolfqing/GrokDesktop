@@ -175,6 +175,9 @@ final class AppModel: ObservableObject {
     @Published var pendingBusySend: String?
     @Published var suppressSuggest = false
     @Published var goalMode = false
+    @Published var cliUpdate = CLIUpdateStatus()
+    @Published var isCheckingCLIUpdate = false
+    @Published var isUpdatingCLI = false
 
     @AppStorage("appearancePreference") var appearanceRaw = AppearancePreference.system.rawValue
     @AppStorage("languagePreference") var languageRaw = AppLanguage.system.rawValue
@@ -1088,7 +1091,7 @@ final class AppModel: ObservableObject {
             text = String(text[..<at])
         }
         if !text.isEmpty, !text.hasSuffix(" ") { text += " " }
-        draft = text + "@\(url.path) "
+        draft = text + PromptMedia.mentionToken(for: url) + " "
         mentionQuery = nil
         mentionMatches = []
         showAttachMenu = false
@@ -1892,7 +1895,9 @@ final class AppModel: ObservableObject {
         case "/models":
             runGrokCLI(arguments: ["models"], title: "/models")
         case "/update":
-            runGrokCLI(arguments: ["update", "--check"], title: "/update")
+            settingsSection = .advanced
+            showSettings = true
+            checkCLIUpdate(force: true)
         case "/shortcuts", "/keys":
             showShortcuts = true
         case "/vim-mode", "/minimal", "/fullscreen", "/full", "/edit-prompt", "/expand":
@@ -2324,6 +2329,46 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func checkCLIUpdate(force: Bool = false) {
+        if isCheckingCLIUpdate || isUpdatingCLI { return }
+        if !force, let checked = cliUpdate.checkedAt, Date().timeIntervalSince(checked) < 45 {
+            return
+        }
+        isCheckingCLIUpdate = true
+        let grokLocator = locator
+        Task {
+            let status = await Task.detached {
+                CLIUpdateStatus.check(locator: grokLocator)
+            }.value
+            cliUpdate = status
+            isCheckingCLIUpdate = false
+            client.refreshVersion()
+        }
+    }
+
+    func installCLIUpdate() {
+        if isUpdatingCLI || isCheckingCLIUpdate { return }
+        isUpdatingCLI = true
+        let grokLocator = locator
+        Task {
+            let result = await Task.detached {
+                CLIUpdateStatus.install(locator: grokLocator)
+            }.value
+            isUpdatingCLI = false
+            if result.ok {
+                flash(copy.t("CLI updated. Start a new session to use it.", "CLI 已更新。开一个新会话即可使用。"))
+                checkCLIUpdate(force: true)
+            } else {
+                cliUpdate.error = result.timedOut
+                    ? copy.t("Update timed out.", "更新超时。")
+                    : (result.text.isEmpty ? copy.t("Update failed.", "更新失败。") : result.text)
+                showCLIReport = true
+                cliReportTitle = "grok update"
+                cliReportBody = result.text.isEmpty ? (cliUpdate.error ?? "failed") : result.text
+            }
+        }
+    }
+
     func retryLocate() {
         firstRunReason = bootstrapReason()
         if firstRunReason == nil {
@@ -2439,7 +2484,7 @@ final class AppModel: ObservableObject {
 
     func exportDiagnostics() {
         let text = DiagnosticExport.make(
-            version: "0.1.19",
+            version: "0.1.20",
             grokVersion: client.grokVersion,
             state: String(describing: client.state),
             lastError: client.lastError,

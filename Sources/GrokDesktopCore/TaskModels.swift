@@ -184,6 +184,43 @@ public enum PromptTimestamp {
         return "\(seconds)s"
     }
 
+    /// CLI turn/phase timer: `2.5s`, `13m26s`, `1h2m`.
+    public static func formatCompactElapsed(_ value: TimeInterval) -> String {
+        if value < 60 {
+            return posixFormat("%.1fs", max(value, 0))
+        }
+        let total = max(Int(value.rounded()), 0)
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        let seconds = total % 60
+        if hours > 0 {
+            return "\(hours)h\(minutes)m"
+        }
+        return "\(minutes)m\(seconds)s"
+    }
+
+    /// CLI token chip: `12`, `1.23k`, `10.1k`, `130k`, `1.23m`.
+    public static func compactCount(_ value: Int) -> String {
+        if value < 1000 { return "\(value)" }
+        if value < 10_000 {
+            return posixFormat("%.2fk", Double(value) / 1000)
+        }
+        if value < 100_000 {
+            return posixFormat("%.1fk", Double(value) / 1000)
+        }
+        if value < 1_000_000 {
+            return "\(value / 1000)k"
+        }
+        if value < 10_000_000 {
+            return posixFormat("%.2fm", Double(value) / 1_000_000)
+        }
+        return posixFormat("%.1fm", Double(value) / 1_000_000)
+    }
+
+    private static func posixFormat(_ format: String, _ value: Double) -> String {
+        String(format: format, locale: Locale(identifier: "en_US_POSIX"), value)
+    }
+
     public static func applyTodos(from update: SessionUpdate, into todos: inout [AgentTodo]) {
         if let output = update.raw["rawOutput"] as? [String: Any],
            let updated = output["TodosUpdated"] as? [String: Any] {

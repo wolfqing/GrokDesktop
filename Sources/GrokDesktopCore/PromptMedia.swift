@@ -1,5 +1,17 @@
 import Foundation
 
+public struct MediaSpan: Equatable, Sendable {
+    public var range: NSRange
+    public var url: URL
+    public var isImage: Bool
+
+    public init(range: NSRange, url: URL, isImage: Bool) {
+        self.range = range
+        self.url = url
+        self.isImage = isImage
+    }
+}
+
 public enum PromptMedia {
     public static let imageExtensions: Set<String> = [
         "png", "jpg", "jpeg", "gif", "webp", "heic", "heif", "tif", "tiff", "bmp"
@@ -21,6 +33,17 @@ public enum PromptMedia {
         }
     }
 
+    public static func mentionToken(for url: URL) -> String {
+        let path = url.path
+        if path.contains(where: { $0.isWhitespace || $0 == "\"" }) {
+            let escaped = path
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "\"", with: "\\\"")
+            return "@\"\(escaped)\""
+        }
+        return "@\(path)"
+    }
+
     public static func fileURL(from raw: String?) -> URL? {
         guard var value = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
             return nil
@@ -28,8 +51,16 @@ public enum PromptMedia {
         if value.hasPrefix("@") {
             value.removeFirst()
         }
+        if (value.hasPrefix("\"") && value.hasSuffix("\"") && value.count >= 2)
+            || (value.hasPrefix("'") && value.hasSuffix("'") && value.count >= 2) {
+            value = unescapeQuoted(String(value.dropFirst().dropLast()))
+        }
+        if value.hasPrefix("~/") || value == "~" {
+            value = (value as NSString).expandingTildeInPath
+        }
         if value.hasPrefix("file:") {
             return URL(string: value)
+                ?? URL(string: value.addingPercentEncoding(withAllowedCharacters: .urlFragmentAllowed) ?? value)
         }
         if value.hasPrefix("/") {
             return URL(fileURLWithPath: value)
@@ -37,41 +68,96 @@ public enum PromptMedia {
         return nil
     }
 
-    public static func imageURLs(in text: String) -> [URL] {
+    public static func spans(in text: String) -> [MediaSpan] {
         guard !text.isEmpty else { return [] }
         let ns = text as NSString
-        guard let regex = try? NSRegularExpression(pattern: #"@?((?:file://)?/\S+)"#) else { return [] }
+        let full = NSRange(location: 0, length: ns.length)
+        var candidates: [MediaSpan] = []
+
+        func add(_ range: NSRange, raw: String) {
+            guard range.location != NSNotFound, range.length > 1 else { return }
+            guard let url = fileURL(from: raw) else { return }
+            if isImageURL(url), !isPlausibleImagePath(url.path) { return }
+            candidates.append(MediaSpan(range: range, url: url, isImage: isImageURL(url)))
+        }
+
+        if let regex = try? NSRegularExpression(pattern: #"@"([^"]+)""#) {
+            for match in regex.matches(in: text, range: full) {
+                add(match.range, raw: ns.substring(with: match.range(at: 1)))
+            }
+        }
+        if let regex = try? NSRegularExpression(pattern: #"@'([^']+)'"#) {
+            for match in regex.matches(in: text, range: full) {
+                add(match.range, raw: ns.substring(with: match.range(at: 1)))
+            }
+        }
+
+        let extensions = imageExtensions.sorted().joined(separator: "|")
+        if let regex = try? NSRegularExpression(pattern: "(?i)@?((?:file://)?/.+?\\.(?:\(extensions)))\\b") {
+            for match in regex.matches(in: text, range: full) {
+                add(match.range, raw: ns.substring(with: match.range(at: 1)))
+            }
+        }
+
+        if let regex = try? NSRegularExpression(pattern: #"@((?:file://)?(?:~|/)\S+)"#) {
+            for match in regex.matches(in: text, range: full) {
+                add(match.range, raw: ns.substring(with: match.range(at: 1)))
+            }
+        }
+
+        candidates.sort {
+            if $0.range.location != $1.range.location {
+                return $0.range.location < $1.range.location
+            }
+            return $0.range.length > $1.range.length
+        }
+
+        var used = IndexSet()
+        var result: [MediaSpan] = []
+        for span in candidates {
+            let end = span.range.location + span.range.length
+            guard span.range.location < end else { continue }
+            let interval = span.range.location..<end
+            if used.intersects(integersIn: interval) { continue }
+            used.insert(integersIn: interval)
+            result.append(span)
+        }
+        return result
+    }
+
+    public static func imageURLs(in text: String) -> [URL] {
         var urls: [URL] = []
         var seen = Set<String>()
-        for match in regex.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
-            let raw = ns.substring(with: match.range(at: 1))
-            guard let url = fileURL(from: raw), isImageURL(url) else { continue }
-            if seen.insert(url.path).inserted {
-                urls.append(url)
+        for span in spans(in: text) where span.isImage {
+            if seen.insert(span.url.path).inserted {
+                urls.append(span.url)
             }
         }
         return urls
     }
 
     public static func displayText(_ text: String) -> String {
+        let ns = text as NSString
+        var ranges: [NSRange] = []
+        if let regex = try? NSRegularExpression(pattern: #"\[Image #\d+\]"#) {
+            ranges.append(contentsOf: regex.matches(
+                in: text,
+                range: NSRange(location: 0, length: ns.length)
+            ).map(\.range))
+        }
+        ranges.append(contentsOf: spans(in: text).filter(\.isImage).map(\.range))
+        ranges.sort {
+            if $0.location != $1.location { return $0.location > $1.location }
+            return $0.length > $1.length
+        }
         var result = text
-        result = result.replacingOccurrences(of: #"\[Image #\d+\]"#, with: " ", options: .regularExpression)
-        if let regex = try? NSRegularExpression(pattern: #"@?((?:file://)?/\S+)"#) {
-            let ns = result as NSString
-            var ranges: [NSRange] = []
-            for match in regex.matches(in: result, range: NSRange(location: 0, length: ns.length)).reversed() {
-                let raw = ns.substring(with: match.range(at: 1))
-                if let url = fileURL(from: raw), isImageURL(url) {
-                    ranges.append(match.range)
-                }
-            }
-            var stripped = result
-            for range in ranges {
-                if let swiftRange = Range(range, in: stripped) {
-                    stripped.replaceSubrange(swiftRange, with: " ")
-                }
-            }
-            result = stripped
+        var consumedUntil = Int.max
+        for range in ranges {
+            let end = range.location + range.length
+            if end > consumedUntil { continue }
+            guard let swiftRange = Range(range, in: result) else { continue }
+            result.replaceSubrange(swiftRange, with: " ")
+            consumedUntil = range.location
         }
         result = result.replacingOccurrences(of: #"[ \t]{2,}"#, with: " ", options: .regularExpression)
         result = result.replacingOccurrences(of: #"\n{3,}"#, with: "\n\n", options: .regularExpression)
@@ -111,10 +197,26 @@ public enum PromptMedia {
         guard !urls.isEmpty else {
             return [["type": "text", "text": text]]
         }
+        let indexByPath = Dictionary(uniqueKeysWithValues: urls.enumerated().map { ($0.element.path, $0.offset) })
         var labeled = text
-        for (index, url) in urls.enumerated() {
+        let imageSpans = spans(in: text).filter(\.isImage).sorted {
+            $0.range.location > $1.range.location
+        }
+        var used = IndexSet()
+        var replacedPaths = Set<String>()
+        for span in imageSpans {
+            let end = span.range.location + span.range.length
+            let interval = span.range.location..<end
+            if used.intersects(integersIn: interval) { continue }
+            guard let number = indexByPath[span.url.path] else { continue }
+            guard let range = Range(span.range, in: labeled) else { continue }
+            labeled.replaceSubrange(range, with: "[Image #\(number + 1)]")
+            used.insert(integersIn: interval)
+            replacedPaths.insert(span.url.path)
+        }
+        for (index, url) in urls.enumerated() where !replacedPaths.contains(url.path) {
             let token = "[Image #\(index + 1)]"
-            let variants = ["@\(url.path)", url.path, url.absoluteString]
+            let variants = [mentionToken(for: url), "@\(url.path)", url.path, url.absoluteString]
             var replaced = false
             for variant in variants {
                 if let range = labeled.range(of: variant) {
@@ -182,6 +284,31 @@ public enum PromptMedia {
     private static func isTransientPaste(_ url: URL) -> Bool {
         let name = url.lastPathComponent
         return name.hasPrefix("grok-paste-") || url.path.contains("/grokdesktop-images/")
+    }
+
+    private static func unescapeQuoted(_ value: String) -> String {
+        var result = ""
+        var escaping = false
+        for character in value {
+            if escaping {
+                result.append(character)
+                escaping = false
+            } else if character == "\\" {
+                escaping = true
+            } else {
+                result.append(character)
+            }
+        }
+        if escaping { result.append("\\") }
+        return result
+    }
+
+    private static func isPlausibleImagePath(_ path: String) -> Bool {
+        guard isImageURL(URL(fileURLWithPath: path)) else { return false }
+        if FileManager.default.fileExists(atPath: path) { return true }
+        if !path.contains(where: \.isWhitespace) { return true }
+        let directory = URL(fileURLWithPath: path).deletingLastPathComponent().path
+        return !directory.contains(where: \.isWhitespace)
     }
 
     private static func resolveImageURL(_ content: [String: Any]) -> URL? {

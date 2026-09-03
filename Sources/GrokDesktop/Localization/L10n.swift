@@ -74,7 +74,7 @@ struct L10n {
             "此对话不会出现在历史记录中，也不会用于训练模型。"
         )
     }
-    var think: String { t("Thinking", "思考") }
+    var think: String { t("Thinking…", "思考中…") }
     var newAutomation: String { t("New Automation", "新建自动化") }
     var suggested: String { t("Suggested", "推荐") }
     var add: String { t("Add", "添加") }

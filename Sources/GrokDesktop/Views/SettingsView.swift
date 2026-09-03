@@ -50,27 +50,29 @@ struct SettingsView: View {
     }
 
     private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            groupLabel(l10n.general)
-            item(.account, l10n.account, "person")
-            item(.appearance, l10n.appearance, "pencil")
-            item(.behavior, l10n.behavior, "slider.horizontal.3")
-            item(.session, l10n.t("Session", "会话"), "clock")
-            groupLabel(l10n.grok).padding(.top, 14)
-            item(.customize, l10n.customize, "slider.horizontal.2.square")
-            item(.models, l10n.t("Models", "模型"), "cpu")
-            item(.feedback, l10n.t("Feedback", "反馈"), "bubble.left")
-            item(.extensions, l10n.t("Extensions", "扩展"), "puzzlepiece.extension")
-            item(.agent, l10n.t("Agent", "Agent"), "cpu")
-            groupLabel(l10n.payments).padding(.top, 14)
-            item(.billing, l10n.billing, "creditcard")
-            item(.usage, l10n.usage, "bolt")
-            groupLabel(l10n.dataAndInformation).padding(.top, 14)
-            item(.dataControls, l10n.dataControls, "doc.text")
-            item(.advanced, l10n.t("Advanced", "高级"), "wrench.and.screwdriver")
-            Spacer()
+        ScrollView {
+            VStack(alignment: .leading, spacing: 2) {
+                groupLabel(l10n.general)
+                item(.account, l10n.account, "person")
+                item(.appearance, l10n.appearance, "paintbrush")
+                item(.behavior, l10n.behavior, "switch.2")
+                item(.session, l10n.t("Session", "会话"), "clock")
+                groupLabel(l10n.grok).padding(.top, 14)
+                item(.customize, l10n.customize, "slider.horizontal.3")
+                item(.models, l10n.t("Models", "模型"), "cpu")
+                item(.feedback, l10n.t("Feedback", "反馈"), "bubble.left")
+                item(.extensions, l10n.t("Extensions", "扩展"), "puzzlepiece")
+                item(.agent, l10n.t("Agent", "Agent"), "cpu")
+                groupLabel(l10n.payments).padding(.top, 14)
+                item(.billing, l10n.billing, "creditcard")
+                item(.usage, l10n.usage, "bolt")
+                groupLabel(l10n.dataAndInformation).padding(.top, 14)
+                item(.dataControls, l10n.dataControls, "lock.doc")
+                item(.advanced, l10n.t("Advanced", "高级"), "gearshape")
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(16)
     }
 
     private func groupLabel(_ text: String) -> some View {
@@ -85,17 +87,23 @@ struct SettingsView: View {
         Button {
             model.settingsSection = section
         } label: {
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 Image(systemName: icon)
-                    .frame(width: 16)
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 18, height: 18)
+                    .imageScale(.medium)
                 Text(title)
-                Spacer()
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 0)
             }
             .font(.system(size: 13.5))
             .foregroundStyle(palette.text)
             .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
             .background(model.settingsSection == section ? palette.selected : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
@@ -319,11 +327,14 @@ struct SettingsView: View {
             HStack {
                 Text(l10n.t("Permission mode", "权限模式"))
                 Spacer()
-                Menu(model.grokConfig.permissionMode) {
-                    ForEach(["ask", "auto", "always-approve"], id: \.self) { mode in
-                        Button(mode) {
+                Menu(permissionModeLabel(model.grokConfig.permissionMode)) {
+                    ForEach(["ask", "plan", "auto", "always-approve"], id: \.self) { mode in
+                        Button(permissionModeLabel(mode)) {
                             try? model.configStore.set(section: "ui", key: "permission_mode", value: mode)
                             model.grokConfig = model.configStore.load()
+                            if let agentMode = AgentMode(settings: mode) {
+                                model.client.setMode(agentMode)
+                            }
                         }
                     }
                 }
@@ -614,7 +625,7 @@ struct SettingsView: View {
             ))
             .foregroundStyle(palette.secondary)
             HStack {
-                Text("Grok Desktop 0.1.19")
+                Text("Grok Desktop 0.1.20")
                 Spacer()
                 Text(model.client.grokVersion ?? "grok ?")
                     .foregroundStyle(palette.secondary)
@@ -811,76 +822,184 @@ struct SettingsView: View {
     }
 
     private var advancedPage: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Text("App")
-                Spacer()
-                Text("0.1.19")
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 10) {
+                versionRow(l10n.t("App", "应用"), "0.1.20")
+                versionRow(
+                    "grok CLI",
+                    model.cliUpdate.current.isEmpty
+                        ? (model.client.grokVersion ?? l10n.t("not found", "未找到"))
+                        : model.cliUpdate.current
+                )
+                if !model.cliUpdate.latest.isEmpty, model.cliUpdate.latest != model.cliUpdate.current {
+                    versionRow(l10n.t("Latest CLI", "CLI 最新"), model.cliUpdate.latest)
+                }
+                if let channel = cliChannelLabel {
+                    Text(channel)
+                        .font(.system(size: 12))
+                        .foregroundStyle(palette.secondary)
+                }
+                Text(cliUpdateMessage)
+                    .font(.system(size: 13))
+                    .foregroundStyle(model.cliUpdate.error == nil ? palette.secondary : Color.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    Button {
+                        model.checkCLIUpdate(force: true)
+                    } label: {
+                        if model.isCheckingCLIUpdate {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Text(l10n.t("Check for updates", "检查更新"))
+                        }
+                    }
+                    .buttonStyle(GrokSecondaryButtonStyle())
+                    .disabled(model.isCheckingCLIUpdate || model.isUpdatingCLI)
+
+                    Button {
+                        model.installCLIUpdate()
+                    } label: {
+                        if model.isUpdatingCLI {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Text(l10n.t("Update CLI", "更新 CLI"))
+                        }
+                    }
+                    .buttonStyle(GrokPrimaryButtonStyle())
+                    .disabled(!canInstallCLI)
+                }
             }
-            HStack {
-                Text("grok")
-                Spacer()
-                Text(model.client.grokVersion ?? l10n.t("not found", "未找到"))
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(palette.hairline))
+
+            if let error = model.client.lastError, !error.isEmpty {
+                Text(error)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            if let error = model.client.lastError {
-                Text(error).foregroundStyle(.red)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(l10n.t("Tools", "工具"))
+                    .font(.system(size: 13, weight: .semibold))
+                advancedActions
             }
-            if !model.client.events.isEmpty {
-                Text(l10n.t("ACP events", "ACP 事件"))
-                    .font(.system(size: 12, weight: .medium))
-                Text(model.client.events.suffix(16).map(\.line).joined(separator: "\n"))
-                    .font(.system(size: 11, design: .monospaced))
-                    .textSelection(.enabled)
-                    .padding(10)
-                    .background(palette.chip, in: RoundedRectangle(cornerRadius: 8))
-            }
-            if !model.client.stderrLines.isEmpty {
-                Text(model.client.stderrLines.suffix(12).joined(separator: "\n"))
-                    .font(.system(size: 11, design: .monospaced))
-                    .textSelection(.enabled)
-                    .padding(10)
-                    .background(palette.chip, in: RoundedRectangle(cornerRadius: 8))
-            }
-            Button(l10n.t("Open config.toml", "打开 config.toml")) {
-                model.configStore.openInEditor()
-            }
-            .buttonStyle(GrokSecondaryButtonStyle())
-            Button("/doctor") {
-                model.showSettings = false
-                model.handleCommand("/doctor")
-            }
-            .buttonStyle(GrokSecondaryButtonStyle())
-            Button("/inspect") {
-                model.showSettings = false
-                model.handleCommand("/inspect")
-            }
-            .buttonStyle(GrokSecondaryButtonStyle())
-            Button("/import-claude") {
-                model.showSettings = false
-                model.handleCommand("/import-claude")
-            }
-            .buttonStyle(GrokSecondaryButtonStyle())
-            Button(l10n.t("Check CLI updates", "检查 CLI 更新")) {
-                model.showSettings = false
-                model.handleCommand("/update")
-            }
-            .buttonStyle(GrokSecondaryButtonStyle())
-            Button(l10n.t("Export diagnostic", "导出诊断包")) {
-                model.exportDiagnostics()
-            }
-            .buttonStyle(GrokSecondaryButtonStyle())
-            Button("Docs") { model.openDocs() }
-                .buttonStyle(GrokSecondaryButtonStyle())
-            Button("CHANGELOG") { model.openChangelog() }
-                .buttonStyle(GrokSecondaryButtonStyle())
-            if !model.client.capabilities.methods.isEmpty {
-                Text(model.client.capabilities.methods.joined(separator: ", "))
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(palette.secondary)
+
+            if !model.client.events.isEmpty || !model.client.stderrLines.isEmpty {
+                DisclosureGroup(l10n.t("Diagnostics", "诊断")) {
+                    if !model.client.events.isEmpty {
+                        Text(model.client.events.suffix(12).map(\.line).joined(separator: "\n"))
+                            .font(.system(size: 11, design: .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    if !model.client.stderrLines.isEmpty {
+                        Text(model.client.stderrLines.suffix(8).joined(separator: "\n"))
+                            .font(.system(size: 11, design: .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .font(.system(size: 13))
             }
         }
         .font(.system(size: 13))
         .padding(.top, 8)
+        .onAppear { model.checkCLIUpdate() }
+    }
+
+    private var canInstallCLI: Bool {
+        !model.isCheckingCLIUpdate
+            && !model.isUpdatingCLI
+            && model.cliUpdate.updateAvailable
+            && model.cliUpdate.error == nil
+    }
+
+    private var cliChannelLabel: String? {
+        let channel = model.cliUpdate.channel
+        guard !channel.isEmpty else { return nil }
+        return l10n.t("Channel: \(channel)", "通道：\(channel)")
+    }
+
+    private var cliUpdateMessage: String {
+        if model.isUpdatingCLI {
+            return l10n.t("Installing the latest grok CLI…", "正在安装最新 grok CLI…")
+        }
+        if model.isCheckingCLIUpdate, model.cliUpdate.checkedAt == nil {
+            return l10n.t("Checking…", "正在检查…")
+        }
+        if let error = model.cliUpdate.error, !error.isEmpty {
+            return error
+        }
+        if model.cliUpdate.updateAvailable {
+            return l10n.t(
+                "A newer CLI is available. Update, then start a new session.",
+                "有新的 CLI。更新后开一个新会话即可使用。"
+            )
+        }
+        if !model.cliUpdate.current.isEmpty {
+            return l10n.t("This CLI is up to date.", "当前 CLI 已是最新。")
+        }
+        return l10n.t("Check whether the grok CLI has a newer build.", "检查 grok CLI 是否有新版本。")
+    }
+
+    private var advancedActions: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Button(l10n.t("Open config.toml", "打开 config.toml")) {
+                    model.configStore.openInEditor()
+                }
+                .buttonStyle(GrokSecondaryButtonStyle())
+                Button(l10n.t("Export diagnostic", "导出诊断包")) {
+                    model.exportDiagnostics()
+                }
+                .buttonStyle(GrokSecondaryButtonStyle())
+            }
+            HStack(spacing: 8) {
+                Button("/doctor") {
+                    model.showSettings = false
+                    model.handleCommand("/doctor")
+                }
+                .buttonStyle(GrokSecondaryButtonStyle())
+                Button("/inspect") {
+                    model.showSettings = false
+                    model.handleCommand("/inspect")
+                }
+                .buttonStyle(GrokSecondaryButtonStyle())
+                Button("/import-claude") {
+                    model.showSettings = false
+                    model.handleCommand("/import-claude")
+                }
+                .buttonStyle(GrokSecondaryButtonStyle())
+            }
+            HStack(spacing: 8) {
+                Button("Docs") { model.openDocs() }
+                    .buttonStyle(GrokSecondaryButtonStyle())
+                Button("CHANGELOG") { model.openChangelog() }
+                    .buttonStyle(GrokSecondaryButtonStyle())
+            }
+        }
+    }
+
+    private func versionRow(_ title: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title)
+            Spacer()
+            Text(value)
+                .foregroundStyle(palette.secondary)
+                .textSelection(.enabled)
+        }
+    }
+
+    private func permissionModeLabel(_ mode: String) -> String {
+        switch mode {
+        case "ask", "default": return l10n.t("Ask me", "询问")
+        case "plan": return l10n.t("Plan", "计划")
+        case "auto": return l10n.t("Auto", "自动")
+        case "always-approve", "bypassPermissions": return l10n.t("Do it", "全权")
+        default: return mode
+        }
     }
 
     private func toggle(_ title: String, subtitle: String? = nil, isOn: Binding<Bool>) -> some View {

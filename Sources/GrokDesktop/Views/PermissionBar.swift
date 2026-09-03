@@ -14,6 +14,11 @@ struct PermissionBar: View {
             Text(l10n.t("Needs your OK", "需要你点头"))
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(palette.secondary)
+            if !provenance.isEmpty {
+                Text(provenance)
+                    .font(.system(size: 11))
+                    .foregroundStyle(palette.secondary)
+            }
             Text(displayTitle)
                 .font(.system(size: 14, weight: .medium))
                 .lineLimit(3)
@@ -101,6 +106,26 @@ struct PermissionBar: View {
                 .stroke(palette.hairline, lineWidth: 1)
         )
         .padding(.horizontal, inset ? 24 : 0)
+    }
+
+    private var provenance: String {
+        let mode = model.client.mode.title(chinese: l10n.language == .chinese)
+        switch request.source.lowercased() {
+        case "rule":
+            return l10n.t("Because a config rule asked", "因为配置规则要求询问") + " · \(mode)"
+        case "hook":
+            return l10n.t("Because a hook asked", "因为钩子要求询问") + " · \(mode)"
+        case "classifier":
+            return l10n.t("Because auto mode is unsure", "因为自动模式不确定") + " · \(mode)"
+        case "session":
+            return l10n.t("Remembered for this session", "本会话已记住") + " · \(mode)"
+        case "mode":
+            return mode
+        case "":
+            return l10n.t("Mode", "模式") + " · \(mode)"
+        default:
+            return "\(request.source) · \(mode)"
+        }
     }
 
     private var displayTitle: String {

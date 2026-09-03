@@ -16,6 +16,8 @@ public final class ACPClient: ObservableObject {
     @Published public private(set) var sessionID: String?
     @Published public private(set) var items: [ConversationItem] = []
     @Published public private(set) var isTurnRunning = false
+    @Published public private(set) var turnStartedAt: Date?
+    @Published public var outgoingPreview: String?
     @Published public private(set) var isStopping = false
     @Published public private(set) var permission: PermissionRequest?
     @Published public private(set) var userQuestion: UserQuestionRequest?
@@ -214,7 +216,7 @@ public final class ACPClient: ObservableObject {
                 "protocolVersion": 1,
                 "clientInfo": [
                     "name": "GrokDesktop",
-                    "version": "0.1.19"
+                    "version": "0.1.20"
                 ],
                 "clientCapabilities": [
                     "fs": [
@@ -415,8 +417,17 @@ public final class ACPClient: ObservableObject {
     public func send(text: String, sessionID target: String? = nil, kind: QueuedPrompt.Kind = .followUp) async throws {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        let existing = (target ?? sessionID).flatMap { workspaceByID[$0] } ?? currentWorkspace
+        if let workspace = existing, workspace.isTurnRunning {
+            workspace.promptQueue.append(QueuedPrompt(text: trimmed, kind: kind))
+            syncFromCurrent()
+            return
+        }
+        if let workspace = existing {
+            revealUserTurn(trimmed, on: workspace)
+        }
         try await connectIfNeeded()
-        if sessionID == nil, target == nil {
+        if sessionID == nil, target == nil, self.sessionID == nil {
             try await newSession()
         }
         let id = target ?? sessionID
@@ -431,21 +442,7 @@ public final class ACPClient: ObservableObject {
             syncFromCurrent()
             return
         }
-
-        let lastUser = workspace.items.last.flatMap { item -> String? in
-            if case .user(_, let existing) = item { return existing }
-            return nil
-        }
-        if lastUser != trimmed {
-            workspace.fold(SessionFold.userTurn(trimmed))
-        }
-        workspace.beginTurn()
-        isStopping = false
-        workspace.assistantBufferID = nil
-        workspace.thoughtBufferID = nil
-        workspace.lastError = nil
-        lastError = nil
-        syncFromCurrent()
+        revealUserTurn(trimmed, on: workspace)
 
         apply(tier: modelTier)
         var params: [String: Any] = [
@@ -503,6 +500,34 @@ public final class ACPClient: ObservableObject {
             return
         }
         try await send(text: trimmed, sessionID: id)
+    }
+
+    private func revealUserTurn(_ trimmed: String, on workspace: SessionWorkspace) {
+        let lastUser = workspace.items.last.flatMap { item -> String? in
+            if case .user(_, let existing) = item { return existing }
+            return nil
+        }
+        if lastUser != trimmed {
+            workspace.fold(SessionFold.userTurn(trimmed))
+        }
+        if !workspace.isTurnRunning {
+            workspace.beginTurn()
+        }
+        isStopping = false
+        workspace.assistantBufferID = nil
+        workspace.thoughtBufferID = nil
+        workspace.lastError = nil
+        lastError = nil
+        syncFromCurrent()
+    }
+
+    public func removeQueuedPrompt(id: String, sessionID target: String? = nil) {
+        if let workspace = target.flatMap({ workspaceByID[$0] }) ?? currentWorkspace {
+            workspace.promptQueue.removeAll { $0.id == id }
+            syncFromCurrent()
+            return
+        }
+        promptQueue.removeAll { $0.id == id }
     }
 
     public func cancelTurn(sessionID target: String? = nil) {
@@ -1064,6 +1089,7 @@ public final class ACPClient: ObservableObject {
                 items = workspace.items
             }
             isTurnRunning = workspace.isTurnRunning
+            turnStartedAt = workspace.turnStartedAt
             permission = workspace.permission
             userQuestion = workspace.userQuestion
             lastError = workspace.lastError ?? lastError
@@ -1369,6 +1395,10 @@ public final class ACPClient: ObservableObject {
             if path.hasPrefix("/") { return URL(fileURLWithPath: path) }
             return nil
         }
+    }
+
+    public func refreshVersion() {
+        grokVersion = Self.readVersion(locator: locator)
     }
 
     public static func readVersion(locator: GrokBinaryLocator) -> String? {

@@ -1,5 +1,21 @@
 import Foundation
 
+public struct AsideTurn: Equatable, Hashable, Sendable, Identifiable {
+    public var id: String
+    public var question: String
+    public var answer: String
+    public var pending: Bool
+    public var queued: Bool
+
+    public init(id: String, question: String, answer: String, pending: Bool, queued: Bool) {
+        self.id = id
+        self.question = question
+        self.answer = answer
+        self.pending = pending
+        self.queued = queued
+    }
+}
+
 public struct QueuedPrompt: Equatable, Hashable, Sendable, Identifiable {
     public var id: String
     public var text: String
@@ -96,6 +112,7 @@ public enum SessionFold {
     }
 
     public static func apply(_ update: SessionUpdate, onto snapshot: inout SessionSnapshot) {
+        let previousThought = snapshot.thoughtID
         TranscriptLoader.apply(
             update: update,
             items: &snapshot.items,
@@ -107,6 +124,14 @@ public enum SessionFold {
             todos: &snapshot.todos,
             tasks: &snapshot.tasks
         )
+        if let previousThought, snapshot.thoughtID != previousThought {
+            TurnTiming.stampThought(
+                id: previousThought,
+                onto: &snapshot.itemDurations,
+                dates: snapshot.itemDates,
+                endedAt: update.timestamp ?? Date()
+            )
+        }
         switch update.kind {
         case .sessionRecap:
             let summary = update.text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -173,6 +198,76 @@ public enum SessionFold {
 
     public static func isAside(_ text: String) -> Bool {
         SlashBuiltins.name(in: text) == "/btw"
+    }
+
+    public static func asidePrompt(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return trimmed }
+        if isAside(trimmed) { return trimmed }
+        return "/btw \(trimmed)"
+    }
+
+    public static func asideDisplay(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isAside(trimmed) else { return trimmed }
+        let rest = trimmed.drop(while: { !$0.isWhitespace }).drop(while: { $0.isWhitespace })
+        return rest.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    public static func belongsToAside(_ item: ConversationItem, items: [ConversationItem]) -> Bool {
+        guard let index = items.firstIndex(where: { $0.id == item.id }) else { return false }
+        for candidate in items[...index].reversed() {
+            if case .user(_, let text) = candidate {
+                return isAside(text)
+            }
+        }
+        return false
+    }
+
+    public static func asideTurns(
+        items: [ConversationItem],
+        queued: [QueuedPrompt] = []
+    ) -> [AsideTurn] {
+        var turns: [AsideTurn] = []
+        var current: AsideTurn?
+        for item in items {
+            if case .user(let id, let text) = item, isAside(text) {
+                if let current { turns.append(current) }
+                current = AsideTurn(
+                    id: id,
+                    question: asideDisplay(text),
+                    answer: "",
+                    pending: true,
+                    queued: false
+                )
+                continue
+            }
+            guard var open = current else { continue }
+            switch item {
+            case .assistant(_, let text, let done):
+                if !text.isEmpty {
+                    open.answer = open.answer.isEmpty ? text : open.answer + text
+                }
+                open.pending = !done
+                current = open
+            case .user:
+                turns.append(open)
+                current = nil
+            default:
+                break
+            }
+        }
+        if let current { turns.append(current) }
+        for prompt in queued where prompt.kind == .aside {
+            turns.append(AsideTurn(
+                id: prompt.id,
+                question: asideDisplay(prompt.text),
+                answer: "",
+                pending: true,
+                queued: true
+            ))
+        }
+        return turns
     }
 
     public static func applyGoal(_ text: String, enabled: Bool) -> String {

@@ -214,6 +214,7 @@ struct ChatView: View {
     @State private var scrollMetrics = ChatScrollMetrics()
     @State private var scrollDriver = ChatScrollDriver()
     @State private var scrollbarDragging = false
+    @State private var expandedThoughts: Set<String> = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -292,6 +293,10 @@ struct ChatView: View {
                                 ForEach(displayedRows) { row in
                                     displayRow(row)
                                         .id(row.id)
+                                }
+                                ForEach(model.client.promptQueue) { queued in
+                                    queuedPromptRow(queued)
+                                        .id("queue-\(queued.id)")
                                 }
                                 Color.clear
                                     .frame(height: 8)
@@ -392,6 +397,8 @@ struct ChatView: View {
                         .padding(.bottom, 8)
                 }
 
+                turnStatusBlock
+
                 composerBlock
             }
 
@@ -422,13 +429,75 @@ struct ChatView: View {
     }
 
     private func compactContext(_ value: Int) -> String {
-        if value >= 1_000_000 {
-            return String(format: "%.1fM", Double(value) / 1_000_000)
+        PromptTimestamp.compactCount(value)
+    }
+
+    @ViewBuilder
+    private var turnStatusBlock: some View {
+        if model.client.isTurnRunning || model.client.isStopping {
+            TimelineView(.periodic(from: .now, by: 0.25)) { timeline in
+                turnStatusRow(now: timeline.date)
+            }
+            .frame(maxWidth: GrokTheme.contentWidth)
+            .padding(.horizontal, model.compactChat ? 16 : 28)
+            .padding(.bottom, 4)
         }
-        if value >= 1000 {
-            return String(format: "%.0fk", Double(value) / 1000)
+    }
+
+    private func turnStatusRow(now: Date) -> some View {
+        let chinese = l10n.language == .chinese
+        let status = TurnNarrative.status(
+            items: model.client.items,
+            dates: model.client.itemDates,
+            chinese: chinese,
+            running: model.client.isTurnRunning,
+            stopping: model.client.isStopping
+        )
+        let phase = status?.phaseStartedAt.map { now.timeIntervalSince($0) }
+        let turn = model.client.turnStartedAt.map { now.timeIntervalSince($0) }
+        let toolColor = Color.green.opacity(palette.isDark ? 0.85 : 0.75)
+        return HStack(spacing: 8) {
+            RunningStatusIcon(
+                active: model.client.isTurnRunning && !model.client.isStopping,
+                idleSystemImage: "stop.fill",
+                color: status?.isTool == true ? toolColor : palette.secondary,
+                size: 10
+            )
+            Text(status?.label ?? (chinese ? "思考中…" : "Thinking…"))
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(status?.isTool == true ? toolColor : palette.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            if let phase, phase >= 0.2 {
+                Text(PromptTimestamp.formatCompactElapsed(phase))
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(palette.secondary)
+                    .fixedSize()
+            }
+            Spacer(minLength: 8)
+            if let turn, turn >= 1 {
+                Text(PromptTimestamp.formatCompactElapsed(turn))
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(palette.secondary)
+                    .fixedSize()
+            }
+            if model.displayedContextUsed > 0 {
+                Text("⇣\(PromptTimestamp.compactCount(model.displayedContextUsed))")
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(palette.secondary)
+                    .fixedSize()
+            }
+            Button {
+                if !model.client.isStopping { model.client.stopWork() }
+            } label: {
+                Text("[stop]")
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundStyle(model.client.isStopping ? palette.secondary : Color.red.opacity(0.85))
+            }
+            .buttonStyle(.plain)
+            .disabled(model.client.isStopping)
+            .help(model.client.isStopping ? l10n.stopping : l10n.stop)
         }
-        return "\(value)"
     }
 
     private var composerBlock: some View {
@@ -627,46 +696,55 @@ struct ChatView: View {
 
     private enum DisplayRow: Identifiable {
         case message(ConversationItem)
-        case tools(id: String, items: [ConversationItem])
+        case stream(id: String, items: [ConversationItem])
 
         var id: String {
             switch self {
             case .message(let item):
                 return item.id
-            case .tools(let id, _):
+            case .stream(let id, _):
                 return id
             }
         }
+    }
 
+    private enum StreamPiece: Identifiable {
+        case tools(id: String, items: [ConversationItem])
+        case item(ConversationItem)
+
+        var id: String {
+            switch self {
+            case .tools(let id, _):
+                return id
+            case .item(let item):
+                return item.id
+            }
+        }
     }
 
     private var displayedRows: [DisplayRow] {
         var rows: [DisplayRow] = []
         var pending: [ConversationItem] = []
 
-        func flushTools() {
+        func flushStream() {
             guard !pending.isEmpty else { return }
             let id = pending.map(\.id).joined(separator: "+")
-            rows.append(.tools(id: id, items: pending))
+            rows.append(.stream(id: id, items: pending))
             pending = []
         }
 
         for item in model.client.items {
             if case .thought = item, !model.showThinkingBlocks { continue }
             if isTodoTool(item) { continue }
-            if case .tool(_, let title, let status, _) = item {
-                if canMerge(title: title, status: status, onto: pending) {
-                    pending.append(item)
-                } else {
-                    flushTools()
-                    pending = [item]
-                }
-            } else {
-                flushTools()
+            switch item {
+            case .user, .assistant:
+                flushStream()
                 rows.append(.message(item))
+            default:
+                pending.append(item)
             }
         }
-        flushTools()
+        flushStream()
         return rows
     }
 
@@ -734,15 +812,19 @@ struct ChatView: View {
     }
 
     private var lastDisplayID: String? {
-        displayedRows.last?.id
+        if let queued = model.client.promptQueue.last {
+            return "queue-\(queued.id)"
+        }
+        return displayedRows.last?.id
     }
 
     private func canMerge(title: String, status: String, onto pending: [ConversationItem]) -> Bool {
-        guard model.mergeToolRows, let last = pending.last else { return false }
+        guard model.mergeToolRows else { return false }
+        guard !ToolVoice.isActive(status), ToolVoice.foldsInVerbGroup(title) else { return false }
+        guard let last = pending.last else { return true }
         guard case .tool(_, let previousTitle, let previousStatus, _) = last else { return false }
-        guard !ToolVoice.isActive(status), !ToolVoice.isActive(previousStatus) else { return false }
-        let kind = ToolVoice.kind(title)
-        return kind != .other && kind == ToolVoice.kind(previousTitle)
+        guard !ToolVoice.isActive(previousStatus) else { return false }
+        return ToolVoice.foldsInVerbGroup(previousTitle)
     }
 
     private var todoFingerprint: String {
@@ -766,7 +848,7 @@ struct ChatView: View {
         case .none:
             tail = "empty"
         }
-        return "\(model.client.sessionID ?? "")-\(model.client.items.count)-\(tail)-\(todoFingerprint)-\(model.client.isTurnRunning)-\(model.client.isStopping)"
+        return "\(model.client.sessionID ?? "")-\(model.client.items.count)-\(tail)-\(todoFingerprint)-\(model.client.isTurnRunning)-\(model.client.isStopping)-q\(model.client.promptQueue.count)"
     }
 
     private func pinToLatestOnOpen(_ proxy: ScrollViewProxy) {
@@ -812,7 +894,8 @@ struct ChatView: View {
     }
 
     private func copyPrompt(_ id: String, _ text: String) {
-        model.copyText(text)
+        let shown = PromptMedia.displayText(text)
+        model.copyText(shown.isEmpty ? text : shown)
         copiedPromptID = id
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
             if copiedPromptID == id {
@@ -858,8 +941,8 @@ struct ChatView: View {
         switch row {
         case .message(let item):
             messageRow(item)
-        case .tools(_, let items):
-            toolCluster(items)
+        case .stream(_, let items):
+            streamCluster(items)
         }
     }
 
@@ -873,55 +956,83 @@ struct ChatView: View {
     }
 
     @ViewBuilder
-    private func messageRow(_ item: ConversationItem) -> some View {
-        switch item {
-        case .user(let id, let text):
-            let images = PromptMedia.resolvedImages(stored: model.client.itemImages[id], text: text)
-            let shown = PromptMedia.displayText(text)
-            HStack {
-                Spacer(minLength: 80)
-                VStack(alignment: .trailing, spacing: 4) {
+    private func queuedPromptRow(_ item: QueuedPrompt) -> some View {
+        userPromptRow(
+            id: "queue-\(item.id)",
+            text: item.text,
+            images: PromptMedia.imageURLs(in: item.text),
+            queued: true,
+            onRemove: { model.client.removeQueuedPrompt(id: item.id) }
+        )
+    }
+
+    @ViewBuilder
+    private func userPromptRow(
+        id: String,
+        text: String,
+        images: [URL],
+        queued: Bool,
+        onRemove: (() -> Void)? = nil
+    ) -> some View {
+        let shown = PromptMedia.displayText(text)
+        let caption = shown.isEmpty && images.isEmpty ? text : shown
+        HStack {
+            Spacer(minLength: 80)
+            VStack(alignment: .trailing, spacing: 4) {
+                if queued {
+                    Text(l10n.t("Queued", "排队中"))
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(palette.secondary)
+                } else {
                     timestamp(id, always: true)
-                    VStack(alignment: .trailing, spacing: 8) {
-                        ForEach(images, id: \.path) { url in
-                            PromptImageView(url: url)
-                        }
-                        if !shown.isEmpty {
-                            LinkedText(
-                                text: shown,
-                                fontSize: GrokTheme.chatBubbleSize(compact: model.compactChat),
-                                markdown: false,
-                                fillsWidth: false,
-                                color: palette.promptBubbleText,
-                                maxContentWidth: GrokTheme.bubbleMaxWidth
-                            )
-                        } else if images.isEmpty {
-                            LinkedText(
-                                text: text,
-                                fontSize: GrokTheme.chatBubbleSize(compact: model.compactChat),
-                                markdown: false,
-                                fillsWidth: false,
-                                color: palette.promptBubbleText,
-                                maxContentWidth: GrokTheme.bubbleMaxWidth
-                            )
-                        }
+                }
+                VStack(alignment: .trailing, spacing: 8) {
+                    ForEach(images, id: \.path) { url in
+                        PromptImageView(url: url)
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, model.compactChat ? 8 : 10)
-                    .background(palette.promptBubble, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    HStack(spacing: 4) {
-                        if isLatestUser(id) {
-                            Button {
-                                model.restorePromptToComposer(text)
-                            } label: {
-                                Image(systemName: "arrow.uturn.backward")
-                                    .font(.system(size: 11, weight: .medium))
-                                    .foregroundStyle(palette.secondary)
-                                    .frame(width: 22, height: 22)
-                            }
-                            .buttonStyle(.plain)
-                            .help(l10n.restorePrompt)
+                    if !caption.isEmpty {
+                        LinkedText(
+                            text: caption,
+                            fontSize: GrokTheme.chatBubbleSize(compact: model.compactChat),
+                            markdown: false,
+                            fillsWidth: false,
+                            color: queued ? palette.secondary : palette.promptBubbleText,
+                            maxContentWidth: GrokTheme.bubbleMaxWidth
+                        )
+                    }
+                }
+                .padding(.horizontal, images.isEmpty ? 14 : 8)
+                .padding(.vertical, model.compactChat ? 8 : 10)
+                .background(
+                    (queued ? palette.chip : palette.promptBubble),
+                    in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+                )
+                .opacity(queued ? 0.92 : 1)
+                HStack(spacing: 4) {
+                    if queued {
+                        Button {
+                            onRemove?()
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(palette.secondary)
+                                .frame(width: 22, height: 22)
                         }
+                        .buttonStyle(.plain)
+                        .help(l10n.t("Remove from queue", "从队列移除"))
+                    } else if isLatestUser(id) {
+                        Button {
+                            model.restorePromptToComposer(text)
+                        } label: {
+                            Image(systemName: "arrow.uturn.backward")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(palette.secondary)
+                                .frame(width: 22, height: 22)
+                        }
+                        .buttonStyle(.plain)
+                        .help(l10n.restorePrompt)
+                    }
+                    if !queued {
                         Button {
                             copyPrompt(id, text)
                         } label: {
@@ -935,7 +1046,20 @@ struct ChatView: View {
                     }
                 }
             }
-            .padding(.horizontal, model.compactChat ? 16 : 28)
+        }
+        .padding(.horizontal, model.compactChat ? 16 : 28)
+    }
+
+    @ViewBuilder
+    private func messageRow(_ item: ConversationItem) -> some View {
+        switch item {
+        case .user(let id, let text):
+            userPromptRow(
+                id: id,
+                text: text,
+                images: PromptMedia.resolvedImages(stored: model.client.itemImages[id], text: text),
+                queued: false
+            )
         case .assistant(let id, let text, let done):
             VStack(alignment: .leading, spacing: 6) {
                 timestamp(id)
@@ -962,17 +1086,9 @@ struct ChatView: View {
                 }
             }
             .padding(.horizontal, model.compactChat ? 16 : 28)
-        case .thought(_, let text):
-            DisclosureGroup {
-                LinkedText(text: text, fontSize: GrokTheme.chatMetaSize(compact: model.compactChat), markdown: false, color: palette.secondary)
-            } label: {
-                Text(l10n.think)
-                    .font(.system(size: GrokTheme.chatMetaSize(compact: model.compactChat)))
-                    .foregroundStyle(palette.secondary)
-            }
-            .tint(palette.secondary)
-            .foregroundStyle(palette.secondary)
-            .padding(.horizontal, model.compactChat ? 16 : 28)
+        case .thought(let id, let text):
+            thoughtRow(id: id, text: text)
+                .padding(.horizontal, model.compactChat ? 16 : 28)
         case .tool(let id, let title, let status, let detail):
             toolLine(id: id, title: title, status: status, detail: detail)
                 .padding(.horizontal, model.compactChat ? 16 : 28)
@@ -983,31 +1099,158 @@ struct ChatView: View {
     }
 
     @ViewBuilder
-    private func toolCluster(_ items: [ConversationItem]) -> some View {
-        let chinese = model.language.resolved() == .chinese
-        if items.count == 1, case .tool(let id, let title, let status, let detail) = items[0] {
+    private func streamCluster(_ items: [ConversationItem]) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            ForEach(streamPieces(items)) { piece in
+                switch piece {
+                case .tools(_, let tools):
+                    toolCluster(tools)
+                case .item(let item):
+                    streamItem(item)
+                }
+            }
+        }
+        .padding(.horizontal, model.compactChat ? 16 : 28)
+        .padding(.vertical, 2)
+    }
+
+    private func streamPieces(_ items: [ConversationItem]) -> [StreamPiece] {
+        var pieces: [StreamPiece] = []
+        var pending: [ConversationItem] = []
+
+        func flush() {
+            guard !pending.isEmpty else { return }
+            pieces.append(.tools(id: pending.map(\.id).joined(separator: "+"), items: pending))
+            pending = []
+        }
+
+        for item in items {
+            if case .tool(_, let title, let status, _) = item,
+               canMerge(title: title, status: status, onto: pending) {
+                pending.append(item)
+            } else {
+                flush()
+                if case .tool(_, let title, let status, _) = item,
+                   model.mergeToolRows,
+                   !ToolVoice.isActive(status),
+                   ToolVoice.foldsInVerbGroup(title) {
+                    pending = [item]
+                } else {
+                    pieces.append(.item(item))
+                }
+            }
+        }
+        flush()
+        return pieces
+    }
+
+    @ViewBuilder
+    private func streamItem(_ item: ConversationItem) -> some View {
+        switch item {
+        case .thought(let id, let text):
+            thoughtRow(id: id, text: text)
+        case .tool(let id, let title, let status, let detail):
             toolLine(id: id, title: title, status: status, detail: detail)
-                .padding(.horizontal, model.compactChat ? 16 : 28)
-        } else if let first = items.first, case .tool(_, let title, _, _) = first {
-            DisclosureGroup {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(items, id: \.id) { item in
-                        if case .tool(let id, let itemTitle, let status, let detail) = item {
-                            toolLine(id: id, title: itemTitle, status: status, detail: detail, grouped: true)
-                        }
+        case .notice(_, let text):
+            LinkedText(text: text, fontSize: GrokTheme.chatMetaSize(compact: model.compactChat), markdown: false, color: palette.secondary)
+        default:
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private func thoughtRow(id: String, text: String) -> some View {
+        let chinese = l10n.language == .chinese
+        let live = isLiveThought(id)
+        let elapsed = TurnTiming.seconds(
+            forThought: id,
+            items: model.client.items,
+            dates: model.client.itemDates,
+            stored: model.client.itemDurations,
+            running: live
+        )
+        let header = ThoughtVoice.header(elapsed: elapsed, running: live, chinese: chinese)
+        let tail = ThoughtVoice.tail(text)
+        let expanded = Binding(
+            get: { expandedThoughts.contains(id) },
+            set: { on in
+                if on { expandedThoughts.insert(id) } else { expandedThoughts.remove(id) }
+            }
+        )
+        VStack(alignment: .leading, spacing: 4) {
+            DisclosureGroup(isExpanded: expanded) {
+                if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    LinkedText(
+                        text: text,
+                        fontSize: GrokTheme.chatMetaSize(compact: model.compactChat),
+                        markdown: false,
+                        color: palette.secondary
+                    )
+                    .padding(.leading, 18)
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    diamond(filled: true, color: live ? palette.secondary : palette.secondary.opacity(0.85), active: live)
+                    Text(header)
+                        .font(.system(size: GrokTheme.chatMetaSize(compact: model.compactChat), weight: .medium))
+                        .foregroundStyle(palette.secondary)
+                    Spacer(minLength: 0)
+                }
+            }
+            .tint(palette.secondary)
+            if live, !expandedThoughts.contains(id), !tail.lines.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    if tail.ellipsis {
+                        Text("…")
+                            .foregroundStyle(palette.secondary)
+                    }
+                    ForEach(Array(tail.lines.enumerated()), id: \.offset) { _, line in
+                        Text(line)
+                            .foregroundStyle(palette.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                .padding(.leading, 20)
-            } label: {
-                toolHeader(
-                    status: items.allSatisfy(toolSucceeded) ? "completed" : "cancelled",
-                    verb: ToolVoice.groupHeadline(kind: ToolVoice.kind(title), count: items.count, chinese: chinese),
-                    target: "",
-                    location: nil
-                )
+                .font(.system(size: GrokTheme.chatMetaSize(compact: model.compactChat)))
+                .padding(.leading, 18)
             }
-            .padding(.horizontal, model.compactChat ? 16 : 28)
         }
+    }
+
+    private func isLiveThought(_ id: String) -> Bool {
+        guard model.client.isTurnRunning else { return false }
+        return model.client.items.last(where: { item in
+            if isTodoTool(item) { return false }
+            if case .thought = item, !model.showThinkingBlocks { return false }
+            return true
+        })?.id == id
+    }
+
+    @ViewBuilder
+    private func toolCluster(_ items: [ConversationItem]) -> some View {
+        let chinese = model.language.resolved() == .chinese
+        let status = items.allSatisfy(toolSucceeded) ? "completed" : (items.contains(where: { item in
+            if case .tool(_, _, let value, _) = item { return value == "failed" }
+            return false
+        }) ? "failed" : "cancelled")
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 3) {
+                ForEach(items, id: \.id) { item in
+                    if case .tool(let id, let itemTitle, let itemStatus, let detail) = item {
+                        toolLine(id: id, title: itemTitle, status: itemStatus, detail: detail, grouped: true)
+                    }
+                }
+            }
+            .padding(.leading, 18)
+        } label: {
+            toolHeader(
+                status: status,
+                verb: ToolVoice.groupLabel(items: items, chinese: chinese),
+                target: "",
+                location: nil,
+                grouped: true
+            )
+        }
+        .tint(palette.secondary)
     }
 
     @ViewBuilder
@@ -1019,7 +1262,8 @@ struct ChatView: View {
         grouped: Bool = false
     ) -> some View {
         let chinese = model.language.resolved() == .chinese
-        let parsed = ToolVoice.line(title, chinese: chinese, cwd: model.client.workingDirectory)
+        let active = ToolVoice.isActive(status) && model.client.isTurnRunning
+        let parsed = ToolVoice.line(title, chinese: chinese, cwd: model.client.workingDirectory, running: active)
         let shownStatus = model.client.isStopping && ToolVoice.isActive(status) ? "cancelled" : status
         if detail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             toolHeader(status: shownStatus, verb: parsed.verb, target: parsed.target, location: parsed.location)
@@ -1033,7 +1277,7 @@ struct ChatView: View {
                     markdown: false,
                     color: palette.secondary
                 )
-                .padding(.leading, grouped ? 0 : 20)
+                .padding(.leading, grouped ? 0 : 18)
             } label: {
                 toolHeader(status: shownStatus, verb: parsed.verb, target: parsed.target, location: parsed.location)
             }
@@ -1041,15 +1285,16 @@ struct ChatView: View {
         }
     }
 
-    private func toolHeader(status: String, verb: String, target: String, location: String?) -> some View {
-        let active = ToolVoice.isActive(status) && model.client.isTurnRunning
+    private func toolHeader(
+        status: String,
+        verb: String,
+        target: String,
+        location: String?,
+        grouped: Bool = false
+    ) -> some View {
+        let active = ToolVoice.isActive(status) && model.client.isTurnRunning && !model.client.isStopping
         return HStack(spacing: 8) {
-            RunningStatusIcon(
-                active: active && !model.client.isStopping,
-                idleSystemImage: toolIdleIcon(status),
-                color: toolColor(status),
-                size: 11
-            )
+            diamond(filled: !grouped || active, color: toolColor(status, active: active), active: active)
             Text(verb)
                 .foregroundStyle(palette.secondary)
             if !target.isEmpty {
@@ -1072,6 +1317,13 @@ struct ChatView: View {
         .padding(.vertical, 1)
     }
 
+    private func diamond(filled: Bool, color: Color, active: Bool) -> some View {
+        Text(filled ? "◆" : "◇")
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(color)
+            .opacity(active ? 0.92 : 1)
+    }
+
     private func toolSucceeded(_ item: ConversationItem) -> Bool {
         if case .tool(_, _, let status, _) = item {
             return status == "completed"
@@ -1079,16 +1331,10 @@ struct ChatView: View {
         return false
     }
 
-    private func toolIdleIcon(_ status: String) -> String {
-        switch status {
-        case "completed": return "checkmark"
-        case "cancelled": return "xmark"
-        case "failed": return "exclamationmark"
-        default: return "circle"
+    private func toolColor(_ status: String, active: Bool = false) -> Color {
+        if active {
+            return Color.green.opacity(palette.isDark ? 0.85 : 0.75)
         }
-    }
-
-    private func toolColor(_ status: String) -> Color {
         switch status {
         case "completed": return palette.secondary
         case "failed": return .orange

@@ -443,6 +443,20 @@ var turnDurations: [String: TimeInterval] = [:]
 TurnTiming.stamp(onto: &turnDurations, items: turnItems, dates: turnDates, startedAt: turnStart, endedAt: turnEnd)
 expect(abs((turnDurations["a-turn"] ?? 0) - 12) < 0.01, "stamped turn duration")
 expect(TurnTiming.seconds(forAssistant: "h-turn", items: turnItems, dates: turnDates, stored: turnDurations) == nil, "thought has no duration")
+let thoughtDates = ["h-turn": turnStart, "a-turn": turnEnd]
+expect(
+    abs((TurnTiming.seconds(forThought: "h-turn", items: turnItems, dates: thoughtDates, stored: [:]) ?? 0) - 12) < 0.01,
+    "thought duration from next item"
+)
+expect(ThoughtVoice.header(elapsed: 12.2, running: false, chinese: false) == "Thought for 12.2s", "thought header elapsed")
+expect(ThoughtVoice.header(elapsed: nil, running: true, chinese: false) == "Thinking…", "live thought header")
+expect(ThoughtVoice.header(elapsed: 12.2, running: false, chinese: true) == "思考了 12.2s", "thought header zh")
+expect(PromptTimestamp.formatCompactElapsed(12.2) == "12.2s", "compact seconds")
+expect(PromptTimestamp.formatCompactElapsed(806) == "13m26s", "compact minutes")
+expect(PromptTimestamp.compactCount(130_000) == "130k", "compact tokens")
+let thoughtTail = ThoughtVoice.tail("alpha\n\n1. first\n2. second\n3. third\n4. fourth\n5. fifth")
+expect(thoughtTail.ellipsis, "thought tail ellipsis")
+expect(thoughtTail.lines == ["2. second", "3. third", "4. fourth", "5. fifth"], "thought tail last lines")
 
 let imageURL = FileManager.default.temporaryDirectory.appendingPathComponent("grok-media-test.png")
 try? Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]).write(to: imageURL)
@@ -515,6 +529,30 @@ expect(blocks[0]["type"] as? String == "text", "first block is text")
 expect((blocks[0]["text"] as? String)?.contains("[Image #1]") == true, "text uses image token")
 expect(blocks[1]["type"] as? String == "image", "second block is image")
 
+let spacedDir = FileManager.default.temporaryDirectory.appendingPathComponent("gd-space-\(UUID().uuidString)", isDirectory: true)
+try! FileManager.default.createDirectory(at: spacedDir, withIntermediateDirectories: true)
+let spacedImage = spacedDir.appendingPathComponent("截屏 2026-09-03 05.51.41.png")
+try? Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]).write(to: spacedImage)
+let spacedMention = PromptMedia.mentionToken(for: spacedImage)
+expect(spacedMention.contains("\""), "space in path is quoted")
+expect(PromptMedia.imageURLs(in: "@\(spacedImage.path) 看看这张图").first?.path == spacedImage.path, "unquoted spaced image path")
+expect(PromptMedia.imageURLs(in: "\(spacedMention) 看看这张图").first?.path == spacedImage.path, "quoted spaced image path")
+expect(PromptMedia.displayText("@\(spacedImage.path) 看看这张图") == "看看这张图", "strip unquoted spaced image path")
+expect(PromptMedia.displayText("\(spacedMention) 看看这张图") == "看看这张图", "strip quoted spaced image path")
+let spacedBlocks = PromptMedia.promptBlocks(from: "@\(spacedImage.path) 看看这张图")
+expect(spacedBlocks.contains(where: { ($0["type"] as? String) == "image" }), "spaced path sends image block")
+expect((spacedBlocks[0]["text"] as? String)?.contains("[Image #1]") == true, "spaced path becomes image token")
+expect(!(spacedBlocks[0]["text"] as? String ?? "").contains("截屏"), "image token hides spaced filename")
+let falseSpaced = PromptMedia.imageURLs(in: "see /Users/foo and later /tmp/not-a-real-file.png")
+expect(falseSpaced.isEmpty, "do not treat two paths joined by spaces as one image")
+let spacedFold = SessionFold.userTurn("@\(spacedImage.path) 看看这张图")
+expect(spacedFold.imageURLs.first?.path == spacedImage.path, "user turn keeps spaced image")
+let spacedLinks = ChatLinkDetector.detect(
+    in: "@\(spacedImage.path)",
+    fileExists: { $0 == spacedImage.path }
+)
+expect(spacedLinks.contains(where: { $0.url.path == spacedImage.path }), "link detector keeps spaced image path")
+
 let markdown = ChatMarkdown.blocks(in: "Hello **world**\n```swift\nlet x = 1\n```\nDone")
 expect(markdown.count == 3, "markdown splits prose and fence")
 expect(ChatMarkdown.heading(in: "## Next steps")?.level == 2, "markdown heading")
@@ -555,9 +593,49 @@ if case .code(let language, let code) = markdown[1] {
 }
 expect(ToolVoice.headline("read_file AppModel.swift", chinese: true) == "读 AppModel.swift", "tool read headline")
 expect(ToolVoice.headline("Read `/Users/demo/app/Sources/GrokDesktop/Views/ChatView.swift`", chinese: false) == "Read Views/ChatView.swift", "cli read title shortens path")
-expect(ToolVoice.headline("Execute `git status`", chinese: false) == "Ran git status", "cli execute title")
+expect(ToolVoice.headline("Execute `git status`", chinese: false) == "Run git status", "cli execute title")
 expect(ToolVoice.kind("TODO|FIXME|XXX") == .search, "regex title is search")
 expect(ToolVoice.groupHeadline(kind: .read, count: 5, chinese: true) == "读 5 个文件", "grouped reads")
+expect(ToolVoice.groupHeadline(kind: .search, count: 1, chinese: false) == "Searched 1 pattern", "grouped search")
+expect(ToolVoice.foldsInVerbGroup("Read ChatView.swift"), "reads fold")
+expect(!ToolVoice.foldsInVerbGroup("Run git status"), "commands stay unfolded")
+expect(
+    ToolVoice.groupLabel(
+        items: [
+            .tool(id: "a", title: "Read a.rs", status: "completed", detail: ""),
+            .tool(id: "b", title: "Search todo", status: "completed", detail: ""),
+            .tool(id: "c", title: "Read b.rs", status: "completed", detail: "")
+        ],
+        chinese: false
+    ) == "Read 2 files, Searched 1 pattern",
+    "mixed verb group"
+)
+expect(
+    TurnNarrative.status(
+        items: [
+            .user(id: "u", text: "go"),
+            .thought(id: "h", text: "plan")
+        ],
+        dates: [:],
+        chinese: false,
+        running: true,
+        stopping: false
+    )?.label == "Thinking…",
+    "status thinking"
+)
+expect(
+    TurnNarrative.status(
+        items: [
+            .user(id: "u", text: "go"),
+            .tool(id: "t", title: "read_file AppModel.swift", status: "running", detail: "")
+        ],
+        dates: [:],
+        chinese: false,
+        running: true,
+        stopping: false
+    )?.isTool == true,
+    "status running tool"
+)
 expect(ToolVoice.statusLabel("running", chinese: true) == "进行中", "tool running label")
 expect(AgentMode.normal.title(chinese: true) == "询问", "mode ask title")
 
@@ -1233,6 +1311,25 @@ expect(cfg.load().disabledSkills.contains("review-pr"), "config disabled skills"
 
 let foundByID = SessionIndex(sessionsRoot: indexRoot).record(id: "sid-fast")
 expect(foundByID != nil, "session index finds by folder id")
+
+let cliJSON = CLIUpdateStatus.parse("""
+{"currentVersion":"1.0.13","latestVersion":"1.0.20","updateAvailable":true,"installer":"internal","channel":"stable","autoUpdate":true,"error":null}
+""")
+expect(cliJSON.current == "1.0.13", "cli update current")
+expect(cliJSON.latest == "1.0.20", "cli update latest")
+expect(cliJSON.updateAvailable, "cli update available")
+expect(cliJSON.channel == "stable", "cli update channel")
+let cliPlain = CLIUpdateStatus.parse("Grok Build - v1.0.13 (latest: 1.0.13) [stable]")
+expect(cliPlain.current == "1.0.13", "cli plain current")
+expect(!cliPlain.updateAvailable, "cli plain up to date")
+let permSource = PermissionRequest.parse(id: .int(9), params: [
+    "options": [["optionId": "proceed_once", "name": "Allow", "kind": "allow_once"]],
+    "toolCall": ["title": "run_terminal_command"],
+    "_meta": ["source": "hook"]
+] as [String: Any])
+expect(permSource.source == "hook", "permission source from meta")
+expect(AgentMode(settings: "plan") == .plan, "settings plan maps")
+expect(AgentMode(settings: "ask") == .normal, "settings ask maps")
 
 print("GrokDesktopSmoke ok")
 

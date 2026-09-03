@@ -73,6 +73,10 @@ public enum ChatLinkDetector {
         collect(#"\b((?:[\w.+-]+/)+\.?[\w.+-]+\.[A-Za-z][A-Za-z0-9]{0,9})\b"#)
         collect(#"\b([\w.+-]+\.[A-Za-z][A-Za-z0-9]{0,9})\b"#)
 
+        for span in PromptMedia.spans(in: text) where span.isImage {
+            candidates.append((span.range, ns.substring(with: span.range)))
+        }
+
         candidates.sort {
             if $0.0.location != $1.0.location { return $0.0.location < $1.0.location }
             return $0.0.length > $1.0.length

@@ -48,7 +48,7 @@ public enum TurnNarrative {
             guard case .tool(_, let title, let status, _) = item else { return nil }
             guard ToolVoice.isActive(status) else { return nil }
             if ToolVoice.kind(title) == .todo { return nil }
-            return ToolVoice.headline(title, chinese: chinese)
+            return ToolVoice.headline(title, chinese: chinese, running: true)
         }.first
 
         let phase: TurnStory.Phase
@@ -136,5 +136,67 @@ public enum TurnNarrative {
             add(hunk.path)
         }
         return names
+    }
+}
+
+public struct TurnStatusLine: Equatable, Sendable {
+    public var label: String
+    public var isTool: Bool
+    public var phaseStartedAt: Date?
+
+    public init(label: String, isTool: Bool, phaseStartedAt: Date? = nil) {
+        self.label = label
+        self.isTool = isTool
+        self.phaseStartedAt = phaseStartedAt
+    }
+}
+
+extension TurnNarrative {
+    public static func status(
+        items: [ConversationItem],
+        dates: [String: Date],
+        chinese: Bool,
+        running: Bool,
+        stopping: Bool
+    ) -> TurnStatusLine? {
+        if stopping {
+            return TurnStatusLine(label: chinese ? "正在停止…" : "Cancelling…", isTool: false)
+        }
+        guard running else { return nil }
+        for item in items.reversed() {
+            switch item {
+            case .tool(let id, let title, let status, _):
+                if ToolVoice.isActive(status) {
+                    return TurnStatusLine(
+                        label: ToolVoice.headline(title, chinese: chinese, running: true),
+                        isTool: true,
+                        phaseStartedAt: dates[id]
+                    )
+                }
+            case .thought(let id, _):
+                return TurnStatusLine(
+                    label: chinese ? "思考中…" : "Thinking…",
+                    isTool: false,
+                    phaseStartedAt: dates[id]
+                )
+            case .assistant(let id, _, let done):
+                return TurnStatusLine(
+                    label: done
+                        ? (chinese ? "思考中…" : "Thinking…")
+                        : (chinese ? "正在回复…" : "Responding…"),
+                    isTool: false,
+                    phaseStartedAt: dates[id]
+                )
+            case .user(let id, _):
+                return TurnStatusLine(
+                    label: chinese ? "思考中…" : "Thinking…",
+                    isTool: false,
+                    phaseStartedAt: dates[id]
+                )
+            case .notice:
+                continue
+            }
+        }
+        return TurnStatusLine(label: chinese ? "思考中…" : "Thinking…", isTool: false)
     }
 }

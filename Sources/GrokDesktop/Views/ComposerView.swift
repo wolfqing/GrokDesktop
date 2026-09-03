@@ -155,18 +155,19 @@ struct ComposerView: View {
             }
 
             if !model.client.promptQueue.isEmpty {
-                let follow = model.client.promptQueue.filter { $0.kind == .followUp }.count
-                let asides = model.client.promptQueue.filter { $0.kind == .aside }.count
-                HStack(spacing: 8) {
-                    if follow > 0 {
-                        Text(l10n.t("Queued \(follow)", "已排队 \(follow) 条"))
-                    }
-                    if asides > 0 {
-                        Text(l10n.t("Aside waiting \(asides)", "旁问等候 \(asides) 条"))
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(
+                        l10n.t(
+                            "Waiting — will send when this turn finishes",
+                            "排队中 — 当前回复结束后自动发送"
+                        )
+                    )
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(palette.secondary)
+                    ForEach(model.client.promptQueue) { item in
+                        queuedRow(item)
                     }
                 }
-                .font(.system(size: 11))
-                .foregroundStyle(palette.secondary)
                 .padding(.horizontal, 6)
             }
 
@@ -407,26 +408,58 @@ struct ComposerView: View {
             model.confirmBusySendNow()
             return
         }
-        if model.client.isTurnRunning {
-            if text.isEmpty {
-                model.client.cancelTurn()
-                return
-            }
-            if forceNow {
-                model.pendingBusySend = text
-                model.draft = ""
-                model.confirmBusySendNow()
-                return
-            }
-            model.beginBusySend(text)
-            return
-        }
         if SlashBuiltins.handles(model.draft) {
             model.handleCommand(model.draft)
             model.draft = ""
             return
         }
+        if model.client.isTurnRunning, text.isEmpty {
+            model.client.cancelTurn()
+            return
+        }
+        if forceNow, model.client.isTurnRunning, !text.isEmpty {
+            model.pendingBusySend = text
+            model.draft = ""
+            model.confirmBusySendNow()
+            return
+        }
         model.sendDraft()
+    }
+
+    private func queuedRow(_ item: QueuedPrompt) -> some View {
+        let images = PromptMedia.imageURLs(in: item.text)
+        let shown = PromptMedia.displayText(item.text)
+        return HStack(alignment: .center, spacing: 8) {
+            Image(systemName: "clock")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(palette.secondary)
+            if let first = images.first {
+                DraftImageThumb(url: first, size: 28)
+            }
+            Text(shown.isEmpty ? l10n.t("Image", "图片") : shown)
+                .font(.system(size: 12))
+                .lineLimit(1)
+                .foregroundStyle(palette.text)
+            if images.count > 1 {
+                Text("+\(images.count - 1)")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(palette.secondary)
+            }
+            Spacer(minLength: 8)
+            Button {
+                model.client.removeQueuedPrompt(id: item.id)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(palette.secondary)
+                    .frame(width: 18, height: 18)
+            }
+            .buttonStyle(.plain)
+            .help(l10n.t("Remove from queue", "从队列移除"))
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(palette.chip, in: Capsule())
     }
 
     private func attachFiles() {
@@ -437,7 +470,7 @@ struct ComposerView: View {
         panel.allowsMultipleSelection = true
         panel.prompt = "@"
         guard panel.runModal() == .OK else { return }
-        let refs = panel.urls.map { "@\($0.path)" }.joined(separator: " ")
+        let refs = panel.urls.map(PromptMedia.mentionToken(for:)).joined(separator: " ")
         if model.draft.isEmpty {
             model.draft = refs + " "
         } else {
@@ -448,6 +481,7 @@ struct ComposerView: View {
 
 private struct DraftImageThumb: View {
     let url: URL
+    var size: CGFloat = 72
     @Environment(\.palette) private var palette
 
     var body: some View {
@@ -456,18 +490,18 @@ private struct DraftImageThumb: View {
                 Image(nsImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
-                    .frame(width: 72, height: 72)
+                    .frame(width: size, height: size)
                     .clipped()
             } else {
                 Image(systemName: "photo")
                     .foregroundStyle(palette.secondary)
-                    .frame(width: 72, height: 72)
+                    .frame(width: size, height: size)
             }
         }
         .background(palette.chip)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: min(10, size / 4), style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: min(10, size / 4), style: .continuous)
                 .stroke(palette.hairline, lineWidth: 1)
         )
         .help(url.lastPathComponent)

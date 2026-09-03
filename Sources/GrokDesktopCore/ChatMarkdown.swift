@@ -242,11 +242,11 @@ public enum ToolVoice {
         line(title, chinese: false).kind
     }
 
-    public static func headline(_ title: String, chinese: Bool, cwd: URL? = nil) -> String {
-        line(title, chinese: chinese, cwd: cwd).headline
+    public static func headline(_ title: String, chinese: Bool, cwd: URL? = nil, running: Bool = false) -> String {
+        line(title, chinese: chinese, cwd: cwd, running: running).headline
     }
 
-    public static func line(_ title: String, chinese: Bool, cwd: URL? = nil) -> ToolLine {
+    public static func line(_ title: String, chinese: Bool, cwd: URL? = nil, running: Bool = false) -> ToolLine {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             return ToolLine(kind: .other, verb: chinese ? "工具" : "Tool", target: "")
@@ -258,17 +258,17 @@ public enum ToolVoice {
         }
 
         if let parsed = parseCLITitle(trimmed) {
-            return decorate(parsed, chinese: chinese, cwd: cwd)
+            return decorate(parsed, chinese: chinese, cwd: cwd, running: running)
         }
 
         if let named = parseNamedTool(trimmed, lower: lower) {
-            return decorate(named, chinese: chinese, cwd: cwd)
+            return decorate(named, chinese: chinese, cwd: cwd, running: running)
         }
 
         if looksLikeSearchPattern(trimmed) {
             return ToolLine(
                 kind: .search,
-                verb: verb(.search, chinese: chinese),
+                verb: verb(.search, chinese: chinese, running: running),
                 target: shortenCommand(trimmed)
             )
         }
@@ -276,23 +276,42 @@ public enum ToolVoice {
         return ToolLine(kind: .other, verb: trimmed, target: "")
     }
 
-    public static func groupHeadline(kind: ToolKind, count: Int, chinese: Bool) -> String {
-        switch kind {
-        case .read:
-            return chinese ? "读 \(count) 个文件" : "Read \(count) files"
-        case .list:
-            return chinese ? "列 \(count) 个目录" : "List \(count) folders"
-        case .search:
-            return chinese ? "搜 \(count) 次" : "Search \(count) times"
-        case .edit:
-            return chinese ? "改 \(count) 个文件" : "Edited \(count) files"
-        case .run:
-            return chinese ? "跑 \(count) 条命令" : "Ran \(count) commands"
-        case .todo:
-            return chinese ? "更新任务" : "Updated tasks"
-        case .other:
-            return chinese ? "\(count) 个步骤" : "\(count) steps"
+    /// CLI verb-group: consecutive completed reads / searches / listings fold together.
+    /// Execute and edit stay as their own rows.
+    public static func foldsInVerbGroup(_ title: String) -> Bool {
+        switch kind(title) {
+        case .read, .list, .search: return true
+        default: return false
         }
+    }
+
+    public static func groupHeadline(kind: ToolKind, count: Int, chinese: Bool, running: Bool = false) -> String {
+        let word = verb(kind, chinese: chinese, running: running)
+        let unit = noun(kind, count: count, chinese: chinese)
+        return chinese ? "\(word) \(count) \(unit)" : "\(word) \(count) \(unit)"
+    }
+
+    public static func groupLabel(items: [ConversationItem], chinese: Bool) -> String {
+        var buckets: [(ToolKind, Int)] = []
+        var running = false
+        var failed = 0
+        for item in items {
+            guard case .tool(_, let title, let status, _) = item else { continue }
+            if isActive(status) { running = true }
+            if status == "failed" { failed += 1 }
+            let bucket = kind(title)
+            if let index = buckets.firstIndex(where: { $0.0 == bucket }) {
+                buckets[index].1 += 1
+            } else {
+                buckets.append((bucket, 1))
+            }
+        }
+        let parts = buckets.map { groupHeadline(kind: $0.0, count: $0.1, chinese: chinese, running: running) }
+        var text = parts.joined(separator: chinese ? "，" : ", ")
+        if failed > 0 {
+            text += chinese ? " · \(failed) 失败" : " · \(failed) failed"
+        }
+        return text
     }
 
     public static func statusLabel(_ status: String, chinese: Bool) -> String {
@@ -314,7 +333,7 @@ public enum ToolVoice {
         status == "running" || status == "in_progress" || status == "pending"
     }
 
-    private static func decorate(_ line: ToolLine, chinese: Bool, cwd: URL?) -> ToolLine {
+    private static func decorate(_ line: ToolLine, chinese: Bool, cwd: URL?, running: Bool) -> ToolLine {
         let location = line.location.flatMap { $0.isEmpty ? nil : $0 }
         let target: String
         if let location {
@@ -330,21 +349,53 @@ public enum ToolVoice {
         }
         return ToolLine(
             kind: line.kind,
-            verb: verb(line.kind, chinese: chinese),
+            verb: verb(line.kind, chinese: chinese, running: running),
             target: target,
             location: location ?? (looksLikePath(line.target) ? line.target : nil)
         )
     }
 
-    private static func verb(_ kind: ToolKind, chinese: Bool) -> String {
+    private static func verb(_ kind: ToolKind, chinese: Bool, running: Bool = false) -> String {
+        if chinese {
+            switch kind {
+            case .read: return "读"
+            case .list: return "列"
+            case .search: return "搜"
+            case .edit: return "改"
+            case .run: return "跑"
+            case .todo: return "更新任务"
+            case .other: return "工具"
+            }
+        }
         switch kind {
-        case .read: return chinese ? "读" : "Read"
-        case .list: return chinese ? "列" : "List"
-        case .search: return chinese ? "搜" : "Search"
-        case .edit: return chinese ? "改" : "Edited"
-        case .run: return chinese ? "跑" : "Ran"
-        case .todo: return chinese ? "更新任务" : "Updated tasks"
-        case .other: return chinese ? "工具" : "Tool"
+        case .read: return running ? "Reading" : "Read"
+        case .list: return running ? "Listing" : "Listed"
+        case .search: return running ? "Searching" : "Searched"
+        case .edit: return running ? "Editing" : "Edited"
+        case .run: return "Run"
+        case .todo: return "Updated tasks"
+        case .other: return running ? "Running" : "Ran"
+        }
+    }
+
+    private static func noun(_ kind: ToolKind, count: Int, chinese: Bool) -> String {
+        if chinese {
+            switch kind {
+            case .read, .edit: return "个文件"
+            case .list: return "个目录"
+            case .search: return "个模式"
+            case .run: return "条命令"
+            case .todo: return "项任务"
+            case .other: return "个步骤"
+            }
+        }
+        switch kind {
+        case .read, .edit: return count == 1 ? "file" : "files"
+        case .list: return count == 1 ? "dir" : "dirs"
+        case .search: return count == 1 ? "pattern" : "patterns"
+        case .run: return count == 1 ? "command" : "commands"
+        case .todo: return count == 1 ? "task" : "tasks"
+        case .other: return count == 1 ? "step" : "steps"
         }
     }
 

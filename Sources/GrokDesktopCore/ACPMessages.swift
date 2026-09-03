@@ -303,6 +303,7 @@ public struct PermissionRequest: Identifiable, Sendable, Equatable {
     public var command: String?
     public var path: String?
     public var questions: [UserQuestion]
+    public var source: String
 
     public init(
         id: JSONRPCID,
@@ -313,7 +314,8 @@ public struct PermissionRequest: Identifiable, Sendable, Equatable {
         detail: String = "",
         command: String? = nil,
         path: String? = nil,
-        questions: [UserQuestion] = []
+        questions: [UserQuestion] = [],
+        source: String = ""
     ) {
         self.id = id
         self.sessionId = sessionId
@@ -324,6 +326,7 @@ public struct PermissionRequest: Identifiable, Sendable, Equatable {
         self.command = command
         self.path = path
         self.questions = questions
+        self.source = source
     }
 
     public var isQuestion: Bool {
@@ -364,8 +367,30 @@ public struct PermissionRequest: Identifiable, Sendable, Equatable {
             detail: detail,
             command: command,
             path: path,
-            questions: UserQuestion.parseList(rawInput["questions"] ?? params["questions"] ?? toolCall["questions"])
+            questions: UserQuestion.parseList(rawInput["questions"] ?? params["questions"] ?? toolCall["questions"]),
+            source: permissionSource(params: params, toolCall: toolCall)
         )
+    }
+
+    private static func permissionSource(params: [String: Any], toolCall: [String: Any]) -> String {
+        let meta = params["_meta"] as? [String: Any] ?? [:]
+        let toolMeta = toolCall["_meta"] as? [String: Any] ?? [:]
+        let nested = (meta["x.ai/permission"] as? [String: Any])
+            ?? (toolMeta["x.ai/permission"] as? [String: Any])
+            ?? [:]
+        let raw = firstString(nested, keys: ["source", "reason", "rule", "mode"])
+            ?? firstString(meta, keys: ["source", "permissionSource", "reason", "rule"])
+            ?? firstString(params, keys: ["source", "permissionSource", "reason"])
+            ?? firstString(toolCall, keys: ["source", "reason"])
+        guard let raw, !raw.isEmpty else { return "" }
+        switch raw.lowercased() {
+        case "rule", "config": return "rule"
+        case "hook": return "hook"
+        case "mode", "permission_mode": return "mode"
+        case "classifier", "auto": return "classifier"
+        case "session", "always_allow": return "session"
+        default: return raw
+        }
     }
 
     private static func permissionDetail(
@@ -705,6 +730,16 @@ public enum AgentMode: String, CaseIterable, Identifiable, Sendable {
         case .plan: return .alwaysApprove
         case .auto: return .alwaysApprove
         case .alwaysApprove: return .normal
+        }
+    }
+
+    public init?(settings: String) {
+        switch settings.lowercased() {
+        case "ask", "default": self = .normal
+        case "plan": self = .plan
+        case "auto": self = .auto
+        case "always-approve", "bypasspermissions", "dontask": self = .alwaysApprove
+        default: return nil
         }
     }
 }

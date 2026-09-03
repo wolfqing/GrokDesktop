@@ -68,3 +68,77 @@ public enum TimedProcess {
         }
     }
 }
+
+public struct ProcessCapture: Sendable {
+    public var status: Int32
+    public var stdout: String
+    public var stderr: String
+    public var timedOut: Bool
+
+    public init(status: Int32 = 1, stdout: String = "", stderr: String = "", timedOut: Bool = false) {
+        self.status = status
+        self.stdout = stdout
+        self.stderr = stderr
+        self.timedOut = timedOut
+    }
+
+    public var text: String {
+        let out = stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !out.isEmpty { return out }
+        return stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    public var ok: Bool { !timedOut && status == 0 }
+}
+
+public extension TimedProcess {
+    static func capture(
+        executable: URL,
+        arguments: [String],
+        cwd: URL,
+        timeout: TimeInterval = 8,
+        limitBytes: Int = 1_000_000
+    ) -> ProcessCapture {
+        let process = Process()
+        process.executableURL = executable
+        process.arguments = arguments
+        process.currentDirectoryURL = cwd
+        let output = Pipe()
+        let err = Pipe()
+        process.standardOutput = output
+        process.standardError = err
+        do {
+            try process.run()
+        } catch {
+            return ProcessCapture(status: 1, stderr: error.localizedDescription)
+        }
+        let group = DispatchGroup()
+        group.enter()
+        DispatchQueue.global(qos: .userInitiated).async {
+            process.waitUntilExit()
+            group.leave()
+        }
+        if group.wait(timeout: .now() + timeout) == .timedOut {
+            terminate(process)
+            return ProcessCapture(
+                status: process.terminationStatus,
+                stdout: readLimited(output, limitBytes: limitBytes),
+                stderr: readLimited(err, limitBytes: limitBytes),
+                timedOut: true
+            )
+        }
+        return ProcessCapture(
+            status: process.terminationStatus,
+            stdout: readLimited(output, limitBytes: limitBytes),
+            stderr: readLimited(err, limitBytes: limitBytes)
+        )
+    }
+
+    private static func readLimited(_ pipe: Pipe, limitBytes: Int) -> String {
+        var data = pipe.fileHandleForReading.readDataToEndOfFile()
+        if data.count > limitBytes {
+            data = data.prefix(limitBytes)
+        }
+        return String(data: data, encoding: .utf8) ?? ""
+    }
+}
