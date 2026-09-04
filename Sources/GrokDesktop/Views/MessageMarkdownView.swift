@@ -11,6 +11,14 @@ struct MessageMarkdownView: View {
     @State private var copiedLanguage: String?
 
     var body: some View {
+        if live {
+            LinkedText(text: text, fontSize: fontSize, markdown: false, live: true)
+        } else {
+            finishedBlocks
+        }
+    }
+
+    private var finishedBlocks: some View {
         VStack(alignment: .leading, spacing: GrokTheme.chatBlockSpacing(compact: fontSize < 15)) {
             ForEach(Array(ChatMarkdown.blocks(in: text).enumerated()), id: \.offset) { _, block in
                 switch block {

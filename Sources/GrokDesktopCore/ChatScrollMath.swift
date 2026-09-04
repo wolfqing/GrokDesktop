@@ -30,4 +30,13 @@ public enum ChatScrollMath {
     public static func thumbTop(progress: CGFloat, track: CGFloat, thumb: CGFloat) -> CGFloat {
         min(max(progress, 0), 1) * max(track - thumb, 0)
     }
+
+    public static func jumpChromeChanged(
+        oldNearBottom: Bool,
+        oldCanScroll: Bool,
+        newNearBottom: Bool,
+        newCanScroll: Bool
+    ) -> Bool {
+        oldNearBottom != newNearBottom || oldCanScroll != newCanScroll
+    }
 }

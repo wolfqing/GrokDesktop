@@ -20,9 +20,9 @@ Community project. Not an official xAI / SpaceXAI product.
 
 ## Install
 
-**Download:** [Grok-Desktop-0.1.21.zip](https://github.com/wolfqing/GrokDesktop/releases/download/v0.1.21/Grok-Desktop-0.1.21.zip) · [All releases](https://github.com/wolfqing/GrokDesktop/releases) · [Changelog](CHANGELOG.md)
+**Download:** [Grok-Desktop-0.1.22.zip](https://github.com/wolfqing/GrokDesktop/releases/download/v0.1.22/Grok-Desktop-0.1.22.zip) · [All releases](https://github.com/wolfqing/GrokDesktop/releases) · [Changelog](CHANGELOG.md)
 
-**0.1.21:** a sent prompt appears immediately with `Received — thinking…`. `/btw` / ⌘⇧B asks a side question in the inspector. Drag-select copies live chat text.
+**0.1.22:** the Build window stays responsive while grok streams and reads files.
 
 1. macOS 14+
 2. Unzip and move `Grok Desktop.app` to Applications

@@ -112,6 +112,9 @@ public final class ACPClient: ObservableObject {
     private var retainedSessionIDs: [String] = []
     private var loadGeneration = 0
     private let terminalsHost = TerminalHost()
+    private var pendingUpdates: [SessionUpdate] = []
+    private var publishTask: Task<Void, Never>?
+    private var publishDirty = false
 
     public init(
         locator: GrokBinaryLocator = GrokBinaryLocator(),
@@ -216,7 +219,7 @@ public final class ACPClient: ObservableObject {
                 "protocolVersion": 1,
                 "clientInfo": [
                     "name": "GrokDesktop",
-                    "version": "0.1.21"
+                    "version": "0.1.22"
                 ],
                 "clientCapabilities": [
                     "fs": [
@@ -894,6 +897,10 @@ public final class ACPClient: ObservableObject {
     private func stop(reconnect: Bool) {
         shouldReconnect = reconnect
         reconnectTask?.cancel()
+        publishTask?.cancel()
+        publishTask = nil
+        publishDirty = false
+        pendingUpdates = []
         stdinHandle = nil
         process?.terminationHandler = nil
         process?.terminate()
@@ -964,15 +971,24 @@ public final class ACPClient: ObservableObject {
 
     private func consume(stdout chunk: Data) {
         stdoutBuffer.append(chunk)
+        var flushNow = false
         while let range = stdoutBuffer.range(of: Data([0x0A])) {
             let line = stdoutBuffer.subdata(in: stdoutBuffer.startIndex..<range.lowerBound)
             stdoutBuffer.removeSubrange(stdoutBuffer.startIndex..<range.upperBound)
             guard !line.isEmpty else { continue }
-            handle(line: line)
+            if handle(line: line) {
+                flushNow = true
+            }
+        }
+        if flushNow {
+            publishNow()
+        } else if !pendingUpdates.isEmpty {
+            schedulePublish()
         }
     }
 
-    private func handle(line: Data) {
+    @discardableResult
+    private func handle(line: Data) -> Bool {
         guard let envelope = try? JSONRPCEnvelope.decode(line) else {
             decodeFailures += 1
             appendStderr("Invalid ACP JSON: \(String(data: line, encoding: .utf8) ?? "<binary>")")
@@ -980,7 +996,15 @@ public final class ACPClient: ObservableObject {
                 lastError = "Repeated invalid ACP JSON. Reconnecting."
                 process?.terminate()
             }
-            return
+            return true
+        }
+
+        if envelope.method == "session/update" || envelope.method == "_x.ai/session/update" {
+            let update = SessionUpdate.parse(params: envelope.params, envelopeTimestamp: envelope.timestamp)
+            if ACPPublishPolicy.shouldRecordEvent(method: envelope.method, kind: update.kind) {
+                recordEvent(inbound: true, method: envelope.method ?? "session/update", params: envelope.params)
+            }
+            return apply(update: update)
         }
 
         if let method = envelope.method {
@@ -988,16 +1012,18 @@ public final class ACPClient: ObservableObject {
         }
 
         if let method = envelope.method, let id = envelope.id, UserQuestionRequest.isMethod(method) {
+            flushSessionUpdates()
             present(questionID: id, params: envelope.params)
-            return
+            return true
         }
 
         if let method = envelope.method, let id = envelope.id, handleClientRequest(id: id, method: method, params: envelope.params) {
-            return
+            return true
         }
 
         if let method = envelope.method, envelope.id != nil, method == "session/request_permission" {
             if let id = envelope.id {
+                flushSessionUpdates()
                 let request = PermissionRequest.parse(id: id, params: envelope.params)
                 let workspace = workspaceForSession(request.sessionId ?? sessionID ?? UUID().uuidString)
                 if workspace.allowEditsThisSession, isEditPermission(request),
@@ -1011,7 +1037,7 @@ public final class ACPClient: ObservableObject {
                             ]
                         ]
                     )
-                    return
+                    return false
                 }
                 if workspace.sessionAllowTitles.contains(request.title),
                    let allow = request.options.first(where: { !$0.kind.contains("reject") }) {
@@ -1024,17 +1050,11 @@ public final class ACPClient: ObservableObject {
                             ]
                         ]
                     )
-                    return
+                    return false
                 }
                 workspace.permission = request
-                syncFromCurrent()
             }
-            return
-        }
-
-        if envelope.method == "session/update" || envelope.method == "_x.ai/session/update" {
-            apply(update: SessionUpdate.parse(params: envelope.params, envelopeTimestamp: envelope.timestamp))
-            return
+            return true
         }
 
         if let id = envelope.id, let continuation = pending.removeValue(forKey: id) {
@@ -1045,23 +1065,64 @@ public final class ACPClient: ObservableObject {
                 continuation.resume(returning: envelope)
             }
         }
+        return false
     }
 
-    private func apply(update: SessionUpdate) {
-        let id = update.sessionId ?? sessionID
-        guard let id else { return }
-        let workspace = workspaceForSession(id)
-        workspace.fold(update)
-        if workspace.stopRequested {
-            workspace.markWorkStopped()
+    @discardableResult
+    private func apply(update: SessionUpdate) -> Bool {
+        pendingUpdates.append(update)
+        if ACPPublishPolicy.needsImmediatePublish(method: "session/update", kind: update.kind) {
+            return true
         }
-        if update.kind == .turnCompleted {
-            workspace.finishTurn(at: update.timestamp ?? Date())
+        return false
+    }
+
+    private func schedulePublish() {
+        publishDirty = true
+        guard publishTask == nil else { return }
+        publishTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: ACPPublishPolicy.coalescedIntervalNanoseconds)
+            self.publishTask = nil
+            guard !Task.isCancelled, self.publishDirty else { return }
+            self.publishNow()
         }
-        if update.kind == .plan {
-            workspace.refreshArtifacts()
-        }
+    }
+
+    private func publishNow() {
+        publishDirty = false
+        publishTask?.cancel()
+        publishTask = nil
+        flushSessionUpdates()
         syncFromCurrent()
+    }
+
+    private func flushSessionUpdates() {
+        let batch = pendingUpdates
+        pendingUpdates = []
+        guard !batch.isEmpty else { return }
+        var grouped: [String: [SessionUpdate]] = [:]
+        var order: [String] = []
+        for update in batch {
+            guard let id = update.sessionId ?? sessionID else { continue }
+            if grouped[id] == nil {
+                order.append(id)
+            }
+            grouped[id, default: []].append(update)
+        }
+        for id in order {
+            let updates = grouped[id] ?? []
+            let workspace = workspaceForSession(id)
+            workspace.fold(updates: updates)
+            if workspace.stopRequested {
+                workspace.markWorkStopped()
+            }
+            if let completed = updates.last(where: { $0.kind == .turnCompleted }) {
+                workspace.finishTurn(at: completed.timestamp ?? Date())
+            }
+            if updates.contains(where: { $0.kind == .plan }) {
+                workspace.refreshArtifacts()
+            }
+        }
     }
 
     private func workspaceForSession(_ id: String) -> SessionWorkspace {
@@ -1108,6 +1169,7 @@ public final class ACPClient: ObservableObject {
     }
 
     private func syncFromCurrent() {
+        flushSessionUpdates()
         if let workspace = currentWorkspace {
             if workspace.items != items {
                 items = workspace.items
@@ -1224,12 +1286,20 @@ public final class ACPClient: ObservableObject {
             respondError(id: id, message: "Missing path")
             return
         }
-        do {
-            let text = try String(contentsOf: URL(fileURLWithPath: path), encoding: .utf8)
-            let sliced = sliceFile(text, line: params["line"] as? Int, limit: params["limit"] as? Int)
-            respond(id: id, result: ["content": sliced])
-        } catch {
-            respondError(id: id, message: error.localizedDescription)
+        let line = params["line"] as? Int
+        let limit = params["limit"] as? Int
+        Task {
+            let result = await Task.detached {
+                Result { try ACPFileRead.contents(at: URL(fileURLWithPath: path), line: line, limit: limit) }
+            }.value
+            await MainActor.run {
+                switch result {
+                case .success(let text):
+                    self.respond(id: id, result: ["content": text])
+                case .failure(let error):
+                    self.respondError(id: id, message: error.localizedDescription)
+                }
+            }
         }
     }
 
@@ -1239,13 +1309,18 @@ public final class ACPClient: ObservableObject {
             return
         }
         let content = params["content"] as? String ?? ""
-        let url = URL(fileURLWithPath: path)
-        do {
-            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try content.write(to: url, atomically: true, encoding: .utf8)
-            respond(id: id, result: [:] as [String: Any])
-        } catch {
-            respondError(id: id, message: error.localizedDescription)
+        Task {
+            let result = await Task.detached {
+                Result { try ACPFileRead.write(content, to: URL(fileURLWithPath: path)) }
+            }.value
+            await MainActor.run {
+                switch result {
+                case .success:
+                    self.respond(id: id, result: [:] as [String: Any])
+                case .failure(let error):
+                    self.respondError(id: id, message: error.localizedDescription)
+                }
+            }
         }
     }
 
@@ -1323,15 +1398,6 @@ public final class ACPClient: ObservableObject {
         terminalsHost.release(id: terminalID)
         terminals = terminalsHost.snapshots
         respond(id: id, result: [:] as [String: Any])
-    }
-
-    private func sliceFile(_ text: String, line: Int?, limit: Int?) -> String {
-        guard line != nil || limit != nil else { return text }
-        let rows = text.split(separator: "\n", omittingEmptySubsequences: false)
-        let start = max((line ?? 1) - 1, 0)
-        let end = min(rows.count, start + max(limit ?? (rows.count - start), 0))
-        guard start < rows.count else { return "" }
-        return rows[start..<end].joined(separator: "\n")
     }
 
     private func respondError(id: JSONRPCID, message: String) {

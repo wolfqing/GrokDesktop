@@ -22,13 +22,14 @@ struct LinkedText: View {
             text: text,
             fontSize: fontSize,
             monospaced: monospaced,
-            markdown: markdown,
+            markdown: markdown && !live,
             fillsWidth: fillsWidth,
             maxContentWidth: maxContentWidth,
             textColor: NSColor(color ?? palette.text),
             linkColor: .linkColor,
             baseDirectory: model.client.workingDirectory,
-            chinese: l10n.language == .chinese
+            chinese: l10n.language == .chinese,
+            live: live
         )
         .frame(maxWidth: fillsWidth ? .infinity : maxContentWidth, alignment: .leading)
         .fixedSize(horizontal: !fillsWidth, vertical: true)
@@ -84,6 +85,7 @@ private struct LinkedTextNSView: NSViewRepresentable {
     let linkColor: NSColor
     let baseDirectory: URL
     let chinese: Bool
+    var live = false
 
     func makeCoordinator() -> LinkedTextCoordinator {
         LinkedTextCoordinator()
@@ -144,7 +146,7 @@ private struct LinkedTextNSView: NSViewRepresentable {
     }
 
     private func apply(to view: ChatTextView) {
-        let fingerprint = "\(text.count)|\(text.hashValue)|\(fontSize)|\(monospaced)|\(markdown)|\(textColor.hash)|\(GrokTheme.chatLineHeight)|\(baseDirectory.path)"
+        let fingerprint = "\(text.count)|\(text.hashValue)|\(fontSize)|\(monospaced)|\(markdown)|\(live)|\(textColor.hash)|\(GrokTheme.chatLineHeight)|\(baseDirectory.path)"
         if view.appliedFingerprint == fingerprint { return }
         let rendered = Self.attributed(
             text,
@@ -153,7 +155,8 @@ private struct LinkedTextNSView: NSViewRepresentable {
             markdown: markdown,
             textColor: textColor,
             linkColor: linkColor,
-            baseDirectory: baseDirectory
+            baseDirectory: baseDirectory,
+            detectLinks: !live
         )
         if view.textStorage?.isEqual(to: rendered) == true {
             view.appliedFingerprint = fingerprint
@@ -170,7 +173,8 @@ private struct LinkedTextNSView: NSViewRepresentable {
         markdown: Bool,
         textColor: NSColor,
         linkColor: NSColor,
-        baseDirectory: URL
+        baseDirectory: URL,
+        detectLinks: Bool = true
     ) -> NSAttributedString {
         let font = monospaced
             ? NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
@@ -233,13 +237,15 @@ private struct LinkedTextNSView: NSViewRepresentable {
             }
         }
 
-        let displayed = mutable.string
-        for link in ChatLinkDetector.detect(in: displayed, baseDirectory: baseDirectory) {
-            if link.range.location + link.range.length > mutable.length { continue }
-            if mutable.attribute(.link, at: link.range.location, effectiveRange: nil) != nil {
-                continue
+        if detectLinks {
+            let displayed = mutable.string
+            for link in ChatLinkDetector.detect(in: displayed, baseDirectory: baseDirectory) {
+                if link.range.location + link.range.length > mutable.length { continue }
+                if mutable.attribute(.link, at: link.range.location, effectiveRange: nil) != nil {
+                    continue
+                }
+                styleLink(link.range, url: link.url)
             }
-            styleLink(link.range, url: link.url)
         }
         return mutable
     }

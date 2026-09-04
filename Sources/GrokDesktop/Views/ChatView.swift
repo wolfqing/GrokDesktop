@@ -23,8 +23,10 @@ private struct ChatScrollGeometryReader: ViewModifier {
 }
 
 private struct ChatDefaultBottomAnchor: ViewModifier {
+    var enabled: Bool
+
     func body(content: Content) -> some View {
-        if #available(macOS 15.0, *) {
+        if #available(macOS 15.0, *), enabled {
             content.defaultScrollAnchor(.bottom)
         } else {
             content
@@ -49,6 +51,7 @@ struct ChatScrollBottomMonitor: NSViewRepresentable {
         nonisolated(unsafe) var token: NSObjectProtocol?
         nonisolated(unsafe) var frameToken: NSObjectProtocol?
         var lastNear: Bool?
+        var lastPublished = ChatScrollMetrics()
         var ignoreUntil = Date.distantPast
         var slack: CGFloat = 56
         var isDark = false
@@ -114,7 +117,15 @@ struct ChatScrollBottomMonitor: NSViewRepresentable {
             }
             let metrics = Self.metrics(from: clip, slack: slack)
             driver?.update(metrics: metrics, isDark: isDark)
-            onMetrics(metrics)
+            if ChatScrollMath.jumpChromeChanged(
+                oldNearBottom: lastPublished.isNearBottom,
+                oldCanScroll: lastPublished.canScroll,
+                newNearBottom: metrics.isNearBottom,
+                newCanScroll: metrics.canScroll
+            ) {
+                lastPublished = metrics
+                onMetrics(metrics)
+            }
             guard Date() >= ignoreUntil else { return }
             if lastNear != metrics.isNearBottom {
                 lastNear = metrics.isNearBottom
@@ -193,9 +204,6 @@ struct ChatScrollBottomMonitor: NSViewRepresentable {
         }
         if context.coordinator.clip == nil {
             context.coordinator.attach(from: nsView)
-        } else {
-            context.coordinator.styleScroller()
-            context.coordinator.emit()
         }
     }
 }
@@ -320,7 +328,7 @@ struct ChatView: View {
                             .frame(maxWidth: .infinity)
                         }
                         .scrollIndicators(.never)
-                        .modifier(ChatDefaultBottomAnchor())
+                        .modifier(ChatDefaultBottomAnchor(enabled: stickToLatest || pinningToLatest))
                         .modifier(ChatScrollGeometryReader { applyScrollMetrics($0) })
                         .background(
                             ChatScrollBottomMonitor(
@@ -382,8 +390,12 @@ struct ChatView: View {
                         }
                     }
                     .onChange(of: followToken) { _, _ in
-                        if pinningToLatest || stickToLatest {
+                        if pinningToLatest {
                             snapToLatest(proxy)
+                        } else if stickToLatest {
+                            if #unavailable(macOS 15.0) {
+                                snapToLatest(proxy)
+                            }
                         }
                     }
                     .onChange(of: model.jumpTarget) { _, target in
@@ -707,63 +719,13 @@ struct ChatView: View {
         .frame(maxWidth: 420)
     }
 
-    private enum DisplayRow: Identifiable {
-        case message(ConversationItem)
-        case stream(id: String, items: [ConversationItem])
-
-        var id: String {
-            switch self {
-            case .message(let item):
-                return item.id
-            case .stream(let id, _):
-                return id
-            }
-        }
-    }
-
-    private enum StreamPiece: Identifiable {
-        case tools(id: String, items: [ConversationItem])
-        case item(ConversationItem)
-
-        var id: String {
-            switch self {
-            case .tools(let id, _):
-                return id
-            case .item(let item):
-                return item.id
-            }
-        }
-    }
-
-    private var displayedRows: [DisplayRow] {
-        var rows: [DisplayRow] = []
-        var pending: [ConversationItem] = []
-
-        func flushStream() {
-            guard !pending.isEmpty else { return }
-            let id = pending.map(\.id).joined(separator: "+")
-            rows.append(.stream(id: id, items: pending))
-            pending = []
-        }
-
-        let hideAsides = model.client.items.contains { item in
-            if case .user(_, let text) = item { return !SessionFold.isAside(text) }
-            return false
-        }
-        for item in model.client.items {
-            if hideAsides, SessionFold.belongsToAside(item, items: model.client.items) { continue }
-            if case .thought = item, !model.showThinkingBlocks { continue }
-            if isTodoTool(item) { continue }
-            switch item {
-            case .user, .assistant:
-                flushStream()
-                rows.append(.message(item))
-            default:
-                pending.append(item)
-            }
-        }
-        flushStream()
-        return rows
+    private var displayedRows: [ChatDisplayRow] {
+        ChatDisplay.rows(
+            items: model.client.items,
+            hideAsides: true,
+            showThinking: model.showThinkingBlocks,
+            skipTodoTools: true
+        )
     }
 
     private var showJumpToLatest: Bool {
@@ -781,8 +743,14 @@ struct ChatView: View {
     }
 
     private func applyScrollMetrics(_ metrics: ChatScrollMetrics) {
+        scrollDriver.update(metrics: metrics, isDark: palette.isDark)
         if scrollbarDragging { return }
-        if scrollMetrics != metrics {
+        if ChatScrollMath.jumpChromeChanged(
+            oldNearBottom: scrollMetrics.isNearBottom,
+            oldCanScroll: scrollMetrics.canScroll,
+            newNearBottom: metrics.isNearBottom,
+            newCanScroll: metrics.canScroll
+        ) {
             scrollMetrics = metrics
         }
         if pinningToLatest {
@@ -795,7 +763,6 @@ struct ChatView: View {
                 }
             } else {
                 bottomHits = 0
-                scrollDriver.seek(to: 1)
             }
             return
         }
@@ -806,6 +773,7 @@ struct ChatView: View {
         OverlayScrollbar(
             metrics: scrollMetrics,
             isDark: palette.isDark,
+            driver: scrollDriver,
             onBegan: {
                 pinningToLatest = false
                 scrollbarDragging = true
@@ -836,15 +804,6 @@ struct ChatView: View {
         if showsWaitingStatus { return "waiting-status" }
         if showsOutgoingPreview { return "outgoing-preview" }
         return displayedRows.last?.id
-    }
-
-    private func canMerge(title: String, status: String, onto pending: [ConversationItem]) -> Bool {
-        guard model.mergeToolRows else { return false }
-        guard !ToolVoice.isActive(status), ToolVoice.foldsInVerbGroup(title) else { return false }
-        guard let last = pending.last else { return true }
-        guard case .tool(_, let previousTitle, let previousStatus, _) = last else { return false }
-        guard !ToolVoice.isActive(previousStatus) else { return false }
-        return ToolVoice.foldsInVerbGroup(previousTitle)
     }
 
     private var todoFingerprint: String {
@@ -880,7 +839,7 @@ struct ChatView: View {
         stickToLatest = true
         ignoreScrollUntil = Date().addingTimeInterval(2.6)
         snapToLatest(proxy)
-        for delay in [0.05, 0.12, 0.24, 0.4, 0.7, 1.1, 1.6, 2.2] {
+        for delay in [0.08, 0.28, 0.7] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                 guard token == pinToken, pinningToLatest else { return }
                 snapToLatest(proxy)
@@ -957,7 +916,7 @@ struct ChatView: View {
     }
 
     @ViewBuilder
-    private func displayRow(_ row: DisplayRow) -> some View {
+    private func displayRow(_ row: ChatDisplayRow) -> some View {
         switch row {
         case .message(let item):
             messageRow(item)
@@ -1210,7 +1169,7 @@ struct ChatView: View {
     @ViewBuilder
     private func streamCluster(_ items: [ConversationItem]) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            ForEach(streamPieces(items)) { piece in
+            ForEach(ChatDisplay.streamPieces(items, mergeTools: model.mergeToolRows)) { piece in
                 switch piece {
                 case .tools(_, let tools):
                     toolCluster(tools)
@@ -1221,36 +1180,6 @@ struct ChatView: View {
         }
         .padding(.horizontal, model.compactChat ? 16 : 28)
         .padding(.vertical, 2)
-    }
-
-    private func streamPieces(_ items: [ConversationItem]) -> [StreamPiece] {
-        var pieces: [StreamPiece] = []
-        var pending: [ConversationItem] = []
-
-        func flush() {
-            guard !pending.isEmpty else { return }
-            pieces.append(.tools(id: pending.map(\.id).joined(separator: "+"), items: pending))
-            pending = []
-        }
-
-        for item in items {
-            if case .tool(_, let title, let status, _) = item,
-               canMerge(title: title, status: status, onto: pending) {
-                pending.append(item)
-            } else {
-                flush()
-                if case .tool(_, let title, let status, _) = item,
-                   model.mergeToolRows,
-                   !ToolVoice.isActive(status),
-                   ToolVoice.foldsInVerbGroup(title) {
-                    pending = [item]
-                } else {
-                    pieces.append(.item(item))
-                }
-            }
-        }
-        flush()
-        return pieces
     }
 
     @ViewBuilder

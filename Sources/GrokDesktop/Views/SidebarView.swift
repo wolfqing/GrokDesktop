@@ -230,6 +230,7 @@ struct SidebarView: View {
                 OverlayScrollbar(
                     metrics: sidebarScroll,
                     isDark: palette.isDark,
+                    driver: sidebarDriver,
                     onSeek: { sidebarDriver.seek(to: $0) }
                 )
                 .frame(width: 14)

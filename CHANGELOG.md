@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.22 - 2026-09-04
+
+The Build window no longer freezes while grok is streaming or reading files.
+
+- Session updates coalesce on the main thread (about 20 UI frames a second). Token chunks no longer rebuild the whole window.
+- Streaming replies skip Markdown and link detection until the turn finishes.
+- Tool/thought clusters keep a stable identity when new rows append.
+- File reads/writes leave the main thread and cap how much is loaded.
+- Chat scroll metrics no longer write SwiftUI state on every layout pass.
+
 ## 0.1.21 - 2026-09-04
 
 Sending a prompt now shows up immediately, and `/btw` lives in the inspector.

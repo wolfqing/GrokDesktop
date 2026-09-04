@@ -64,8 +64,10 @@ struct InspectorView: View {
             model.client.refreshPlanArtifacts()
             Task { await model.client.refreshGit() }
         }
-        .onChange(of: model.client.items.count) { _, _ in
-            model.refreshWorkspace()
+        .onChange(of: model.client.isTurnRunning) { wasRunning, running in
+            if wasRunning, !running {
+                model.refreshWorkspace()
+            }
         }
         .onChange(of: model.focusAsideComposer) { _, focus in
             if focus {

@@ -202,22 +202,27 @@ final class ScrollKnobView: NSView {
 struct OverlayScrollbar: NSViewRepresentable {
     var metrics: ChatScrollMetrics
     var isDark: Bool
+    var driver: ChatScrollDriver? = nil
     var onBegan: () -> Void = {}
     var onSeek: (CGFloat) -> Void
     var onEnded: (CGFloat) -> Void = { _ in }
 
     func makeNSView(context: Context) -> ScrollKnobView {
         let view = ScrollKnobView()
-        apply(view)
+        driver?.knob = view
+        apply(view, includeMetrics: true)
         return view
     }
 
     func updateNSView(_ view: ScrollKnobView, context: Context) {
-        apply(view)
+        driver?.knob = view
+        apply(view, includeMetrics: driver?.scroll == nil)
     }
 
-    private func apply(_ view: ScrollKnobView) {
-        view.metrics = metrics
+    private func apply(_ view: ScrollKnobView, includeMetrics: Bool) {
+        if includeMetrics {
+            view.metrics = metrics
+        }
         view.isDark = isDark
         view.onBegan = onBegan
         view.onSeek = onSeek
@@ -228,16 +233,19 @@ struct OverlayScrollbar: NSViewRepresentable {
 @MainActor
 final class ChatScrollDriver {
     weak var scroll: NSScrollView?
+    weak var knob: ScrollKnobView?
 
     func attach(_ scroll: NSScrollView) {
+        let changed = self.scroll !== scroll
         self.scroll = scroll
-        ThinChatScroller.stripSystemScrollers(on: scroll)
+        if changed {
+            ThinChatScroller.stripSystemScrollers(on: scroll)
+        }
     }
 
     func update(metrics: ChatScrollMetrics, isDark: Bool) {
-        if let scroll {
-            ThinChatScroller.stripSystemScrollers(on: scroll)
-        }
+        knob?.metrics = metrics
+        knob?.isDark = isDark
     }
 
     func seek(to progress: CGFloat) {

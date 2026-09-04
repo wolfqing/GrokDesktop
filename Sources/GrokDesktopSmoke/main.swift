@@ -1351,5 +1351,87 @@ expect(permSource.source == "hook", "permission source from meta")
 expect(AgentMode(settings: "plan") == .plan, "settings plan maps")
 expect(AgentMode(settings: "ask") == .normal, "settings ask maps")
 
+let displayItems: [ConversationItem] = [
+    .user(id: "u1", text: "fix freeze"),
+    .thought(id: "h1", text: "looking"),
+    .tool(id: "t1", title: "Read ChatView.swift", status: "completed", detail: ""),
+    .tool(id: "t2", title: "Read ACPClient.swift", status: "completed", detail: "")
+]
+let displayOnce = ChatDisplay.rows(items: Array(displayItems.prefix(3)))
+let displayTwice = ChatDisplay.rows(items: displayItems)
+expect(displayOnce.count == 2, "user plus one stream cluster")
+expect(displayTwice.count == 2, "appended tools stay in the same stream cluster")
+expect(displayOnce[1].id == displayTwice[1].id, "stream id stays stable when tools append")
+let merged = ChatDisplay.streamPieces(
+    [.tool(id: "r1", title: "Read a.swift", status: "completed", detail: ""),
+     .tool(id: "r2", title: "Read b.swift", status: "completed", detail: "")],
+    mergeTools: true
+)
+let mergedMore = ChatDisplay.streamPieces(
+    [.tool(id: "r1", title: "Read a.swift", status: "completed", detail: ""),
+     .tool(id: "r2", title: "Read b.swift", status: "completed", detail: ""),
+     .tool(id: "r3", title: "Grep freeze", status: "completed", detail: "")],
+    mergeTools: true
+)
+expect(merged.count == 1, "completed reads fold")
+expect(mergedMore.count == 1, "later search stays in the same fold")
+expect(merged[0].id == mergedMore[0].id, "tool cluster id stays stable when reads append")
+
+expect(
+    !ACPPublishPolicy.needsImmediatePublish(method: "session/update", kind: .agentMessageChunk),
+    "message chunks coalesce"
+)
+expect(
+    !ACPPublishPolicy.needsImmediatePublish(method: "session/update", kind: .agentThoughtChunk),
+    "thought chunks coalesce"
+)
+expect(
+    !ACPPublishPolicy.needsImmediatePublish(method: "session/update", kind: .toolCallUpdate),
+    "tool updates coalesce"
+)
+expect(
+    ACPPublishPolicy.needsImmediatePublish(method: "session/update", kind: .turnCompleted),
+    "turn complete flushes"
+)
+expect(
+    ACPPublishPolicy.needsImmediatePublish(method: "session/request_permission", kind: nil),
+    "permission flushes"
+)
+expect(
+    ACPPublishPolicy.needsImmediatePublish(method: "x.ai/ask_user_question", kind: nil),
+    "user question flushes"
+)
+expect(
+    !ACPPublishPolicy.shouldRecordEvent(method: "session/update", kind: .agentMessageChunk),
+    "do not record every token as an inspector event"
+)
+
+let readRoot = FileManager.default.temporaryDirectory.appendingPathComponent("gd-read-\(UUID().uuidString)", isDirectory: true)
+try! FileManager.default.createDirectory(at: readRoot, withIntermediateDirectories: true)
+let bigFile = readRoot.appendingPathComponent("blob.txt")
+try! Data(repeating: 0x61, count: 40_000).write(to: bigFile)
+let capped = try! ACPFileRead.contents(at: bigFile, maxBytes: 2048)
+expect(capped.utf8.count <= 2048, "file read caps bytes, got \(capped.utf8.count)")
+let lined = readRoot.appendingPathComponent("lines.txt")
+try! (1...20).map { "line-\($0)" }.joined(separator: "\n").write(to: lined, atomically: true, encoding: .utf8)
+let slice = try! ACPFileRead.contents(at: lined, line: 5, limit: 3, maxBytes: 1024)
+expect(slice == "line-5\nline-6\nline-7", "file read honors line/limit, got \(slice)")
+
+expect(
+    !ChatScrollMath.jumpChromeChanged(
+        oldNearBottom: true, oldCanScroll: true,
+        newNearBottom: true, newCanScroll: true
+    ),
+    "same jump chrome does not republish"
+)
+expect(
+    ChatScrollMath.jumpChromeChanged(
+        oldNearBottom: true, oldCanScroll: true,
+        newNearBottom: false, newCanScroll: true
+    ),
+    "leaving the bottom republishes jump chrome"
+)
+
 print("GrokDesktopSmoke ok")
+
 

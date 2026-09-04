@@ -362,8 +362,15 @@ public extension SessionWorkspace {
     }
 
     func fold(_ update: SessionUpdate) {
+        fold(updates: [update])
+    }
+
+    func fold(updates: [SessionUpdate]) {
+        guard !updates.isEmpty else { return }
         var next = snapshot()
-        SessionFold.apply(update, onto: &next)
+        for update in updates {
+            SessionFold.apply(update, onto: &next)
+        }
         adopt(next)
     }
 }
