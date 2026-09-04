@@ -216,7 +216,7 @@ public final class ACPClient: ObservableObject {
                 "protocolVersion": 1,
                 "clientInfo": [
                     "name": "GrokDesktop",
-                    "version": "0.1.20"
+                    "version": "0.1.21"
                 ],
                 "clientCapabilities": [
                     "fs": [
@@ -425,20 +425,43 @@ public final class ACPClient: ObservableObject {
         }
         if let workspace = existing {
             revealUserTurn(trimmed, on: workspace)
+        } else {
+            outgoingPreview = trimmed
+            if turnStartedAt == nil {
+                turnStartedAt = Date()
+            }
         }
-        try await connectIfNeeded()
-        if sessionID == nil, target == nil, self.sessionID == nil {
-            try await newSession()
+        let id: String
+        let workspace: SessionWorkspace
+        do {
+            try await connectIfNeeded()
+            if sessionID == nil, target == nil, self.sessionID == nil {
+                try await newSession()
+            }
+            guard let resolved = target ?? sessionID,
+                  let resolvedWorkspace = workspaceByID[resolved] ?? currentWorkspace else {
+                outgoingPreview = nil
+                throw ACPError.rpc("No session")
+            }
+            if !resolvedWorkspace.loadedOnAgent {
+                try await ensureAgentLoaded(resolvedWorkspace)
+            }
+            id = resolved
+            workspace = resolvedWorkspace
+        } catch {
+            outgoingPreview = nil
+            if let begun = existing ?? currentWorkspace, begun.isTurnRunning {
+                begun.lastError = error.localizedDescription
+                begun.fold(SessionFold.notice(error.localizedDescription))
+                begun.finishTurn()
+                lastError = error.localizedDescription
+                syncFromCurrent()
+            }
+            throw error
         }
-        let id = target ?? sessionID
-        guard let id, let workspace = workspaceByID[id] ?? currentWorkspace else {
-            throw ACPError.rpc("No session")
-        }
-        if !workspace.loadedOnAgent {
-            try await ensureAgentLoaded(workspace)
-        }
-        if workspace.isTurnRunning {
+        if workspace.isTurnRunning, existing?.id != workspace.id {
             workspace.promptQueue.append(QueuedPrompt(text: trimmed, kind: kind))
+            outgoingPreview = nil
             syncFromCurrent()
             return
         }
@@ -510,6 +533,7 @@ public final class ACPClient: ObservableObject {
         if lastUser != trimmed {
             workspace.fold(SessionFold.userTurn(trimmed))
         }
+        outgoingPreview = nil
         if !workspace.isTurnRunning {
             workspace.beginTurn()
         }

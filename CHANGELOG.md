@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.21 - 2026-09-04
+
+Sending a prompt now shows up immediately, and `/btw` lives in the inspector.
+
+- A sent prompt appears in the transcript right away, with `Received — thinking…` / `已收到，正在思考…` until grok starts answering.
+- `/btw` and ⌘⇧B open a Codex-style aside composer in the right sidebar. Side questions stay out of the main thread.
+- Drag-select copy on mouse-up works on live streaming text and inside the conversation scroller.
+
 ## 0.1.20 - 2026-09-03
 
 Thinking and tool rows now follow Grok Build’s TUI.

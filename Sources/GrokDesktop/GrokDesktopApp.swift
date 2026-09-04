@@ -93,6 +93,10 @@ struct GrokDesktopApp: App {
                     model.destination = .build
                 }
                 .keyboardShortcut("i", modifiers: .command)
+                Button(model.copy.t("By the way", "顺便问")) {
+                    model.openAsideComposer()
+                }
+                .keyboardShortcut("b", modifiers: [.command, .shift])
                 Button(model.copy.t("Cycle mode", "切换模式")) { model.cycleMode() }
                     .keyboardShortcut(.tab, modifiers: .shift)
                 Button(model.copy.t("Always approve", "全权")) {

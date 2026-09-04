@@ -236,7 +236,7 @@ struct CommandPalette: View {
             .init(command: "/loop", title: l10n.t("Loop", "循环"), detail: l10n.t("Run a prompt on an interval", "按间隔重复执行提示词"), icon: "repeat", section: media, insertsIntoDraft: true),
             .init(command: "/goal", title: l10n.t("Goal", "目标"), detail: l10n.t("Set or manage an autonomous goal", "设置或管理自主目标"), icon: "flag", section: media, insertsIntoDraft: true),
             .init(command: "/deep-research", title: l10n.t("Deep research", "深度研究"), detail: l10n.t("Start a background research run", "启动后台研究工作流"), icon: "globe", section: media, insertsIntoDraft: true),
-            .init(command: "/btw", title: l10n.t("By the way", "顺便问"), detail: l10n.t("Ask a side question", "发一条不打断当前任务的旁问"), icon: "text.bubble", section: media, insertsIntoDraft: true),
+            .init(command: "/btw", title: l10n.t("By the way", "顺便问"), detail: l10n.t("Ask a side question from the right sidebar", "在右边栏发一条不打断当前任务的旁问"), icon: "text.bubble", section: media),
             .init(command: "/workflow", title: l10n.t("Workflow", "工作流"), detail: l10n.t("Launch or control a saved workflow", "启动或管理已保存工作流"), icon: "arrow.triangle.branch", section: media, insertsIntoDraft: true),
             .init(command: "/usage", title: l10n.usage, detail: l10n.t("Open usage and billing", "打开用量和账单"), icon: "chart.bar", section: app),
             .init(command: "/settings", title: l10n.settings, detail: l10n.t("Open settings", "打开设置"), icon: "gearshape", section: app),

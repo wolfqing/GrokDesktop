@@ -173,6 +173,8 @@ final class AppModel: ObservableObject {
     @Published var accountUsage = AccountUsage()
     @Published var isRefreshingUsage = false
     @Published var pendingBusySend: String?
+    @Published var asideDraft = ""
+    @Published var focusAsideComposer = false
     @Published var suppressSuggest = false
     @Published var goalMode = false
     @Published var cliUpdate = CLIUpdateStatus()
@@ -1196,13 +1198,37 @@ final class AppModel: ObservableObject {
         destination = .build
         draft = ""
         showPalette = false
+        showInspector = true
+        inspectorDetailsVisible = true
         Task {
             do {
-                try await client.send(text: text, kind: .aside)
+                try await client.send(text: SessionFold.asidePrompt(text), kind: .aside)
             } catch {
                 present(error)
             }
         }
+    }
+
+    func openAsideComposer(prefill: String = "") {
+        destination = .build
+        showInspector = true
+        inspectorDetailsVisible = true
+        showPalette = false
+        mentionQuery = nil
+        if !prefill.isEmpty {
+            asideDraft = SessionFold.asideDisplay(prefill)
+        }
+        focusAsideComposer = true
+    }
+
+    func sendAside() {
+        let text = asideDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            openAsideComposer()
+            return
+        }
+        asideDraft = ""
+        enqueueAside(text)
     }
 
 
@@ -1906,9 +1932,9 @@ final class AppModel: ObservableObject {
             applyMemoryCommand(rest)
         case "/btw":
             if rest.isEmpty {
-                insertSlashPrompt("/btw")
+                openAsideComposer()
             } else {
-                enqueueAside("/btw \(rest)")
+                enqueueAside(rest)
             }
         case "/remember", "/flush", "/dream", "/loop", "/goal", "/deep-research":
             if rest.isEmpty, name == "/remember" || name == "/loop" || name == "/goal" || name == "/deep-research" {
@@ -2484,7 +2510,7 @@ final class AppModel: ObservableObject {
 
     func exportDiagnostics() {
         let text = DiagnosticExport.make(
-            version: "0.1.20",
+            version: "0.1.21",
             grokVersion: client.grokVersion,
             state: String(describing: client.state),
             lastError: client.lastError,

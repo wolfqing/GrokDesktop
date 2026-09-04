@@ -6,6 +6,7 @@ struct InspectorView: View {
     @Environment(\.palette) private var palette
     @Environment(\.l10n) private var l10n
     @State private var planNote = ""
+    @FocusState private var asideFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -50,7 +51,12 @@ struct InspectorView: View {
                     .padding(14)
                 }
                 .frame(maxHeight: model.previewedFile == nil ? .infinity : 280)
+            } else if model.previewedFile == nil {
+                Spacer(minLength: 0)
             }
+
+            Divider().overlay(palette.hairline)
+            steerPanel
         }
         .background(palette.sidebar)
         .onAppear {
@@ -60,6 +66,12 @@ struct InspectorView: View {
         }
         .onChange(of: model.client.items.count) { _, _ in
             model.refreshWorkspace()
+        }
+        .onChange(of: model.focusAsideComposer) { _, focus in
+            if focus {
+                asideFocused = true
+                model.focusAsideComposer = false
+            }
         }
     }
 
@@ -157,6 +169,101 @@ struct InspectorView: View {
         model.displayedContextUsed > 0
             || !model.client.items.isEmpty
             || showsConnection
+    }
+
+    private var asideTurns: [AsideTurn] {
+        SessionFold.asideTurns(items: model.client.items, queued: model.client.promptQueue)
+    }
+
+    private var steerPanel: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "text.bubble")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(palette.secondary)
+                Text(l10n.t("By the way", "顺便问"))
+                    .font(.system(size: 12, weight: .semibold))
+                Spacer()
+                Text(l10n.t("Won't interrupt", "不打断当前任务"))
+                    .font(.system(size: 10))
+                    .foregroundStyle(palette.secondary)
+            }
+            if !asideTurns.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(asideTurns.suffix(4)) { turn in
+                        asideTurnRow(turn)
+                    }
+                }
+            }
+            HStack(alignment: .bottom, spacing: 8) {
+                TextField(
+                    l10n.t("Steer this turn…", "顺便说一句…"),
+                    text: $model.asideDraft,
+                    axis: .vertical
+                )
+                .textFieldStyle(.plain)
+                .font(.system(size: 12.5))
+                .lineLimit(1...4)
+                .focused($asideFocused)
+                .onSubmit { model.sendAside() }
+                Button {
+                    model.sendAside()
+                } label: {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(canSendAside ? palette.sendGlyph : palette.secondary)
+                        .frame(width: 24, height: 24)
+                        .background(
+                            canSendAside ? palette.send : palette.chip,
+                            in: Circle()
+                        )
+                }
+                .buttonStyle(.plain)
+                .disabled(!canSendAside)
+                .help(l10n.t("Send aside", "发送旁问"))
+            }
+            .padding(8)
+            .background(palette.input, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(palette.hairline, lineWidth: 1)
+            )
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+    }
+
+    private var canSendAside: Bool {
+        !model.asideDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func asideTurnRow(_ turn: AsideTurn) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(turn.question)
+                .font(.system(size: 12, weight: .medium))
+                .fixedSize(horizontal: false, vertical: true)
+            if turn.queued {
+                Text(l10n.t("Queued — sends after this turn", "排队中 — 本轮结束后发送"))
+                    .font(.system(size: 11))
+                    .foregroundStyle(palette.secondary)
+            } else if turn.pending, turn.answer.isEmpty {
+                HStack(spacing: 6) {
+                    RunningStatusIcon(active: true, idleSystemImage: "ellipsis", color: .orange, size: 10)
+                    Text(l10n.t("Waiting for a side answer", "等旁问回复"))
+                        .font(.system(size: 11))
+                        .foregroundStyle(palette.secondary)
+                }
+            } else if !turn.answer.isEmpty {
+                Text(turn.answer)
+                    .font(.system(size: 11))
+                    .foregroundStyle(palette.secondary)
+                    .lineLimit(6)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(palette.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     private func turnSection(_ story: TurnStory) -> some View {

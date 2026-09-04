@@ -18,45 +18,20 @@ struct LinkedText: View {
     var live = false
 
     var body: some View {
-        if live {
-            plainText
-        } else {
-            LinkedTextNSView(
-                text: text,
-                fontSize: fontSize,
-                monospaced: monospaced,
-                markdown: markdown,
-                fillsWidth: fillsWidth,
-                maxContentWidth: maxContentWidth,
-                textColor: NSColor(color ?? palette.text),
-                linkColor: .linkColor,
-                baseDirectory: model.client.workingDirectory,
-                chinese: l10n.language == .chinese
-            )
-            .frame(maxWidth: fillsWidth ? .infinity : maxContentWidth, alignment: .leading)
-            .fixedSize(horizontal: !fillsWidth, vertical: true)
-        }
-    }
-
-    private var plainText: some View {
-        Group {
-            if markdown {
-                Text(Self.swiftUIMarkdown(text))
-            } else {
-                Text(text)
-            }
-        }
-        .font(monospaced ? .system(size: fontSize, design: .monospaced) : .system(size: fontSize))
-        .lineSpacing(monospaced ? 2 : fontSize * (GrokTheme.chatLineHeight - 1))
-        .foregroundStyle(color ?? palette.text)
-        .textSelection(.enabled)
-        .frame(maxWidth: fillsWidth ? .infinity : nil, alignment: .leading)
-    }
-
-    private static func swiftUIMarkdown(_ text: String) -> AttributedString {
-        var options = AttributedString.MarkdownParsingOptions()
-        options.interpretedSyntax = .inlineOnlyPreservingWhitespace
-        return (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
+        LinkedTextNSView(
+            text: text,
+            fontSize: fontSize,
+            monospaced: monospaced,
+            markdown: markdown,
+            fillsWidth: fillsWidth,
+            maxContentWidth: maxContentWidth,
+            textColor: NSColor(color ?? palette.text),
+            linkColor: .linkColor,
+            baseDirectory: model.client.workingDirectory,
+            chinese: l10n.language == .chinese
+        )
+        .frame(maxWidth: fillsWidth ? .infinity : maxContentWidth, alignment: .leading)
+        .fixedSize(horizontal: !fillsWidth, vertical: true)
     }
 }
 
@@ -291,12 +266,13 @@ final class ChatTextView: NSTextView {
 
     override func mouseUp(with event: NSEvent) {
         super.mouseUp(with: event)
-        let selected = SelectionCopyAction.selectedString(in: self) ?? ""
         let start = mouseDownPoint ?? event.locationInWindow
         let distance = hypot(event.locationInWindow.x - start.x, event.locationInWindow.y - start.y)
         mouseDownPoint = nil
         let count = event.clickCount
-        Task { @MainActor in
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let selected = SelectionCopyAction.selectedString(in: self) ?? ""
             SelectionCopyAction.emit(selected, dragDistance: distance, clickCount: count)
         }
     }

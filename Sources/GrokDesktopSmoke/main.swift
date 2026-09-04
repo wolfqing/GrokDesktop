@@ -941,6 +941,26 @@ if case .planReview(let approve) = inferred?.intent {
 
 expect(SessionFold.isAside("/btw also check tests"), "btw is aside")
 expect(!SessionFold.isAside("also check tests"), "plain text is follow-up")
+expect(SessionFold.asidePrompt("check tests") == "/btw check tests", "aside prompt prefixes")
+expect(SessionFold.asidePrompt("/btw already") == "/btw already", "aside prompt keeps slash")
+expect(SessionFold.asideDisplay("/btw also check tests") == "also check tests", "aside display strips slash")
+let asideItems: [ConversationItem] = [
+    .user(id: "u-main", text: "main work"),
+    .assistant(id: "a-main", text: "working", done: false),
+    .user(id: "u-aside", text: "/btw what file is this"),
+    .assistant(id: "a-aside", text: "ChatView.swift", done: true)
+]
+expect(SessionFold.belongsToAside(asideItems[2], items: asideItems), "aside user is aside")
+expect(SessionFold.belongsToAside(asideItems[3], items: asideItems), "aside answer is aside")
+expect(!SessionFold.belongsToAside(asideItems[0], items: asideItems), "main user is not aside")
+let asideTurns = SessionFold.asideTurns(
+    items: asideItems,
+    queued: [QueuedPrompt(text: "/btw queued note", kind: .aside)]
+)
+expect(asideTurns.count == 2, "aside turns include queued")
+expect(asideTurns[0].question == "what file is this", "aside question")
+expect(asideTurns[0].answer == "ChatView.swift", "aside answer")
+expect(asideTurns[1].queued, "queued aside marked")
 expect(SessionFold.applyGoal("ship the preview", enabled: true) == "/goal ship the preview", "goal prefixes")
 expect(SessionFold.applyGoal("/goal already", enabled: true) == "/goal already", "goal keeps slash")
 expect(SessionFold.applyGoal("/new", enabled: true) == "/new", "goal leaves commands")

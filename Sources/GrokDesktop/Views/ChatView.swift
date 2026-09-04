@@ -220,13 +220,13 @@ struct ChatView: View {
         VStack(spacing: 0) {
             header
 
-            if let reason = model.firstRunReason, model.client.items.isEmpty {
+            if let reason = model.firstRunReason, model.client.items.isEmpty, model.client.outgoingPreview == nil {
                 FirstRunView(reason: reason)
                 composerBlock
-            } else if model.client.items.isEmpty, model.client.isLoadingSession {
+            } else if model.client.items.isEmpty, model.client.isLoadingSession, model.client.outgoingPreview == nil {
                 loadingState
                 composerBlock
-            } else if model.client.items.isEmpty {
+            } else if model.client.items.isEmpty, model.client.outgoingPreview == nil, model.client.promptQueue.isEmpty {
                 emptyState
             } else {
                 if model.client.isReconnecting {
@@ -294,7 +294,20 @@ struct ChatView: View {
                                     displayRow(row)
                                         .id(row.id)
                                 }
-                                ForEach(model.client.promptQueue) { queued in
+                                if let preview = outgoingPreviewText {
+                                    userPromptRow(
+                                        id: "outgoing-preview",
+                                        text: preview,
+                                        images: PromptMedia.imageURLs(in: preview),
+                                        queued: false
+                                    )
+                                    .id("outgoing-preview")
+                                }
+                                if showsWaitingStatus {
+                                    waitingStatusRow
+                                        .id("waiting-status")
+                                }
+                                ForEach(model.client.promptQueue.filter { $0.kind != .aside }) { queued in
                                     queuedPromptRow(queued)
                                         .id("queue-\(queued.id)")
                                 }
@@ -733,7 +746,12 @@ struct ChatView: View {
             pending = []
         }
 
+        let hideAsides = model.client.items.contains { item in
+            if case .user(_, let text) = item { return !SessionFold.isAside(text) }
+            return false
+        }
         for item in model.client.items {
+            if hideAsides, SessionFold.belongsToAside(item, items: model.client.items) { continue }
             if case .thought = item, !model.showThinkingBlocks { continue }
             if isTodoTool(item) { continue }
             switch item {
@@ -812,9 +830,11 @@ struct ChatView: View {
     }
 
     private var lastDisplayID: String? {
-        if let queued = model.client.promptQueue.last {
+        if let queued = model.client.promptQueue.last(where: { $0.kind != .aside }) {
             return "queue-\(queued.id)"
         }
+        if showsWaitingStatus { return "waiting-status" }
+        if showsOutgoingPreview { return "outgoing-preview" }
         return displayedRows.last?.id
     }
 
@@ -848,7 +868,7 @@ struct ChatView: View {
         case .none:
             tail = "empty"
         }
-        return "\(model.client.sessionID ?? "")-\(model.client.items.count)-\(tail)-\(todoFingerprint)-\(model.client.isTurnRunning)-\(model.client.isStopping)-q\(model.client.promptQueue.count)"
+        return "\(model.client.sessionID ?? "")-\(model.client.items.count)-\(tail)-\(todoFingerprint)-\(model.client.isTurnRunning)-\(model.client.isStopping)-q\(model.client.promptQueue.count)-o\(model.client.outgoingPreview?.count ?? 0)-w\(showsWaitingStatus)"
     }
 
     private func pinToLatestOnOpen(_ proxy: ScrollViewProxy) {
@@ -955,6 +975,83 @@ struct ChatView: View {
         }
     }
 
+    private var outgoingPreviewText: String? {
+        guard let preview = model.client.outgoingPreview, !SessionFold.isAside(preview) else { return nil }
+        if model.client.items.contains(where: {
+            if case .user(_, let text) = $0 { return text == preview }
+            return false
+        }) {
+            return nil
+        }
+        return preview
+    }
+
+    private var showsOutgoingPreview: Bool {
+        outgoingPreviewText != nil
+    }
+
+    private var showsWaitingStatus: Bool {
+        if showsOutgoingPreview { return true }
+        guard model.client.isTurnRunning, !model.client.isStopping else { return false }
+        return !hasVisibleTurnProgress
+    }
+
+    private var hasVisibleTurnProgress: Bool {
+        guard let lastUser = model.client.items.lastIndex(where: {
+            if case .user = $0 { return true }
+            return false
+        }) else { return false }
+        let tail = model.client.items.suffix(from: lastUser + 1)
+        for item in tail {
+            if SessionFold.belongsToAside(item, items: model.client.items) { continue }
+            switch item {
+            case .assistant(_, let text, _) where !text.isEmpty:
+                return true
+            case .tool(_, _, let status, _) where ToolVoice.isActive(status):
+                return true
+            case .thought where model.showThinkingBlocks:
+                return true
+            default:
+                continue
+            }
+        }
+        return false
+    }
+
+    private var waitingTitle: String {
+        if model.client.isReconnecting || model.client.state == .connecting {
+            return l10n.t("Connecting to grok…", "正在连接 grok…")
+        }
+        if model.client.isLoadingSession {
+            return l10n.t("Loading session…", "正在加载会话…")
+        }
+        if model.client.isStopping {
+            return l10n.stopping
+        }
+        return l10n.t("Received — thinking…", "已收到，正在思考…")
+    }
+
+    private var waitingStatusRow: some View {
+        HStack(spacing: 8) {
+            RunningStatusIcon(active: true, idleSystemImage: "ellipsis", color: .orange, size: 12)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(waitingTitle)
+                    .font(.system(size: 13, weight: .medium))
+                if let start = model.client.turnStartedAt {
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        Text(PromptTimestamp.formatElapsed(context.date.timeIntervalSince(start)))
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(palette.secondary)
+                    }
+                }
+            }
+            Spacer()
+        }
+        .foregroundStyle(palette.secondary)
+        .padding(.horizontal, model.compactChat ? 16 : 28)
+        .padding(.top, 4)
+    }
+
     @ViewBuilder
     private func queuedPromptRow(_ item: QueuedPrompt) -> some View {
         userPromptRow(
@@ -974,8 +1071,9 @@ struct ChatView: View {
         queued: Bool,
         onRemove: (() -> Void)? = nil
     ) -> some View {
-        let shown = PromptMedia.displayText(text)
-        let caption = shown.isEmpty && images.isEmpty ? text : shown
+        let raw = SessionFold.isAside(text) ? SessionFold.asideDisplay(text) : text
+        let shown = PromptMedia.displayText(raw)
+        let caption = shown.isEmpty && images.isEmpty ? raw : shown
         HStack {
             Spacer(minLength: 80)
             VStack(alignment: .trailing, spacing: 4) {
@@ -1075,10 +1173,21 @@ struct ChatView: View {
                     )
                 }
                 if model.client.isTurnRunning, isLatestAssistant(id) {
-                    Circle()
-                        .fill(palette.secondary)
-                        .frame(width: 6, height: 6)
-                        .opacity(0.7)
+                    HStack(spacing: 6) {
+                        RunningStatusIcon(active: true, idleSystemImage: "ellipsis", color: .orange, size: 10)
+                        Text(text.isEmpty
+                             ? l10n.t("Thinking…", "正在思考…")
+                             : l10n.t("Writing…", "正在回复…"))
+                            .font(.system(size: 11))
+                            .foregroundStyle(palette.secondary)
+                        if let start = model.client.turnStartedAt {
+                            TimelineView(.periodic(from: .now, by: 1)) { context in
+                                Text(PromptTimestamp.formatElapsed(context.date.timeIntervalSince(start)))
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(palette.secondary)
+                            }
+                        }
+                    }
                 } else if let label = turnDurationLabel(for: id) {
                     Text(label)
                         .font(.system(size: 11))
