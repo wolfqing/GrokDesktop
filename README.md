@@ -20,7 +20,9 @@ Community project. Not an official xAI / SpaceXAI product.
 
 ## Install
 
-**Download:** [Grok-Desktop-0.1.21.zip](https://github.com/wolfqing/GrokDesktop/releases/download/v0.1.21/Grok-Desktop-0.1.21.zip) · [All releases](https://github.com/wolfqing/GrokDesktop/releases)
+**Download:** [Grok-Desktop-0.1.21.zip](https://github.com/wolfqing/GrokDesktop/releases/download/v0.1.21/Grok-Desktop-0.1.21.zip) · [All releases](https://github.com/wolfqing/GrokDesktop/releases) · [Changelog](CHANGELOG.md)
+
+**0.1.21:** a sent prompt appears immediately with `Received — thinking…`. `/btw` / ⌘⇧B asks a side question in the inspector. Drag-select copies live chat text.
 
 1. macOS 14+
 2. Unzip and move `Grok Desktop.app` to Applications
@@ -46,9 +48,9 @@ If it won't install, won't open, or you want a feature: [open an issue](https://
 - **Chat**: grok.com. History stays on the web, not mixed with Build sessions.
 - **Build left**: new session, search, Imagine, live agents, history grouped by project folder from `~/.grok/sessions` (Codex / Claude style). Opening a past chat shows right away; long sessions load in the background. Adding a named project keeps the folders already inferred from sessions.
 - **Imagine**: local image and short video through the grok agent (`/imagine`, `/imagine-video`). Recents come from session `images/` folders. This is not grok.com/imagine inside Chat.
-- **Build center**: conversation, Markdown, clickable files/links. Scroll away and a down arrow jumps back to the latest message. The latest prompt can be put back in the composer.
-- **Build inspector**: context, tasks, plan, diffs, live terminals
-- **Settings**: account, appearance, behavior, extensions — reads `~/.grok/config.toml`
+- **Build center**: conversation, Markdown, clickable files/links. Thinking and tool rows follow the Grok Build TUI. A sent prompt shows up right away, with `Received — thinking…` until grok answers. Drag-select copies. Scroll away and a down arrow jumps back to the latest message. The latest prompt can be put back in the composer.
+- **Build inspector**: context, tasks, plan, diffs, live terminals, and this-turn status. `/btw` / ⌘⇧B opens a Codex-style aside composer; side questions stay out of the main thread.
+- **Settings**: account, appearance, behavior, extensions, grok CLI updates — reads `~/.grok/config.toml`
 
 ## Build from source
 
