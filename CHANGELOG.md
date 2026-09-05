@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.24 - 2026-09-05
+
+Session and project rows in the sidebar are clickable across the whole row, not only the title text.
+
 ## 0.1.23 - 2026-09-05
 
 Scrolling the conversation and the live-turn row are quieter.

@@ -20,9 +20,9 @@ Community project. Not an official xAI / SpaceXAI product.
 
 ## Install
 
-**Download:** [Grok-Desktop-0.1.23.zip](https://github.com/wolfqing/GrokDesktop/releases/download/v0.1.23/Grok-Desktop-0.1.23.zip) · [All releases](https://github.com/wolfqing/GrokDesktop/releases) · [Changelog](CHANGELOG.md)
+**Download:** [Grok-Desktop-0.1.24.zip](https://github.com/wolfqing/GrokDesktop/releases/download/v0.1.24/Grok-Desktop-0.1.24.zip) · [All releases](https://github.com/wolfqing/GrokDesktop/releases) · [Changelog](CHANGELOG.md)
 
-**0.1.23:** conversation scrolling no longer fights the bottom pin, and the live-turn row above the composer is just elapsed time and `[stop]`.
+**0.1.24:** click anywhere on a sidebar session or project row to open it.
 
 1. macOS 14+
 2. Unzip and move `Grok Desktop.app` to Applications

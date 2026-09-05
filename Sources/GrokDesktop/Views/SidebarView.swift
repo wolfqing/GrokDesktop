@@ -182,6 +182,7 @@ struct SidebarView: View {
                                             model.isCurrentProject(project) ? palette.selected : Color.clear,
                                             in: RoundedRectangle(cornerRadius: 8, style: .continuous)
                                         )
+                                        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -499,6 +500,7 @@ struct SidebarView: View {
             .padding(.trailing, 16)
             .padding(.vertical, 7)
             .background(selected ? palette.selected : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .buttonStyle(.plain)
     }

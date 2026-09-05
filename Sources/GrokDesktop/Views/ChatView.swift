@@ -647,6 +647,7 @@ struct ChatView: View {
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 8)
                                 .background(palette.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                             }
                             .buttonStyle(.plain)
                         }
@@ -676,6 +677,7 @@ struct ChatView: View {
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 8)
                                 .background(palette.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                             }
                             .buttonStyle(.plain)
                         }
