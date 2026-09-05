@@ -23,11 +23,11 @@ private struct ChatScrollGeometryReader: ViewModifier {
 }
 
 private struct ChatDefaultBottomAnchor: ViewModifier {
-    var enabled: Bool
-
     func body(content: Content) -> some View {
-        if #available(macOS 15.0, *), enabled {
-            content.defaultScrollAnchor(.bottom)
+        if #available(macOS 15.0, *) {
+            content
+                .defaultScrollAnchor(.bottom, for: .initialOffset)
+                .defaultScrollAnchor(.bottom, for: .sizeChanges)
         } else {
             content
         }
@@ -42,6 +42,7 @@ struct ChatScrollBottomMonitor: NSViewRepresentable {
     var isDark = false
     var onNearBottomChange: (Bool) -> Void
     var onMetrics: (ChatScrollMetrics) -> Void = { _ in }
+    var onUserScroll: (ChatScrollMetrics) -> Void = { _ in }
     var driver: ChatScrollDriver?
 
     @MainActor
@@ -57,6 +58,7 @@ struct ChatScrollBottomMonitor: NSViewRepresentable {
         var isDark = false
         var onChange: (Bool) -> Void = { _ in }
         var onMetrics: (ChatScrollMetrics) -> Void = { _ in }
+        var onUserScroll: (ChatScrollMetrics) -> Void = { _ in }
         var driver: ChatScrollDriver?
         private var attachAttempts = 0
 
@@ -95,7 +97,7 @@ struct ChatScrollBottomMonitor: NSViewRepresentable {
                 queue: .main
             ) { [weak self] _ in
                 Task { @MainActor in
-                    self?.emit()
+                    self?.emit(userScroll: true)
                 }
             }
             frameToken = NotificationCenter.default.addObserver(
@@ -104,19 +106,22 @@ struct ChatScrollBottomMonitor: NSViewRepresentable {
                 queue: .main
             ) { [weak self] _ in
                 Task { @MainActor in
-                    self?.emit()
+                    self?.emit(userScroll: false)
                 }
             }
-            emit()
+            emit(userScroll: false)
         }
 
-        func emit() {
+        func emit(userScroll: Bool) {
             guard let clip else { return }
             if let scroll {
                 driver?.attach(scroll)
             }
             let metrics = Self.metrics(from: clip, slack: slack)
             driver?.update(metrics: metrics, isDark: isDark)
+            if userScroll {
+                onUserScroll(metrics)
+            }
             if ChatScrollMath.jumpChromeChanged(
                 oldNearBottom: lastPublished.isNearBottom,
                 oldCanScroll: lastPublished.canScroll,
@@ -179,6 +184,7 @@ struct ChatScrollBottomMonitor: NSViewRepresentable {
         coordinator.isDark = isDark
         coordinator.onChange = onNearBottomChange
         coordinator.onMetrics = onMetrics
+        coordinator.onUserScroll = onUserScroll
         coordinator.driver = driver
         return coordinator
     }
@@ -198,6 +204,7 @@ struct ChatScrollBottomMonitor: NSViewRepresentable {
         context.coordinator.isDark = isDark
         context.coordinator.onChange = onNearBottomChange
         context.coordinator.onMetrics = onMetrics
+        context.coordinator.onUserScroll = onUserScroll
         context.coordinator.driver = driver
         if let scroll = context.coordinator.scroll {
             driver?.attach(scroll)
@@ -328,16 +335,15 @@ struct ChatView: View {
                             .frame(maxWidth: .infinity)
                         }
                         .scrollIndicators(.never)
-                        .modifier(ChatDefaultBottomAnchor(enabled: stickToLatest || pinningToLatest))
+                        .modifier(ChatDefaultBottomAnchor())
                         .modifier(ChatScrollGeometryReader { applyScrollMetrics($0) })
                         .background(
                             ChatScrollBottomMonitor(
                                 ignoreUntil: ignoreScrollUntil,
                                 isDark: palette.isDark,
-                                onNearBottomChange: { nearBottom in
-                                    applyNearBottom(nearBottom)
-                                },
+                                onNearBottomChange: { _ in },
                                 onMetrics: { applyScrollMetrics($0) },
+                                onUserScroll: { applyUserScroll($0) },
                                 driver: scrollDriver
                             )
                         )
@@ -445,7 +451,7 @@ struct ChatView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(palette.canvas)
-        .animation(.easeOut(duration: 0.16), value: stickToLatest)
+        .animation(.easeOut(duration: 0.16), value: showJumpToLatest)
         .onReceive(NotificationCenter.default.publisher(for: .grokCopyOnSelect)) { note in
             if let text = note.object as? String {
                 model.copySelection(text)
@@ -470,34 +476,12 @@ struct ChatView: View {
     }
 
     private func turnStatusRow(now: Date) -> some View {
-        let chinese = l10n.language == .chinese
-        let status = TurnNarrative.status(
-            items: model.client.items,
-            dates: model.client.itemDates,
-            chinese: chinese,
-            running: model.client.isTurnRunning,
-            stopping: model.client.isStopping
-        )
-        let phase = status?.phaseStartedAt.map { now.timeIntervalSince($0) }
         let turn = model.client.turnStartedAt.map { now.timeIntervalSince($0) }
-        let toolColor = Color.green.opacity(palette.isDark ? 0.85 : 0.75)
         return HStack(spacing: 8) {
-            RunningStatusIcon(
-                active: model.client.isTurnRunning && !model.client.isStopping,
-                idleSystemImage: "stop.fill",
-                color: status?.isTool == true ? toolColor : palette.secondary,
-                size: 10
-            )
-            Text(status?.label ?? (chinese ? "思考中…" : "Thinking…"))
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(status?.isTool == true ? toolColor : palette.secondary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-            if let phase, phase >= 0.2 {
-                Text(PromptTimestamp.formatCompactElapsed(phase))
-                    .font(.system(size: 12, design: .monospaced))
+            if model.client.isStopping {
+                Text(l10n.stopping)
+                    .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(palette.secondary)
-                    .fixedSize()
             }
             Spacer(minLength: 8)
             if let turn, turn >= 1 {
@@ -734,11 +718,21 @@ struct ChatView: View {
             && (!stickToLatest || !scrollMetrics.isNearBottom)
     }
 
-    private func applyNearBottom(_ near: Bool) {
+    private func applyUserScroll(_ metrics: ChatScrollMetrics) {
         guard !pinningToLatest, !scrollbarDragging else { return }
-        guard Date() >= ignoreScrollUntil else { return }
-        if stickToLatest != near {
-            stickToLatest = near
+        scrollDriver.update(metrics: metrics, isDark: palette.isDark)
+        if metrics.userReleased {
+            stickToLatest = false
+        } else if metrics.isNearBottom {
+            stickToLatest = true
+        }
+        if ChatScrollMath.jumpChromeChanged(
+            oldNearBottom: scrollMetrics.isNearBottom,
+            oldCanScroll: scrollMetrics.canScroll,
+            newNearBottom: metrics.isNearBottom,
+            newCanScroll: metrics.canScroll
+        ) {
+            scrollMetrics = metrics
         }
     }
 
@@ -764,9 +758,7 @@ struct ChatView: View {
             } else {
                 bottomHits = 0
             }
-            return
         }
-        applyNearBottom(metrics.isNearBottom)
     }
 
     private func chatScrollbar(_ proxy: ScrollViewProxy) -> some View {
@@ -903,6 +895,15 @@ struct ChatView: View {
         })?.id == id
     }
 
+    private func isCurrentActivity(_ id: String) -> Bool {
+        guard model.client.isTurnRunning else { return false }
+        return model.client.items.last(where: { item in
+            if isTodoTool(item) { return false }
+            if case .thought = item, !model.showThinkingBlocks { return false }
+            return true
+        })?.id == id
+    }
+
     private func isLatestUser(_ id: String) -> Bool {
         model.client.items.last(where: {
             if case .user = $0 { return true }
@@ -993,17 +994,8 @@ struct ChatView: View {
     private var waitingStatusRow: some View {
         HStack(spacing: 8) {
             RunningStatusIcon(active: true, idleSystemImage: "ellipsis", color: .orange, size: 12)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(waitingTitle)
-                    .font(.system(size: 13, weight: .medium))
-                if let start = model.client.turnStartedAt {
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
-                        Text(PromptTimestamp.formatElapsed(context.date.timeIntervalSince(start)))
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(palette.secondary)
-                    }
-                }
-            }
+            Text(waitingTitle)
+                .font(.system(size: 13, weight: .medium))
             Spacer()
         }
         .foregroundStyle(palette.secondary)
@@ -1131,7 +1123,7 @@ struct ChatView: View {
                         live: !done && model.client.isTurnRunning
                     )
                 }
-                if model.client.isTurnRunning, isLatestAssistant(id) {
+                if model.client.isTurnRunning, isCurrentActivity(id) {
                     HStack(spacing: 6) {
                         RunningStatusIcon(active: true, idleSystemImage: "ellipsis", color: .orange, size: 10)
                         Text(text.isEmpty
@@ -1139,13 +1131,6 @@ struct ChatView: View {
                              : l10n.t("Writing…", "正在回复…"))
                             .font(.system(size: 11))
                             .foregroundStyle(palette.secondary)
-                        if let start = model.client.turnStartedAt {
-                            TimelineView(.periodic(from: .now, by: 1)) { context in
-                                Text(PromptTimestamp.formatElapsed(context.date.timeIntervalSince(start)))
-                                    .font(.system(size: 11, design: .monospaced))
-                                    .foregroundStyle(palette.secondary)
-                            }
-                        }
                     }
                 } else if let label = turnDurationLabel(for: id) {
                     Text(label)
@@ -1199,7 +1184,7 @@ struct ChatView: View {
     @ViewBuilder
     private func thoughtRow(id: String, text: String) -> some View {
         let chinese = l10n.language == .chinese
-        let live = isLiveThought(id)
+        let live = isCurrentActivity(id)
         let elapsed = TurnTiming.seconds(
             forThought: id,
             items: model.client.items,
@@ -1252,15 +1237,6 @@ struct ChatView: View {
                 .padding(.leading, 18)
             }
         }
-    }
-
-    private func isLiveThought(_ id: String) -> Bool {
-        guard model.client.isTurnRunning else { return false }
-        return model.client.items.last(where: { item in
-            if isTodoTool(item) { return false }
-            if case .thought = item, !model.showThinkingBlocks { return false }
-            return true
-        })?.id == id
     }
 
     @ViewBuilder

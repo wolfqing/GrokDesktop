@@ -625,7 +625,7 @@ struct SettingsView: View {
             ))
             .foregroundStyle(palette.secondary)
             HStack {
-                Text("Grok Desktop 0.1.22")
+                Text("Grok Desktop 0.1.23")
                 Spacer()
                 Text(model.client.grokVersion ?? "grok ?")
                     .foregroundStyle(palette.secondary)
@@ -824,7 +824,7 @@ struct SettingsView: View {
     private var advancedPage: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 10) {
-                versionRow(l10n.t("App", "应用"), "0.1.22")
+                versionRow(l10n.t("App", "应用"), "0.1.23")
                 versionRow(
                     "grok CLI",
                     model.cliUpdate.current.isEmpty

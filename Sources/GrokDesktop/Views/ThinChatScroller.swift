@@ -10,7 +10,12 @@ struct ChatScrollMetrics: Equatable {
     var canScroll: Bool { content > visible + 12 }
     var travel: CGFloat { max(content - visible, 1) }
     var progress: CGFloat { min(max(offset / travel, 0), 1) }
-    var isNearBottom: Bool { content - (offset + visible) <= 56 }
+    var isNearBottom: Bool {
+        ChatScrollMath.isNearBottom(offset: offset, visible: visible, content: content)
+    }
+    var userReleased: Bool {
+        ChatScrollMath.userReleasedBottom(offset: offset, visible: visible, content: content)
+    }
 }
 
 final class ScrollKnobView: NSView {

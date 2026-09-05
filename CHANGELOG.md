@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.23 - 2026-09-05
+
+Scrolling the conversation and the live-turn row are quieter.
+
+- Mouse-wheel and trackpad scrolling no longer fight the bottom pin. A short flick away from the latest message releases it; new tokens still follow if you stay at the bottom.
+- The row above the composer no longer repeats “Thinking…”. It keeps elapsed time and `[stop]`.
+
 ## 0.1.22 - 2026-09-04
 
 The Build window no longer freezes while grok is streaming or reading files.

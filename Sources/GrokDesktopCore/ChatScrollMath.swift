@@ -31,6 +31,21 @@ public enum ChatScrollMath {
         min(max(progress, 0), 1) * max(track - thumb, 0)
     }
 
+    public static let jumpSlack: CGFloat = 56
+    public static let releaseSlack: CGFloat = 8
+
+    public static func distanceFromBottom(offset: CGFloat, visible: CGFloat, content: CGFloat) -> CGFloat {
+        max(content - offset - visible, 0)
+    }
+
+    public static func isNearBottom(offset: CGFloat, visible: CGFloat, content: CGFloat) -> Bool {
+        distanceFromBottom(offset: offset, visible: visible, content: content) <= jumpSlack
+    }
+
+    public static func userReleasedBottom(offset: CGFloat, visible: CGFloat, content: CGFloat) -> Bool {
+        distanceFromBottom(offset: offset, visible: visible, content: content) > releaseSlack
+    }
+
     public static func jumpChromeChanged(
         oldNearBottom: Bool,
         oldCanScroll: Bool,

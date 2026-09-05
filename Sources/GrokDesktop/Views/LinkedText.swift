@@ -284,11 +284,7 @@ final class ChatTextView: NSTextView {
     }
 
     override func scrollWheel(with event: NSEvent) {
-        if let outer = enclosingScrollView {
-            outer.scrollWheel(with: event)
-        } else {
-            nextResponder?.scrollWheel(with: event)
-        }
+        nextResponder?.scrollWheel(with: event)
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
