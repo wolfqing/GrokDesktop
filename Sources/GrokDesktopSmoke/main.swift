@@ -181,9 +181,13 @@ expect(ws.isLive == false, "empty workspace not live")
 ws.isTurnRunning = true
 expect(ws.isLive, "running workspace is live")
 ws.todos = [AgentTodo(id: "1", content: "One", status: "in_progress")]
+ws.promptQueue = [QueuedPrompt(id: "q", text: "later", kind: .followUp)]
+ws.armedQueueID = "q"
 ws.markWorkStopped()
 expect(ws.stopRequested, "stop requested")
 expect(ws.isTurnRunning == false, "stop clears turn")
+expect(ws.promptQueue.isEmpty, "stop clears the queue")
+expect(ws.armedQueueID == nil, "stop clears send-now")
 expect(ws.todos[0].status == "cancelled", "stop cancels todos")
 expect(ws.isLive == false, "stopped workspace is not live")
 
@@ -1366,6 +1370,24 @@ let permSource = PermissionRequest.parse(id: .int(9), params: [
 expect(permSource.source == "hook", "permission source from meta")
 expect(AgentMode(settings: "plan") == .plan, "settings plan maps")
 expect(AgentMode(settings: "ask") == .normal, "settings ask maps")
+
+let queuedA = QueuedPrompt(id: "a", text: "first", kind: .followUp)
+let queuedB = QueuedPrompt(id: "b", text: "second", kind: .followUp)
+let queuedC = QueuedPrompt(id: "c", text: "third", kind: .aside)
+let promoted = PromptQueue.promote([queuedA, queuedB, queuedC], id: "b")
+expect(promoted.map(\.id) == ["b", "a", "c"], "send now moves that row to the front")
+expect(PromptQueue.promote([queuedA, queuedB], id: "missing").map(\.id) == ["a", "b"], "unknown id leaves the queue")
+let prepended = PromptQueue.prepend([queuedA, queuedB], text: "second", kind: .followUp)
+expect(prepended.first?.text == "second", "send now text jumps the queue")
+expect(prepended.count == 2, "send now text does not duplicate")
+let fresh = PromptQueue.prepend([queuedA], text: "now", kind: .followUp)
+expect(fresh.map(\.text) == ["now", "first"], "new send now lands first")
+expect(promoted.first?.kind == .followUp, "promoted follow-up keeps its kind")
+let asidePromoted = PromptQueue.promote([queuedA, queuedC], id: "c")
+expect(asidePromoted.map(\.id) == ["c", "a"], "aside stays in queue order when moved")
+expect(asidePromoted.first?.kind == .aside, "promoted aside stays an aside")
+let rekind = PromptQueue.prepend([queuedC], text: "third", kind: .followUp)
+expect(rekind.count == 1 && rekind.first?.kind == .followUp, "same text is replaced with the requested kind")
 
 let displayItems: [ConversationItem] = [
     .user(id: "u1", text: "fix freeze"),

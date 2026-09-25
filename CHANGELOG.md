@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.25 - 2026-09-25
+
+Queued prompts stay under the composer. Send now runs one follow-up next.
+
+- The list shows what will send when this turn finishes. The first row is Next. More than three rows scroll.
+- Send now cancels the current turn and runs that follow-up next. That row reads Sending next. Stop still clears the queue.
+- Asides wait until the turn finishes and do not interrupt.
+- An empty send button no longer starts the queue or stops the turn.
+
 ## 0.1.24 - 2026-09-05
 
 Session and project rows in the sidebar are clickable across the whole row, not only the title text.

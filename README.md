@@ -20,9 +20,9 @@ Community project. Not an official xAI / SpaceXAI product.
 
 ## Install
 
-**Download:** [Grok-Desktop-0.1.24.zip](https://github.com/wolfqing/GrokDesktop/releases/download/v0.1.24/Grok-Desktop-0.1.24.zip) · [All releases](https://github.com/wolfqing/GrokDesktop/releases) · [Changelog](CHANGELOG.md)
+**Download:** [Grok-Desktop-0.1.25.zip](https://github.com/wolfqing/GrokDesktop/releases/download/v0.1.25/Grok-Desktop-0.1.25.zip) · [All releases](https://github.com/wolfqing/GrokDesktop/releases) · [Changelog](CHANGELOG.md)
 
-**0.1.24:** click anywhere on a sidebar session or project row to open it.
+**0.1.25:** queued prompts sit under the composer. Send now runs that follow-up next; asides still wait.
 
 1. macOS 14+
 2. Unzip and move `Grok Desktop.app` to Applications

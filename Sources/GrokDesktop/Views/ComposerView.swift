@@ -155,20 +155,7 @@ struct ComposerView: View {
             }
 
             if !model.client.promptQueue.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(
-                        l10n.t(
-                            "Waiting — will send when this turn finishes",
-                            "排队中 — 当前回复结束后自动发送"
-                        )
-                    )
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(palette.secondary)
-                    ForEach(model.client.promptQueue) { item in
-                        queuedRow(item)
-                    }
-                }
-                .padding(.horizontal, 6)
+                queuePanel
             }
 
             Button {
@@ -413,8 +400,7 @@ struct ComposerView: View {
             model.draft = ""
             return
         }
-        if model.client.isTurnRunning, text.isEmpty {
-            model.client.cancelTurn()
+        if text.isEmpty {
             return
         }
         if forceNow, model.client.isTurnRunning, !text.isEmpty {
@@ -426,40 +412,118 @@ struct ComposerView: View {
         model.sendDraft()
     }
 
-    private func queuedRow(_ item: QueuedPrompt) -> some View {
+    private var queuePanel: some View {
+        let items = model.client.promptQueue
+        let count = items.count
+        return VStack(alignment: .leading, spacing: 6) {
+            Text(
+                l10n.t(
+                    "Queued \(count) — sends in order when this turn finishes",
+                    "排队 \(count) 条 — 当前回复结束后按顺序发送"
+                )
+            )
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(palette.secondary)
+            if count > 3 {
+                ScrollView {
+                    queueStack(items)
+                }
+                .scrollIndicators(.never)
+                .frame(height: 210)
+            } else {
+                queueStack(items)
+            }
+        }
+        .padding(.horizontal, 6)
+    }
+
+    private func queueStack(_ items: [QueuedPrompt]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                queuedRow(item, isNext: index == 0)
+            }
+        }
+    }
+
+    private func queuedRow(_ item: QueuedPrompt, isNext: Bool) -> some View {
         let images = PromptMedia.imageURLs(in: item.text)
-        let shown = PromptMedia.displayText(item.text)
+        let raw = item.kind == .aside ? SessionFold.asideDisplay(item.text) : item.text
+        let shown = PromptMedia.displayText(raw)
+        let armed = model.client.armedQueueID == item.id
+        let handoff = model.client.armedQueueID != nil
         return HStack(alignment: .center, spacing: 8) {
-            Image(systemName: "clock")
+            Image(systemName: item.kind == .aside ? "text.bubble" : "clock")
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(palette.secondary)
+                .frame(width: 14)
             if let first = images.first {
                 DraftImageThumb(url: first, size: 28)
             }
-            Text(shown.isEmpty ? l10n.t("Image", "图片") : shown)
-                .font(.system(size: 12))
-                .lineLimit(1)
-                .foregroundStyle(palette.text)
-            if images.count > 1 {
-                Text("+\(images.count - 1)")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(palette.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                if let eyebrow = queueEyebrow(item, isNext: isNext, armed: armed) {
+                    Text(eyebrow)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(palette.secondary)
+                }
+                Text(shown.isEmpty ? l10n.t("Image", "图片") : shown)
+                    .font(.system(size: 12))
+                    .foregroundStyle(palette.text)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                if images.count > 1 {
+                    Text("+\(images.count - 1)")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(palette.secondary)
+                }
             }
             Spacer(minLength: 8)
+            if item.kind == .followUp, !armed {
+                Button(l10n.sendNow) {
+                    model.sendQueuedNow(id: item.id)
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(palette.sendGlyph)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .frame(minHeight: 22)
+                .background(palette.send, in: Capsule())
+                .opacity(handoff ? 0.35 : 1)
+                .disabled(handoff)
+                .help(l10n.t("Cancel this turn and send this one next", "打断当前回合并马上发这一条"))
+            }
             Button {
                 model.client.removeQueuedPrompt(id: item.id)
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(palette.secondary)
-                    .frame(width: 18, height: 18)
+                    .frame(width: 22, height: 22)
             }
             .buttonStyle(.plain)
             .help(l10n.t("Remove from queue", "从队列移除"))
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .background(palette.chip, in: Capsule())
+        .padding(.vertical, 8)
+        .background(palette.chip, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .help(shown)
+    }
+
+    private func queueEyebrow(_ item: QueuedPrompt, isNext: Bool, armed: Bool) -> String? {
+        if armed {
+            return l10n.t("Sending next", "即将发送")
+        }
+        if isNext, item.kind == .aside {
+            return l10n.t("Next · Aside", "下一条 · 旁问")
+        }
+        if item.kind == .aside {
+            return l10n.t("Aside", "旁问")
+        }
+        if isNext {
+            return l10n.t("Next", "下一条")
+        }
+        return nil
     }
 
     private func attachFiles() {

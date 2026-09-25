@@ -10,6 +10,7 @@ public final class SessionWorkspace: Identifiable {
     public var permission: PermissionRequest?
     public var userQuestion: UserQuestionRequest?
     public var promptQueue: [QueuedPrompt] = []
+    public var armedQueueID: String?
     public var planEntries: [PlanEntry] = []
     public var planMarkdown = ""
     public var hunks: [FileHunk] = []
@@ -56,6 +57,7 @@ public final class SessionWorkspace: Identifiable {
     public func markWorkStopped() {
         stopRequested = true
         promptQueue.removeAll()
+        armedQueueID = nil
         var next = snapshot()
         SessionFold.cancelActiveWork(onto: &next)
         adopt(next)

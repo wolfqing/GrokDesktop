@@ -33,6 +33,26 @@ public struct QueuedPrompt: Equatable, Hashable, Sendable, Identifiable {
     }
 }
 
+public enum PromptQueue {
+    public static func promote(_ items: [QueuedPrompt], id: String) -> [QueuedPrompt] {
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return items }
+        var next = items
+        let item = next.remove(at: index)
+        next.insert(item, at: 0)
+        return next
+    }
+
+    public static func prepend(
+        _ items: [QueuedPrompt],
+        text: String,
+        kind: QueuedPrompt.Kind
+    ) -> [QueuedPrompt] {
+        var next = items.filter { $0.text != text }
+        next.insert(QueuedPrompt(text: text, kind: kind), at: 0)
+        return next
+    }
+}
+
 public struct SessionSnapshot: Equatable, Sendable {
     public var items: [ConversationItem] = []
     public var planEntries: [PlanEntry] = []

@@ -313,18 +313,13 @@ struct ChatView: View {
                                     userPromptRow(
                                         id: "outgoing-preview",
                                         text: preview,
-                                        images: PromptMedia.imageURLs(in: preview),
-                                        queued: false
+                                        images: PromptMedia.imageURLs(in: preview)
                                     )
                                     .id("outgoing-preview")
                                 }
                                 if showsWaitingStatus {
                                     waitingStatusRow
                                         .id("waiting-status")
-                                }
-                                ForEach(model.client.promptQueue.filter { $0.kind != .aside }) { queued in
-                                    queuedPromptRow(queued)
-                                        .id("queue-\(queued.id)")
                                 }
                                 Color.clear
                                     .frame(height: 8)
@@ -792,9 +787,6 @@ struct ChatView: View {
     }
 
     private var lastDisplayID: String? {
-        if let queued = model.client.promptQueue.last(where: { $0.kind != .aside }) {
-            return "queue-\(queued.id)"
-        }
         if showsWaitingStatus { return "waiting-status" }
         if showsOutgoingPreview { return "outgoing-preview" }
         return displayedRows.last?.id
@@ -821,7 +813,7 @@ struct ChatView: View {
         case .none:
             tail = "empty"
         }
-        return "\(model.client.sessionID ?? "")-\(model.client.items.count)-\(tail)-\(todoFingerprint)-\(model.client.isTurnRunning)-\(model.client.isStopping)-q\(model.client.promptQueue.count)-o\(model.client.outgoingPreview?.count ?? 0)-w\(showsWaitingStatus)"
+        return "\(model.client.sessionID ?? "")-\(model.client.items.count)-\(tail)-\(todoFingerprint)-\(model.client.isTurnRunning)-\(model.client.isStopping)-o\(model.client.outgoingPreview?.count ?? 0)-w\(showsWaitingStatus)"
     }
 
     private func pinToLatestOnOpen(_ proxy: ScrollViewProxy) {
@@ -1006,23 +998,10 @@ struct ChatView: View {
     }
 
     @ViewBuilder
-    private func queuedPromptRow(_ item: QueuedPrompt) -> some View {
-        userPromptRow(
-            id: "queue-\(item.id)",
-            text: item.text,
-            images: PromptMedia.imageURLs(in: item.text),
-            queued: true,
-            onRemove: { model.client.removeQueuedPrompt(id: item.id) }
-        )
-    }
-
-    @ViewBuilder
     private func userPromptRow(
         id: String,
         text: String,
-        images: [URL],
-        queued: Bool,
-        onRemove: (() -> Void)? = nil
+        images: [URL]
     ) -> some View {
         let raw = SessionFold.isAside(text) ? SessionFold.asideDisplay(text) : text
         let shown = PromptMedia.displayText(raw)
@@ -1030,13 +1009,7 @@ struct ChatView: View {
         HStack {
             Spacer(minLength: 80)
             VStack(alignment: .trailing, spacing: 4) {
-                if queued {
-                    Text(l10n.t("Queued", "排队中"))
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(palette.secondary)
-                } else {
-                    timestamp(id, always: true)
-                }
+                timestamp(id, always: true)
                 VStack(alignment: .trailing, spacing: 8) {
                     ForEach(images, id: \.path) { url in
                         PromptImageView(url: url)
@@ -1047,7 +1020,7 @@ struct ChatView: View {
                             fontSize: GrokTheme.chatBubbleSize(compact: model.compactChat),
                             markdown: false,
                             fillsWidth: false,
-                            color: queued ? palette.secondary : palette.promptBubbleText,
+                            color: palette.promptBubbleText,
                             maxContentWidth: GrokTheme.bubbleMaxWidth
                         )
                     }
@@ -1055,23 +1028,11 @@ struct ChatView: View {
                 .padding(.horizontal, images.isEmpty ? 14 : 8)
                 .padding(.vertical, model.compactChat ? 8 : 10)
                 .background(
-                    (queued ? palette.chip : palette.promptBubble),
+                    palette.promptBubble,
                     in: RoundedRectangle(cornerRadius: 16, style: .continuous)
                 )
-                .opacity(queued ? 0.92 : 1)
                 HStack(spacing: 4) {
-                    if queued {
-                        Button {
-                            onRemove?()
-                        } label: {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(palette.secondary)
-                                .frame(width: 22, height: 22)
-                        }
-                        .buttonStyle(.plain)
-                        .help(l10n.t("Remove from queue", "从队列移除"))
-                    } else if isLatestUser(id) {
+                    if isLatestUser(id) {
                         Button {
                             model.restorePromptToComposer(text)
                         } label: {
@@ -1083,18 +1044,16 @@ struct ChatView: View {
                         .buttonStyle(.plain)
                         .help(l10n.restorePrompt)
                     }
-                    if !queued {
-                        Button {
-                            copyPrompt(id, text)
-                        } label: {
-                            Image(systemName: copiedPromptID == id ? "checkmark" : "square.on.square")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(palette.secondary)
-                                .frame(width: 22, height: 22)
-                        }
-                        .buttonStyle(.plain)
-                        .help(copiedPromptID == id ? l10n.copied : l10n.copyPrompt)
+                    Button {
+                        copyPrompt(id, text)
+                    } label: {
+                        Image(systemName: copiedPromptID == id ? "checkmark" : "square.on.square")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(palette.secondary)
+                            .frame(width: 22, height: 22)
                     }
+                    .buttonStyle(.plain)
+                    .help(copiedPromptID == id ? l10n.copied : l10n.copyPrompt)
                 }
             }
         }
@@ -1108,8 +1067,7 @@ struct ChatView: View {
             userPromptRow(
                 id: id,
                 text: text,
-                images: PromptMedia.resolvedImages(stored: model.client.itemImages[id], text: text),
-                queued: false
+                images: PromptMedia.resolvedImages(stored: model.client.itemImages[id], text: text)
             )
         case .assistant(let id, let text, let done):
             VStack(alignment: .leading, spacing: 6) {

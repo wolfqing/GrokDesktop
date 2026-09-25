@@ -1272,6 +1272,21 @@ final class AppModel: ObservableObject {
         pendingBusySend = nil
     }
 
+    func sendQueuedNow(id: String) {
+        destination = .build
+        Task {
+            do {
+                try await client.sendNow(id: id)
+                if !isPrivateChat {
+                    refreshSessions()
+                }
+                refreshWorkspace()
+            } catch {
+                present(error)
+            }
+        }
+    }
+
     func refreshAccountUsage() {
         if DemoStudio.isEnabled {
             accountUsage = DemoStudio.usage
@@ -2510,7 +2525,7 @@ final class AppModel: ObservableObject {
 
     func exportDiagnostics() {
         let text = DiagnosticExport.make(
-            version: "0.1.24",
+            version: "0.1.25",
             grokVersion: client.grokVersion,
             state: String(describing: client.state),
             lastError: client.lastError,

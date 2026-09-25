@@ -34,6 +34,7 @@ public final class ACPClient: ObservableObject {
     @Published public var planMarkdown = ""
     @Published public var hunks: [FileHunk] = []
     @Published public var promptQueue: [QueuedPrompt] = []
+    @Published public private(set) var armedQueueID: String?
     @Published public var sessionDirectory: URL?
     @Published public private(set) var liveWorkspaces: [SessionWorkspace] = []
     @Published public private(set) var authPresence: AuthPresence = .signedOut
@@ -219,7 +220,7 @@ public final class ACPClient: ObservableObject {
                 "protocolVersion": 1,
                 "clientInfo": [
                     "name": "GrokDesktop",
-                    "version": "0.1.24"
+                    "version": "0.1.25"
                 ],
                 "clientCapabilities": [
                     "fs": [
@@ -496,18 +497,26 @@ public final class ACPClient: ObservableObject {
         }
         workspace.finishTurn()
         workspace.refreshArtifacts()
-        syncFromCurrent()
         if workspace.stopRequested {
             workspace.promptQueue.removeAll()
+            workspace.armedQueueID = nil
+            syncFromCurrent()
             return
         }
-        if let next = workspace.promptQueue.first {
-            workspace.promptQueue.removeFirst()
-            try await send(text: next.text, sessionID: id, kind: next.kind)
+        guard let next = workspace.promptQueue.first else {
+            workspace.armedQueueID = nil
+            syncFromCurrent()
+            return
         }
+        let nextText = next.text
+        let nextKind = next.kind
+        workspace.promptQueue.removeFirst()
+        workspace.armedQueueID = nil
+        syncFromCurrent()
+        try await send(text: nextText, sessionID: id, kind: nextKind)
     }
 
-    public func sendNow(text: String, sessionID target: String? = nil) async throws {
+    public func sendNow(text: String, sessionID target: String? = nil, kind: QueuedPrompt.Kind = .followUp) async throws {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         try await connectIfNeeded()
@@ -519,13 +528,59 @@ public final class ACPClient: ObservableObject {
             throw ACPError.rpc("No session")
         }
         if workspace.isTurnRunning {
-            workspace.promptQueue.removeAll { $0.text == trimmed }
-            workspace.promptQueue.insert(QueuedPrompt(text: trimmed, kind: .followUp), at: 0)
-            fire(method: "session/cancel", params: ["sessionId": id])
-            syncFromCurrent()
+            if kind == .aside {
+                workspace.promptQueue.append(QueuedPrompt(text: trimmed, kind: kind))
+                syncFromCurrent()
+                return
+            }
+            workspace.promptQueue = PromptQueue.prepend(workspace.promptQueue, text: trimmed, kind: kind)
+            workspace.armedQueueID = workspace.promptQueue.first?.id
+            interruptForSendNow(workspace)
             return
         }
-        try await send(text: trimmed, sessionID: id)
+        try await send(text: trimmed, sessionID: id, kind: kind)
+    }
+
+    public func sendNow(id queuedID: String, sessionID target: String? = nil) async throws {
+        let workspace = target.flatMap { workspaceByID[$0] } ?? currentWorkspace
+        guard let workspace,
+              let item = workspace.promptQueue.first(where: { $0.id == queuedID }),
+              item.kind == .followUp else { return }
+        workspace.promptQueue = PromptQueue.promote(workspace.promptQueue, id: queuedID)
+        if workspace.isTurnRunning {
+            workspace.armedQueueID = queuedID
+            interruptForSendNow(workspace)
+            return
+        }
+        workspace.armedQueueID = nil
+        let next = workspace.promptQueue.removeFirst()
+        syncFromCurrent()
+        try await send(text: next.text, sessionID: workspace.id, kind: next.kind)
+    }
+
+    private func interruptForSendNow(_ workspace: SessionWorkspace) {
+        let runningTaskIDs = workspace.tasks.filter(\.isRunning).map(\.id)
+        fire(method: "session/cancel", params: ["sessionId": workspace.id])
+        if let permission = workspace.permission {
+            workspace.permission = nil
+            respond(id: permission.id, result: ["outcome": ["outcome": "cancelled"]])
+        }
+        if let question = workspace.userQuestion {
+            workspace.userQuestion = nil
+            respond(id: question.rpcID, result: UserQuestionOutcome.skipInterview.json)
+        }
+        for taskID in runningTaskIDs {
+            let params: [String: Any] = [
+                "taskId": taskID,
+                "task_id": taskID,
+                "sessionId": workspace.id
+            ]
+            fire(method: "x.ai/task/kill", params: params)
+        }
+        var snapshot = workspace.snapshot()
+        SessionFold.cancelActiveWork(onto: &snapshot)
+        workspace.adopt(snapshot)
+        syncFromCurrent()
     }
 
     private func revealUserTurn(_ trimmed: String, on workspace: SessionWorkspace) {
@@ -551,10 +606,16 @@ public final class ACPClient: ObservableObject {
     public func removeQueuedPrompt(id: String, sessionID target: String? = nil) {
         if let workspace = target.flatMap({ workspaceByID[$0] }) ?? currentWorkspace {
             workspace.promptQueue.removeAll { $0.id == id }
+            if workspace.armedQueueID == id {
+                workspace.armedQueueID = nil
+            }
             syncFromCurrent()
             return
         }
         promptQueue.removeAll { $0.id == id }
+        if armedQueueID == id {
+            armedQueueID = nil
+        }
     }
 
     public func cancelTurn(sessionID target: String? = nil) {
@@ -727,6 +788,8 @@ public final class ACPClient: ObservableObject {
         planMarkdown = ""
         hunks = []
         promptQueue = []
+        armedQueueID = nil
+        currentWorkspace?.armedQueueID = nil
         sessionAllowTitles = []
         sessionDirectory = nil
         itemDates = [:]
@@ -1182,7 +1245,12 @@ public final class ACPClient: ObservableObject {
             planEntries = workspace.planEntries
             planMarkdown = workspace.planMarkdown
             hunks = workspace.hunks
+            if let armed = workspace.armedQueueID,
+               !workspace.promptQueue.contains(where: { $0.id == armed }) {
+                workspace.armedQueueID = nil
+            }
             promptQueue = workspace.promptQueue
+            armedQueueID = workspace.armedQueueID
             sessionDirectory = workspace.directory
             if pendingWorkingDirectory == nil {
                 workingDirectory = workspace.cwd
