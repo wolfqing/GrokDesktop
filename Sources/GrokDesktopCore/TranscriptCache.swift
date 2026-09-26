@@ -4,22 +4,34 @@ enum TranscriptCache {
     static let version = 1
     static let fileNameSuffix = ".json"
 
+    struct Resume {
+        var transcript: Transcript
+        var updatesSize: Int
+        var updatesMTime: Int
+        var assistantID: String?
+        var thoughtID: String?
+    }
+
     static func load(sessionDirectory: URL, limit: Int) -> Transcript? {
+        guard let resume = resume(sessionDirectory: sessionDirectory, limit: limit) else { return nil }
+        let fingerprint = Fingerprint.capture(sessionDirectory: sessionDirectory, limit: limit)
+        guard resume.updatesSize == fingerprint.updatesSize,
+              resume.updatesMTime == fingerprint.updatesMTime
+        else { return nil }
+        return resume.transcript
+    }
+
+    static func resume(sessionDirectory: URL, limit: Int) -> Resume? {
         let url = cacheURL(for: sessionDirectory)
         guard let data = try? Data(contentsOf: url),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              int(object["version"]) == version
-        else { return nil }
-        let fingerprint = Fingerprint.capture(sessionDirectory: sessionDirectory, limit: limit)
-        guard int(object["updatesSize"]) == fingerprint.updatesSize,
-              int(object["updatesMTime"]) == fingerprint.updatesMTime,
-              int(object["chatSize"]) == fingerprint.chatSize,
-              int(object["limit"]) == fingerprint.limit
+              int(object["version"]) == version,
+              int(object["limit"]) == limit
         else { return nil }
 
         let items = (object["items"] as? [[String: Any]] ?? []).compactMap(decodeItem)
         guard !items.isEmpty else { return nil }
-        return Transcript(
+        let transcript = Transcript(
             items: items,
             planEntries: decodePlan(object["planEntries"]),
             itemDates: decodeDates(object["itemDates"]),
@@ -31,11 +43,24 @@ enum TranscriptCache {
             subagents: decodeSubagents(object["subagents"]),
             itemDurations: decodeDurations(object["itemDurations"])
         )
+        return Resume(
+            transcript: transcript,
+            updatesSize: int(object["updatesSize"]),
+            updatesMTime: int(object["updatesMTime"]),
+            assistantID: object["assistantID"] as? String,
+            thoughtID: object["thoughtID"] as? String
+        )
     }
 
-    static func save(_ transcript: Transcript, sessionDirectory: URL, limit: Int) {
+    static func save(
+        _ transcript: Transcript,
+        sessionDirectory: URL,
+        limit: Int,
+        assistantID: String? = nil,
+        thoughtID: String? = nil
+    ) {
         let fingerprint = Fingerprint.capture(sessionDirectory: sessionDirectory, limit: limit)
-        let payload: [String: Any] = [
+        var payload: [String: Any] = [
             "version": version,
             "updatesSize": fingerprint.updatesSize,
             "updatesMTime": fingerprint.updatesMTime,
@@ -54,6 +79,8 @@ enum TranscriptCache {
             "subagents": transcript.subagents.map(encodeSubagent),
             "itemDurations": transcript.itemDurations
         ]
+        if let assistantID { payload["assistantID"] = assistantID }
+        if let thoughtID { payload["thoughtID"] = thoughtID }
         let folder = cacheRoot()
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         if let data = try? JSONSerialization.data(withJSONObject: payload) {

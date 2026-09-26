@@ -183,11 +183,13 @@ expect(ws.isLive, "running workspace is live")
 ws.todos = [AgentTodo(id: "1", content: "One", status: "in_progress")]
 ws.promptQueue = [QueuedPrompt(id: "q", text: "later", kind: .followUp)]
 ws.armedQueueID = "q"
+ws.holdQueue = true
 ws.markWorkStopped()
 expect(ws.stopRequested, "stop requested")
 expect(ws.isTurnRunning == false, "stop clears turn")
 expect(ws.promptQueue.isEmpty, "stop clears the queue")
 expect(ws.armedQueueID == nil, "stop clears send-now")
+expect(ws.holdQueue == false, "stop clears a held queue")
 expect(ws.todos[0].status == "cancelled", "stop cancels todos")
 expect(ws.isLive == false, "stopped workspace is not live")
 
@@ -1269,6 +1271,32 @@ if case .tool(_, _, _, let detail)? = bulkyTool {
 
 let cached = TranscriptLoader.load(sessionDirectory: bulkyDir)
 expect(cached.items == bulky.items, "second load hits transcript cache")
+let updatesURL = bulkyDir.appendingPathComponent("updates.jsonl")
+var corrupted = try! Data(contentsOf: updatesURL)
+corrupted[0] = 0x58
+try! corrupted.write(to: updatesURL)
+let appended = "\n" + """
+{"method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"one more"}}}}
+""" + "\n"
+if let handle = try? FileHandle(forWritingTo: updatesURL) {
+    try! handle.seekToEnd()
+    try! handle.write(contentsOf: Data(appended.utf8))
+    try! handle.close()
+}
+let resumed = TranscriptLoader.load(sessionDirectory: bulkyDir)
+expect(resumed.items.contains(where: { if case .user(_, let text) = $0 { return text.contains("open this") }; return false }), "append resumes without rereading the prefix")
+expect(resumed.items.contains(where: { if case .user(_, let text) = $0 { return text.contains("one more") }; return false }), "append adds the new line")
+
+let tailDir = FileManager.default.temporaryDirectory.appendingPathComponent("gd-tail-\(UUID().uuidString)", isDirectory: true)
+try! FileManager.default.createDirectory(at: tailDir, withIntermediateDirectories: true)
+var tailLines = (0..<80).map { index in
+    #"{"method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"early-\#(index)"}}}}"#
+}
+tailLines.append(#"{"method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"LATE-MARKER"}}}}"#)
+try! tailLines.joined(separator: "\n").write(to: tailDir.appendingPathComponent("updates.jsonl"), atomically: true, encoding: .utf8)
+let tailed = TranscriptLoader.load(sessionDirectory: tailDir, tailByteCap: 700)
+expect(tailed.items.contains(where: { if case .user(_, let text) = $0 { return text.contains("LATE-MARKER") }; return false }), "tail keeps the latest prompt")
+expect(!tailed.items.contains(where: { if case .user(_, let text) = $0 { return text.contains("early-0") }; return false }), "tail skips the old head of a long log")
 
 let pluginJSON = """
 [

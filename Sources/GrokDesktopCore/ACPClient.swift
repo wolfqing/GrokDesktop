@@ -35,6 +35,7 @@ public final class ACPClient: ObservableObject {
     @Published public var hunks: [FileHunk] = []
     @Published public var promptQueue: [QueuedPrompt] = []
     @Published public private(set) var armedQueueID: String?
+    @Published public private(set) var holdQueue = false
     @Published public var sessionDirectory: URL?
     @Published public private(set) var liveWorkspaces: [SessionWorkspace] = []
     @Published public private(set) var authPresence: AuthPresence = .signedOut
@@ -220,7 +221,7 @@ public final class ACPClient: ObservableObject {
                 "protocolVersion": 1,
                 "clientInfo": [
                     "name": "GrokDesktop",
-                    "version": "0.1.25"
+                    "version": "0.1.26"
                 ],
                 "clientCapabilities": [
                     "fs": [
@@ -375,7 +376,13 @@ public final class ACPClient: ObservableObject {
                 lastError = nil
                 isReconnecting = false
                 state = .ready
-                workspace.refreshArtifacts()
+                if let directory = workspace.directory {
+                    let artifacts = await Task.detached {
+                        SessionWorkspace.readArtifacts(directory: directory)
+                    }.value
+                    guard generation == loadGeneration else { return }
+                    workspace.applyArtifacts(artifacts)
+                }
                 syncFromCurrent()
             }
         } catch {
@@ -423,7 +430,13 @@ public final class ACPClient: ObservableObject {
         guard !trimmed.isEmpty else { return }
         let existing = (target ?? sessionID).flatMap { workspaceByID[$0] } ?? currentWorkspace
         if let workspace = existing, workspace.isTurnRunning {
-            workspace.promptQueue.append(QueuedPrompt(text: trimmed, kind: kind))
+            if workspace.holdQueue, kind != .aside {
+                workspace.holdQueue = false
+                workspace.promptQueue = PromptQueue.prepend(workspace.promptQueue, text: trimmed, kind: kind)
+                workspace.armedQueueID = workspace.promptQueue.first?.id
+            } else {
+                workspace.promptQueue.append(QueuedPrompt(text: trimmed, kind: kind))
+            }
             syncFromCurrent()
             return
         }
@@ -496,9 +509,21 @@ public final class ACPClient: ObservableObject {
             }
         }
         workspace.finishTurn()
-        workspace.refreshArtifacts()
+        if let directory = workspace.directory {
+            let artifacts = await Task.detached {
+                SessionWorkspace.readArtifacts(directory: directory)
+            }.value
+            workspace.applyArtifacts(artifacts)
+        }
         if workspace.stopRequested {
             workspace.promptQueue.removeAll()
+            workspace.armedQueueID = nil
+            workspace.holdQueue = false
+            syncFromCurrent()
+            return
+        }
+        if workspace.holdQueue {
+            workspace.holdQueue = false
             workspace.armedQueueID = nil
             syncFromCurrent()
             return
@@ -533,6 +558,7 @@ public final class ACPClient: ObservableObject {
                 syncFromCurrent()
                 return
             }
+            workspace.holdQueue = false
             workspace.promptQueue = PromptQueue.prepend(workspace.promptQueue, text: trimmed, kind: kind)
             workspace.armedQueueID = workspace.promptQueue.first?.id
             interruptForSendNow(workspace)
@@ -547,6 +573,7 @@ public final class ACPClient: ObservableObject {
               let item = workspace.promptQueue.first(where: { $0.id == queuedID }),
               item.kind == .followUp else { return }
         workspace.promptQueue = PromptQueue.promote(workspace.promptQueue, id: queuedID)
+        workspace.holdQueue = false
         if workspace.isTurnRunning {
             workspace.armedQueueID = queuedID
             interruptForSendNow(workspace)
@@ -559,7 +586,6 @@ public final class ACPClient: ObservableObject {
     }
 
     private func interruptForSendNow(_ workspace: SessionWorkspace) {
-        let runningTaskIDs = workspace.tasks.filter(\.isRunning).map(\.id)
         fire(method: "session/cancel", params: ["sessionId": workspace.id])
         if let permission = workspace.permission {
             workspace.permission = nil
@@ -569,17 +595,6 @@ public final class ACPClient: ObservableObject {
             workspace.userQuestion = nil
             respond(id: question.rpcID, result: UserQuestionOutcome.skipInterview.json)
         }
-        for taskID in runningTaskIDs {
-            let params: [String: Any] = [
-                "taskId": taskID,
-                "task_id": taskID,
-                "sessionId": workspace.id
-            ]
-            fire(method: "x.ai/task/kill", params: params)
-        }
-        var snapshot = workspace.snapshot()
-        SessionFold.cancelActiveWork(onto: &snapshot)
-        workspace.adopt(snapshot)
         syncFromCurrent()
     }
 
@@ -608,6 +623,9 @@ public final class ACPClient: ObservableObject {
             workspace.promptQueue.removeAll { $0.id == id }
             if workspace.armedQueueID == id {
                 workspace.armedQueueID = nil
+                if workspace.isTurnRunning {
+                    workspace.holdQueue = true
+                }
             }
             syncFromCurrent()
             return
@@ -615,6 +633,9 @@ public final class ACPClient: ObservableObject {
         promptQueue.removeAll { $0.id == id }
         if armedQueueID == id {
             armedQueueID = nil
+            if isTurnRunning {
+                holdQueue = true
+            }
         }
     }
 
@@ -789,7 +810,9 @@ public final class ACPClient: ObservableObject {
         hunks = []
         promptQueue = []
         armedQueueID = nil
+        holdQueue = false
         currentWorkspace?.armedQueueID = nil
+        currentWorkspace?.holdQueue = false
         sessionAllowTitles = []
         sessionDirectory = nil
         itemDates = [:]
@@ -1182,8 +1205,16 @@ public final class ACPClient: ObservableObject {
             if let completed = updates.last(where: { $0.kind == .turnCompleted }) {
                 workspace.finishTurn(at: completed.timestamp ?? Date())
             }
-            if updates.contains(where: { $0.kind == .plan }) {
-                workspace.refreshArtifacts()
+            if updates.contains(where: { $0.kind == .plan }), let directory = workspace.directory {
+                let workspaceID = workspace.id
+                Task { @MainActor in
+                    let artifacts = await Task.detached {
+                        SessionWorkspace.readArtifacts(directory: directory)
+                    }.value
+                    guard let workspace = self.workspaceByID[workspaceID] else { return }
+                    workspace.applyArtifacts(artifacts)
+                    self.syncFromCurrent()
+                }
             }
         }
     }
@@ -1251,6 +1282,7 @@ public final class ACPClient: ObservableObject {
             }
             promptQueue = workspace.promptQueue
             armedQueueID = workspace.armedQueueID
+            holdQueue = workspace.holdQueue
             sessionDirectory = workspace.directory
             if pendingWorkingDirectory == nil {
                 workingDirectory = workspace.cwd

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.26 - 2026-09-26
+
+Opening a long session is faster, and Send now is easier to undo.
+
+- A session log that only grew is replayed from the new tail. Logs larger than 8MB open from the recent end instead of the whole file.
+- Plan, diff, and checkpoint files load off the main thread. Grok connects in the background after launch.
+- Removing the prompt marked Sending next keeps the rest of the queue. ⌘Return shows the confirm bar before cancelling the turn.
+- Send now no longer marks running tools, todos, or background tasks as cancelled.
+
 ## 0.1.25 - 2026-09-25
 
 Queued prompts stay under the composer. Send now runs one follow-up next.

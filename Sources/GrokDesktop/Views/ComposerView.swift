@@ -391,8 +391,10 @@ struct ComposerView: View {
         model.dismissComposerSuggestions()
         showModelMenu = false
         let text = model.draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        if model.pendingBusySend != nil, text.isEmpty {
-            model.confirmBusySendNow()
+        if model.pendingBusySend != nil {
+            if text.isEmpty {
+                model.confirmBusySendNow()
+            }
             return
         }
         if SlashBuiltins.handles(model.draft) {
@@ -404,9 +406,7 @@ struct ComposerView: View {
             return
         }
         if forceNow, model.client.isTurnRunning, !text.isEmpty {
-            model.pendingBusySend = text
-            model.draft = ""
-            model.confirmBusySendNow()
+            model.beginBusySend(text)
             return
         }
         model.sendDraft()
@@ -416,19 +416,14 @@ struct ComposerView: View {
         let items = model.client.promptQueue
         let count = items.count
         return VStack(alignment: .leading, spacing: 6) {
-            Text(
-                l10n.t(
-                    "Queued \(count) — sends in order when this turn finishes",
-                    "排队 \(count) 条 — 当前回复结束后按顺序发送"
-                )
-            )
+            Text(queueHeader(count))
             .font(.system(size: 11, weight: .medium))
             .foregroundStyle(palette.secondary)
             if count > 3 {
                 ScrollView {
                     queueStack(items)
                 }
-                .scrollIndicators(.never)
+                .scrollIndicators(.visible)
                 .frame(height: 210)
             } else {
                 queueStack(items)
@@ -491,7 +486,11 @@ struct ComposerView: View {
                 .background(palette.send, in: Capsule())
                 .opacity(handoff ? 0.35 : 1)
                 .disabled(handoff)
-                .help(l10n.t("Cancel this turn and send this one next", "打断当前回合并马上发这一条"))
+                .help(
+                    model.client.isTurnRunning
+                        ? l10n.t("Cancel this turn and send this one next", "打断当前回合并马上发这一条")
+                        : l10n.t("Send this prompt", "发送这条")
+                )
             }
             Button {
                 model.client.removeQueuedPrompt(id: item.id)
@@ -508,6 +507,31 @@ struct ComposerView: View {
         .padding(.vertical, 8)
         .background(palette.chip, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .help(shown)
+    }
+
+    private func queueHeader(_ count: Int) -> String {
+        if model.client.armedQueueID != nil {
+            return l10n.t(
+                "Ending this turn, then sending that prompt",
+                "正在结束这一轮，随后发送这条"
+            )
+        }
+        if model.client.holdQueue, model.client.isTurnRunning {
+            return l10n.t(
+                "Ending this turn. The other queued prompts stay.",
+                "正在结束这一轮，其余排队保留"
+            )
+        }
+        if !model.client.isTurnRunning {
+            return l10n.t(
+                "Queued \(count) — Send now runs one",
+                "排队 \(count) 条 — 点立即发送发出"
+            )
+        }
+        return l10n.t(
+            "Queued \(count) — sends in order when this turn finishes",
+            "排队 \(count) 条 — 当前回复结束后按顺序发送"
+        )
     }
 
     private func queueEyebrow(_ item: QueuedPrompt, isNext: Bool, armed: Bool) -> String? {

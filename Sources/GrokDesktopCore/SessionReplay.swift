@@ -66,12 +66,16 @@ public enum SessionReplay {
         return (snapshot, report(from: snapshot, updateCount: updates.count, unknown: unknown))
     }
 
-    public static func replay(jsonl url: URL) -> (snapshot: SessionSnapshot, report: Report) {
+    public static func replay(
+        jsonl url: URL,
+        from offset: UInt64 = 0,
+        skipPartialFirstLine: Bool = false
+    ) -> (snapshot: SessionSnapshot, report: Report) {
         var snapshot = SessionSnapshot()
         var unknown: [String] = []
         var seenUnknown = Set<String>()
         var updateCount = 0
-        streamLines(url) { line in
+        streamLines(url, from: offset, skipPartialFirstLine: skipPartialFirstLine) { line in
             guard let parsed = parseReplayLine(line) else { return }
             if parsed.update.kind == .unknown, !parsed.rawKind.isEmpty, seenUnknown.insert(parsed.rawKind).inserted {
                 unknown.append(parsed.rawKind)
@@ -80,6 +84,18 @@ public enum SessionReplay {
             updateCount += 1
         }
         return (snapshot, report(from: snapshot, updateCount: updateCount, unknown: unknown))
+    }
+
+    public static func fold(
+        jsonl url: URL,
+        from offset: UInt64 = 0,
+        skipPartialFirstLine: Bool = false,
+        onto snapshot: inout SessionSnapshot
+    ) {
+        streamLines(url, from: offset, skipPartialFirstLine: skipPartialFirstLine) { line in
+            guard let parsed = parseReplayLine(line) else { return }
+            SessionFold.apply(parsed.update, onto: &snapshot)
+        }
     }
 
     public static func replay(sessionDirectory: URL) -> (snapshot: SessionSnapshot, report: Report) {
@@ -131,10 +147,19 @@ public enum SessionReplay {
     static let bulkyToolBytes = 8_192
     static let bulkyHeaderBytes = 8_192
 
-    static func streamLines(_ url: URL, handle line: (Data) -> Void) {
+    static func streamLines(
+        _ url: URL,
+        from offset: UInt64 = 0,
+        skipPartialFirstLine: Bool = false,
+        handle line: (Data) -> Void
+    ) {
         guard let file = try? FileHandle(forReadingFrom: url) else { return }
         defer { try? file.close() }
+        if offset > 0 {
+            guard (try? file.seek(toOffset: offset)) != nil else { return }
+        }
         var buffer = Data()
+        var skipping = skipPartialFirstLine
         while true {
             let chunk = (try? file.read(upToCount: 256 * 1024)) ?? Data()
             if chunk.isEmpty { break }
@@ -142,11 +167,16 @@ public enum SessionReplay {
             while let newline = buffer.firstIndex(of: 0x0A) {
                 let row = Data(buffer[..<newline])
                 buffer.removeSubrange(...newline)
+                if skipping {
+                    skipping = false
+                    continue
+                }
                 if !row.isEmpty {
                     line(row)
                 }
             }
         }
+        if skipping { return }
         if !buffer.isEmpty {
             line(buffer)
         }

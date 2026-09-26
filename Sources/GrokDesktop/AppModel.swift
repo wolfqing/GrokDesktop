@@ -256,6 +256,11 @@ final class AppModel: ObservableObject {
         AttentionCenter.shared.onOpenSession = { [weak self] id in
             self?.openWaitingSession(id)
         }
+        if !DemoStudio.isEnabled, locator.locate() != nil {
+            Task { [weak self] in
+                try? await self?.client.connectIfNeeded()
+            }
+        }
         ChatLinkActions.previewFile = { [weak self] url in
             self?.previewFile(url)
         }
@@ -2525,7 +2530,7 @@ final class AppModel: ObservableObject {
 
     func exportDiagnostics() {
         let text = DiagnosticExport.make(
-            version: "0.1.25",
+            version: "0.1.26",
             grokVersion: client.grokVersion,
             state: String(describing: client.state),
             lastError: client.lastError,

@@ -88,36 +88,105 @@ public struct Transcript: Sendable {
 }
 
 public enum TranscriptLoader {
+    /// Files larger than this are opened from the tail. The chat already keeps only the latest rows.
+    public static let defaultTailBytes = 8 * 1024 * 1024
+
     public static func load(
         sessionDirectory: URL,
         limit: Int = 400,
-        includeHunks: Bool = true
+        includeHunks: Bool = true,
+        tailByteCap: Int = defaultTailBytes
     ) -> Transcript {
-        if var cached = TranscriptCache.load(sessionDirectory: sessionDirectory, limit: limit) {
-            cached.planMarkdown = (try? String(
-                contentsOf: sessionDirectory.appendingPathComponent("plan.md"),
-                encoding: .utf8
-            )) ?? ""
-            if includeHunks {
-                cached.hunks = loadHunks(sessionDirectory: sessionDirectory)
+        let updatesURL = sessionDirectory.appendingPathComponent("updates.jsonl")
+        let updatesSize = (try? updatesURL.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+        if let cached = TranscriptCache.resume(sessionDirectory: sessionDirectory, limit: limit) {
+            if cached.updatesSize == updatesSize,
+               cached.updatesMTime == updatesMTime(updatesURL) {
+                return decorate(cached.transcript, sessionDirectory: sessionDirectory, includeHunks: includeHunks)
             }
-            return cached
+            if cached.updatesSize > 0, cached.updatesSize < updatesSize {
+                var snapshot = cached.transcript.snapshot
+                snapshot.assistantID = cached.assistantID
+                snapshot.thoughtID = cached.thoughtID
+                SessionReplay.fold(
+                    jsonl: updatesURL,
+                    from: UInt64(cached.updatesSize),
+                    skipPartialFirstLine: false,
+                    onto: &snapshot
+                )
+                return finish(
+                    snapshot,
+                    sessionDirectory: sessionDirectory,
+                    limit: limit,
+                    includeHunks: includeHunks
+                )
+            }
         }
 
-        var snapshot = SessionReplay.replay(sessionDirectory: sessionDirectory).snapshot
+        let cap = max(tailByteCap, 1024)
+        let snapshot: SessionSnapshot
+        if updatesSize > cap {
+            let offset = UInt64(updatesSize - cap)
+            let tailed = SessionReplay.replay(
+                jsonl: updatesURL,
+                from: offset,
+                skipPartialFirstLine: true
+            ).snapshot
+            if tailed.items.contains(where: { if case .user = $0 { return true }; return false }) {
+                snapshot = tailed
+            } else {
+                snapshot = SessionReplay.replay(sessionDirectory: sessionDirectory).snapshot
+            }
+        } else {
+            snapshot = SessionReplay.replay(sessionDirectory: sessionDirectory).snapshot
+        }
+        return finish(
+            snapshot,
+            sessionDirectory: sessionDirectory,
+            limit: limit,
+            includeHunks: includeHunks
+        )
+    }
 
+    private static func updatesMTime(_ url: URL) -> Int {
+        Int((try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
+            .contentModificationDate?.timeIntervalSince1970 ?? 0)
+    }
+
+    private static func decorate(
+        _ transcript: Transcript,
+        sessionDirectory: URL,
+        includeHunks: Bool
+    ) -> Transcript {
+        var cached = transcript
+        cached.planMarkdown = (try? String(
+            contentsOf: sessionDirectory.appendingPathComponent("plan.md"),
+            encoding: .utf8
+        )) ?? ""
+        if includeHunks {
+            cached.hunks = loadHunks(sessionDirectory: sessionDirectory)
+        }
+        return cached
+    }
+
+    private static func finish(
+        _ snapshot: SessionSnapshot,
+        sessionDirectory: URL,
+        limit: Int,
+        includeHunks: Bool
+    ) -> Transcript {
+        var snapshot = snapshot
         attachDiskImages(sessionDirectory: sessionDirectory, items: snapshot.items, itemImages: &snapshot.itemImages)
-
         if snapshot.items.count > limit {
             snapshot.items = Array(snapshot.items.suffix(limit))
         }
-
-        let planURL = sessionDirectory.appendingPathComponent("plan.md")
-        let planMarkdown = (try? String(contentsOf: planURL, encoding: .utf8)) ?? ""
         let transcript = Transcript(
             items: snapshot.items,
             planEntries: snapshot.planEntries,
-            planMarkdown: planMarkdown,
+            planMarkdown: (try? String(
+                contentsOf: sessionDirectory.appendingPathComponent("plan.md"),
+                encoding: .utf8
+            )) ?? "",
             hunks: includeHunks ? loadHunks(sessionDirectory: sessionDirectory) : [],
             itemDates: snapshot.itemDates,
             itemImages: snapshot.itemImages,
@@ -128,7 +197,13 @@ public enum TranscriptLoader {
             subagents: snapshot.subagents,
             itemDurations: snapshot.itemDurations
         )
-        TranscriptCache.save(transcript, sessionDirectory: sessionDirectory, limit: limit)
+        TranscriptCache.save(
+            transcript,
+            sessionDirectory: sessionDirectory,
+            limit: limit,
+            assistantID: snapshot.assistantID,
+            thoughtID: snapshot.thoughtID
+        )
         return transcript
     }
 

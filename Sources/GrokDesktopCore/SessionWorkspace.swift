@@ -11,6 +11,8 @@ public final class SessionWorkspace: Identifiable {
     public var userQuestion: UserQuestionRequest?
     public var promptQueue: [QueuedPrompt] = []
     public var armedQueueID: String?
+    /// The interrupted turn should end without auto-sending whatever is left in the queue.
+    public var holdQueue = false
     public var planEntries: [PlanEntry] = []
     public var planMarkdown = ""
     public var hunks: [FileHunk] = []
@@ -58,6 +60,7 @@ public final class SessionWorkspace: Identifiable {
         stopRequested = true
         promptQueue.removeAll()
         armedQueueID = nil
+        holdQueue = false
         var next = snapshot()
         SessionFold.cancelActiveWork(onto: &next)
         adopt(next)
@@ -103,21 +106,50 @@ public final class SessionWorkspace: Identifiable {
         }
     }
 
+    public struct ArtifactSnapshot: Sendable {
+        public var planMarkdown: String?
+        public var hunks: [FileHunk]
+        public var checkpoints: [CompactionCheckpoint]
+
+        public init(
+            planMarkdown: String? = nil,
+            hunks: [FileHunk] = [],
+            checkpoints: [CompactionCheckpoint] = []
+        ) {
+            self.planMarkdown = planMarkdown
+            self.hunks = hunks
+            self.checkpoints = checkpoints
+        }
+    }
+
+    public static func readArtifacts(directory: URL) -> ArtifactSnapshot {
+        let plan = directory.appendingPathComponent("plan.md")
+        let planMarkdown = FileManager.default.fileExists(atPath: plan.path)
+            ? (try? String(contentsOf: plan, encoding: .utf8))
+            : nil
+        return ArtifactSnapshot(
+            planMarkdown: planMarkdown,
+            hunks: TranscriptLoader.loadHunks(sessionDirectory: directory),
+            checkpoints: HarnessEvents.loadCheckpoints(sessionDirectory: directory)
+        )
+    }
+
+    public func applyArtifacts(_ artifacts: ArtifactSnapshot) {
+        if let planMarkdown = artifacts.planMarkdown {
+            self.planMarkdown = planMarkdown
+        }
+        hunks = artifacts.hunks
+        guard !artifacts.checkpoints.isEmpty else { return }
+        var merged = artifacts.checkpoints
+        for live in checkpoints where !merged.contains(where: { $0.id == live.id }) {
+            merged.insert(live, at: 0)
+        }
+        checkpoints = merged
+    }
+
     public func refreshArtifacts() {
         guard let directory else { return }
-        let plan = directory.appendingPathComponent("plan.md")
-        if FileManager.default.fileExists(atPath: plan.path) {
-            planMarkdown = (try? String(contentsOf: plan, encoding: .utf8)) ?? planMarkdown
-        }
-        hunks = TranscriptLoader.loadHunks(sessionDirectory: directory)
-        let disk = HarnessEvents.loadCheckpoints(sessionDirectory: directory)
-        if !disk.isEmpty {
-            var merged = disk
-            for live in checkpoints where !merged.contains(where: { $0.id == live.id }) {
-                merged.insert(live, at: 0)
-            }
-            checkpoints = merged
-        }
+        applyArtifacts(Self.readArtifacts(directory: directory))
     }
 }
 
