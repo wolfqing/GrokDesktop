@@ -3,9 +3,11 @@ import SwiftUI
 
 struct ModelEffortPicker: View {
     @Binding var isOpen: Bool
-    @Binding var buildModel: BuildModel
+    @Binding var modelID: String
+    let choices: [ModelChoice]
     @Binding var effort: EffortLevel
     let chinese: Bool
+    let refreshChoices: () -> Void
     let applyTier: (ModelTier) -> Void
 
     @Environment(\.palette) private var palette
@@ -31,6 +33,7 @@ struct ModelEffortPicker: View {
             .onChange(of: isOpen) { _, open in
                 if open {
                     page = .home
+                    refreshChoices()
                 } else {
                     showAdvanced = false
                 }
@@ -42,7 +45,7 @@ struct ModelEffortPicker: View {
             isOpen.toggle()
         } label: {
             HStack(spacing: 6) {
-                Text(buildModel.shortTitle)
+                Text(ModelCatalog.shortTitle(for: modelID, choices: choices))
                 Text(effort.title(chinese: chinese))
                 Image(systemName: "chevron.down")
                     .font(.system(size: 9, weight: .semibold))
@@ -57,7 +60,7 @@ struct ModelEffortPicker: View {
         }
         .buttonStyle(.plain)
         .fixedSize()
-        .help("\(buildModel.menuTitle) · \(effort.title(chinese: chinese))")
+        .help("\(ModelCatalog.name(for: modelID, choices: choices)) · \(effort.title(chinese: chinese))")
     }
 
     private var panel: some View {
@@ -67,13 +70,14 @@ struct ModelEffortPicker: View {
                 homePage
             case .model:
                 drillPage(title: l10n.t("Model", "模型")) {
-                    ForEach(BuildModel.allCases) { item in
+                    ForEach(listedChoices) { item in
                         optionRow(
                             id: "model-\(item.id)",
-                            title: item.menuTitle,
-                            selected: buildModel == item
+                            title: item.name,
+                            detail: item.detail.isEmpty ? nil : item.detail,
+                            selected: modelID == item.id
                         ) {
-                            buildModel = item
+                            modelID = item.id
                             page = .home
                         }
                     }
@@ -100,7 +104,7 @@ struct ModelEffortPicker: View {
         drillRow(
             id: "row-model",
             title: l10n.t("Model", "模型"),
-            value: buildModel.shortTitle
+            value: ModelCatalog.shortTitle(for: modelID, choices: choices)
         ) {
             page = .model
         }
@@ -145,6 +149,17 @@ struct ModelEffortPicker: View {
                 }
             }
         }
+    }
+
+    private var listedChoices: [ModelChoice] {
+        guard !choices.contains(where: { $0.id == modelID }) else { return choices }
+        return [
+            ModelChoice(
+                id: modelID,
+                name: modelID,
+                shortTitle: ModelCatalog.shortTitle(for: modelID)
+            )
+        ] + choices
     }
 
     private func drillPage<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {

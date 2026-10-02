@@ -103,6 +103,7 @@ final class AppModel: ObservableObject {
     @Published var newProjectFolder: URL?
     @Published var workspace = WorkspaceSnapshot()
     @Published var grokConfig = GrokConfig()
+    @Published var modelChoices: [ModelChoice] = ModelCatalog.fallback
     @Published var renameDraft = ""
     @Published var renamingSession: SessionRecord?
     @Published var mentionQuery: String?
@@ -246,6 +247,9 @@ final class AppModel: ObservableObject {
         restoreWorkingDirectory()
         restoreProductSurface()
         refreshAll()
+        refreshModelChoices()
+        client.buildModel = grokConfig.defaultModel.isEmpty ? ModelCatalog.fallbackID : grokConfig.defaultModel
+        client.effort = grokConfig.defaultEffortLevel
         firstRunReason = bootstrapReason()
         refreshWorkspace()
         refreshAccountUsage()
@@ -519,7 +523,7 @@ final class AppModel: ObservableObject {
                 cwd: workspace.cwd.path,
                 title: workspace.title.isEmpty ? copy.t("Live session", "进行中") : workspace.title,
                 updatedAt: Date(),
-                model: client.buildModel.rawValue,
+                model: client.buildModel,
                 directory: workspace.directory ?? workspace.cwd,
                 messageCount: workspace.items.count
             )
@@ -533,12 +537,17 @@ final class AppModel: ObservableObject {
         return nil
     }
 
+    func refreshModelChoices() {
+        modelChoices = ModelCatalog.load()
+    }
+
     func refreshAll() {
         refreshSessions()
         account = AccountProfile.load()
         automations = automationStore.load()
         namedProjects = projectStore.load()
         grokConfig = configStore.load()
+        refreshModelChoices()
         showThinkingBlocks = grokConfig.showThinking
         officialWorkflows = workflowCatalog.load(cwd: client.workingDirectory)
         refreshWorkflowRuns()
@@ -644,7 +653,7 @@ final class AppModel: ObservableObject {
             sessionDirectory: client.sessionDirectory,
             skillCount: skills.count,
             mcpCount: mcpServers.count,
-            model: client.buildModel.rawValue,
+            model: client.buildModel,
             sessionID: client.sessionID ?? ""
         )
     }
@@ -2127,7 +2136,7 @@ final class AppModel: ObservableObject {
         let done = todos.filter { $0.status == "completed" }.count
         cliReportTitle = "/context"
         cliReportBody = [
-            "model: \(client.buildModel.rawValue)",
+            "model: \(client.buildModel)",
             "effort: \(client.effort.rawValue)",
             "mode: \(client.mode.rawValue)",
             "session: \(client.sessionID ?? "—")",
@@ -2242,16 +2251,13 @@ final class AppModel: ObservableObject {
             return
         }
         let lower = first.lowercased()
-        if let match = BuildModel.allCases.first(where: {
-            $0.rawValue == lower || $0.shortTitle.lowercased() == lower || $0.menuTitle.lowercased() == lower
+        refreshModelChoices()
+        if let match = modelChoices.first(where: {
+            $0.id.lowercased() == lower
+                || $0.shortTitle.lowercased() == lower
+                || $0.name.lowercased() == lower
         }) {
-            client.buildModel = match
-        } else if lower.contains("4.6") {
-            client.buildModel = .grok46
-        } else if lower.contains("4.5") {
-            client.buildModel = .grok45
-        } else if lower.contains("build") {
-            client.buildModel = .grokBuild
+            client.buildModel = match.id
         } else {
             flash(copy.t("Unknown model \(first)", "未知模型 \(first)"))
             return
@@ -2259,7 +2265,7 @@ final class AppModel: ObservableObject {
         if parts.count > 1 {
             applyEffortCommand(parts[1])
         }
-        flash("\(client.buildModel.rawValue) · \(client.effort.rawValue)")
+        flash("\(client.buildModel) · \(client.effort.rawValue)")
     }
 
     private func applyEffortCommand(_ rest: String) {
@@ -2530,7 +2536,7 @@ final class AppModel: ObservableObject {
 
     func exportDiagnostics() {
         let text = DiagnosticExport.make(
-            version: "0.1.26",
+            version: "0.1.27",
             grokVersion: client.grokVersion,
             state: String(describing: client.state),
             lastError: client.lastError,
@@ -2672,7 +2678,7 @@ final class AppModel: ObservableObject {
 
     func sessionInfoLine() -> String {
         let id = client.sessionID.map { String($0.prefix(8)) } ?? "—"
-        return "\(client.buildModel.rawValue) · \(client.effort.rawValue) · \(workspace.contextPercent)% · \(id)"
+        return "\(client.buildModel) · \(client.effort.rawValue) · \(workspace.contextPercent)% · \(id)"
     }
 
     private static func writePasteImage(_ image: NSImage) -> URL? {

@@ -171,7 +171,19 @@ let reloaded = ConfigStore(fileURL: tmp).load()
 expect(reloaded.permissionMode == "ask", "config write")
 
 let mapped = ModelTier.auto.applied(config: loaded)
-expect(mapped.model == .grok46, "auto maps default model")
+expect(mapped.model == "grok-4.6", "auto maps default model")
+expect(BuildModel(rawValue: "grok-4.7") == .grok47, "4.7 is selectable")
+expect(BuildModel(rawValue: "grok-4.7-build-fast") == .grok47Fast, "4.7 fast is selectable")
+expect(BuildModel.allCases.first == .grok47, "latest builtin model is listed first")
+let catalogURL = FileManager.default.temporaryDirectory.appendingPathComponent("gd-models-\(UUID().uuidString).json")
+let catalogJSON = """
+{"models":{"grok-4.2-fast":{"info":{"id":"grok-4.2-fast","name":"Grok 4.2 Fast","hidden":false}},"grok-9":{"info":{"id":"grok-9","name":"Grok 9","description":"Newest"}},"grok-8":{"info":{"id":"grok-8","name":"Grok 8","hidden":true}}}}
+"""
+try! catalogJSON.write(to: catalogURL, atomically: true, encoding: .utf8)
+let catalog = ModelCatalog.load(cacheURL: catalogURL)
+expect(catalog.map(\.id) == ["grok-9", "grok-4.2-fast"], "catalog lists newest model first and skips hidden")
+expect(catalog.first?.shortTitle == "9", "catalog short title drops the Grok prefix")
+expect(ModelCatalog.load(cacheURL: URL(fileURLWithPath: "/tmp/missing-models-cache.json")).first?.id == "grok-4.7", "missing catalog falls back")
 
 expect(AuthPresence.probe(environment: ["XAI_API_KEY": "xai-test"]).isReady, "api key counts as signed in")
 expect(AuthPresence.probe(authURL: URL(fileURLWithPath: "/tmp/missing-auth.json"), environment: [:]) == .signedOut, "missing auth is signed out")

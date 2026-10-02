@@ -105,9 +105,11 @@ struct ComposerView: View {
 
                         ModelEffortPicker(
                             isOpen: $showModelMenu,
-                            buildModel: $model.client.buildModel,
+                            modelID: $model.client.buildModel,
+                            choices: model.modelChoices,
                             effort: $model.client.effort,
                             chinese: isChinese,
+                            refreshChoices: { model.refreshModelChoices() },
                             applyTier: { model.client.apply(tier: $0) }
                         )
 

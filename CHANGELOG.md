@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.27 - 2026-10-02
+
+The model menu follows the models installed with Grok.
+
+- Grok 4.7 and Grok 4.7 Fast are listed with 4.6 and 4.5.
+- The list is read from Grok's model catalog. A newer model shows up after Grok refreshes that catalog, without an app update.
+- The model you pick stays selected for the next send.
+
 ## 0.1.26 - 2026-09-26
 
 Opening a long session is faster, and Send now is easier to undo.

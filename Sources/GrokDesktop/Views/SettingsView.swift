@@ -314,9 +314,9 @@ struct SettingsView: View {
                 Text(l10n.t("Default model", "默认模型"))
                 Spacer()
                 Menu(model.grokConfig.defaultModel) {
-                    ForEach(BuildModel.allCases) { item in
-                        Button(item.title) {
-                            try? model.configStore.set(section: "models", key: "default", value: item.rawValue)
+                    ForEach(model.modelChoices) { item in
+                        Button(item.name) {
+                            try? model.configStore.set(section: "models", key: "default", value: item.id)
                             model.grokConfig = model.configStore.load()
                             model.client.apply(tier: .auto)
                         }
@@ -376,9 +376,9 @@ struct SettingsView: View {
             Text(title)
             Spacer()
             Menu(current) {
-                ForEach(BuildModel.allCases) { item in
-                    Button(item.title) {
-                        try? self.model.configStore.set(section: "grok_desktop", key: modelKey, value: item.rawValue)
+                ForEach(self.model.modelChoices) { item in
+                    Button(item.name) {
+                        try? self.model.configStore.set(section: "grok_desktop", key: modelKey, value: item.id)
                         self.model.grokConfig = self.model.configStore.load()
                         self.model.client.apply(tier: self.model.client.modelTier)
                     }
@@ -625,7 +625,7 @@ struct SettingsView: View {
             ))
             .foregroundStyle(palette.secondary)
             HStack {
-                Text("Grok Desktop 0.1.26")
+                Text("Grok Desktop 0.1.27")
                 Spacer()
                 Text(model.client.grokVersion ?? "grok ?")
                     .foregroundStyle(palette.secondary)
@@ -824,7 +824,7 @@ struct SettingsView: View {
     private var advancedPage: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 10) {
-                versionRow(l10n.t("App", "应用"), "0.1.26")
+                versionRow(l10n.t("App", "应用"), "0.1.27")
                 versionRow(
                     "grok CLI",
                     model.cliUpdate.current.isEmpty

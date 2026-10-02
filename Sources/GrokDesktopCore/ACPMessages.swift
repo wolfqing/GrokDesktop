@@ -631,8 +631,8 @@ public enum ModelTier: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .fast: return "Quick responses"
         case .auto: return "Uses your default model"
-        case .expert: return "Thinks hard · grok-build"
-        case .heavy: return "Team of experts · xhigh"
+        case .expert: return "High effort"
+        case .heavy: return "Maximum effort"
         }
     }
 
@@ -672,6 +672,8 @@ public enum EffortLevel: String, CaseIterable, Identifiable, Sendable {
 }
 
 public enum BuildModel: String, CaseIterable, Identifiable, Sendable {
+    case grok47 = "grok-4.7"
+    case grok47Fast = "grok-4.7-build-fast"
     case grok46 = "grok-4.6"
     case grok45 = "grok-4.5"
     case grokBuild = "grok-build"
@@ -681,6 +683,8 @@ public enum BuildModel: String, CaseIterable, Identifiable, Sendable {
 
     public var shortTitle: String {
         switch self {
+        case .grok47: return "4.7"
+        case .grok47Fast: return "4.7 Fast"
         case .grok46: return "4.6"
         case .grok45: return "4.5"
         case .grokBuild: return "Build"
@@ -689,6 +693,8 @@ public enum BuildModel: String, CaseIterable, Identifiable, Sendable {
 
     public var menuTitle: String {
         switch self {
+        case .grok47: return "Grok 4.7"
+        case .grok47Fast: return "Grok 4.7 Fast"
         case .grok46: return "Grok 4.6"
         case .grok45: return "Grok 4.5"
         case .grokBuild: return "Grok Build"
@@ -745,26 +751,24 @@ public enum AgentMode: String, CaseIterable, Identifiable, Sendable {
 }
 
 public extension ModelTier {
-    func applied(config: GrokConfig) -> (model: BuildModel, effort: EffortLevel) {
+    func applied(config: GrokConfig) -> (model: String, effort: EffortLevel) {
+        let model: String
+        let effort: EffortLevel
         switch self {
         case .fast:
-            return (
-                BuildModel(rawValue: config.fastModel) ?? .grok46,
-                EffortLevel(rawValue: config.fastEffort) ?? .low
-            )
+            model = config.fastModel.isEmpty ? ModelCatalog.fallbackID : config.fastModel
+            effort = EffortLevel(rawValue: config.fastEffort) ?? .low
         case .auto:
-            return (config.defaultBuildModel, config.defaultEffortLevel)
+            model = config.defaultModel.isEmpty ? ModelCatalog.fallbackID : config.defaultModel
+            effort = config.defaultEffortLevel
         case .expert:
-            return (
-                BuildModel(rawValue: config.expertModel) ?? .grokBuild,
-                EffortLevel(rawValue: config.expertEffort) ?? .high
-            )
+            model = config.expertModel.isEmpty ? ModelCatalog.fallbackID : config.expertModel
+            effort = EffortLevel(rawValue: config.expertEffort) ?? .high
         case .heavy:
-            return (
-                BuildModel(rawValue: config.heavyModel) ?? .grokBuild,
-                EffortLevel(rawValue: config.heavyEffort) ?? .xhigh
-            )
+            model = config.heavyModel.isEmpty ? ModelCatalog.fallbackID : config.heavyModel
+            effort = EffortLevel(rawValue: config.heavyEffort) ?? .xhigh
         }
+        return (model, effort)
     }
 }
 

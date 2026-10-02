@@ -27,7 +27,7 @@ public final class ACPClient: ObservableObject {
     @Published public private(set) var grokVersion: String?
     @Published public var workingDirectory: URL
     @Published public var modelTier: ModelTier = .auto
-    @Published public var buildModel: BuildModel = .grok45
+    @Published public var buildModel: String = ModelCatalog.fallbackID
     @Published public var effort: EffortLevel = .medium
     @Published public var mode: AgentMode = .normal
     @Published public var planEntries: [PlanEntry] = []
@@ -221,7 +221,7 @@ public final class ACPClient: ObservableObject {
                 "protocolVersion": 1,
                 "clientInfo": [
                     "name": "GrokDesktop",
-                    "version": "0.1.26"
+                    "version": "0.1.27"
                 ],
                 "clientCapabilities": [
                     "fs": [
@@ -484,11 +484,10 @@ public final class ACPClient: ObservableObject {
         }
         revealUserTurn(trimmed, on: workspace)
 
-        apply(tier: modelTier)
         var params: [String: Any] = [
             "sessionId": id,
             "prompt": PromptMedia.promptBlocks(from: trimmed),
-            "model": buildModel.rawValue
+            "model": buildModel
         ]
         var meta: [String: Any] = [
             "effort": effort.rawValue,

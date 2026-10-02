@@ -23,7 +23,7 @@ public struct GrokConfig: Equatable, Sendable {
     public var raw: String
 
     public init(
-        defaultModel: String = "grok-4.5",
+        defaultModel: String = "grok-4.7",
         defaultEffort: String = "medium",
         permissionMode: String = "ask",
         rememberApprovals: Bool = false,
@@ -33,11 +33,11 @@ public struct GrokConfig: Equatable, Sendable {
         respectGitignore: Bool = false,
         codebaseIndexing: Bool = true,
         sandboxProfile: String = "off",
-        fastModel: String = "grok-4.6",
+        fastModel: String = "grok-4.7",
         fastEffort: String = "low",
-        expertModel: String = "grok-build",
+        expertModel: String = "grok-4.7",
         expertEffort: String = "high",
-        heavyModel: String = "grok-build",
+        heavyModel: String = "grok-4.7",
         heavyEffort: String = "xhigh",
         mcpHint: String = "",
         mcpNames: [String] = [],
@@ -67,7 +67,7 @@ public struct GrokConfig: Equatable, Sendable {
     }
 
     public var defaultBuildModel: BuildModel {
-        BuildModel(rawValue: defaultModel) ?? .grok45
+        BuildModel(rawValue: defaultModel) ?? .grok47
     }
 
     public var defaultEffortLevel: EffortLevel {
