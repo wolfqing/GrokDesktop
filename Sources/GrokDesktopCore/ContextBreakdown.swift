@@ -17,6 +17,8 @@ public struct ContextSlice: Equatable, Hashable, Sendable, Identifiable {
 public struct ContextBreakdown: Equatable, Sendable {
     public var used: Int
     public var window: Int
+    /// Window grok wrote for this session. 0 until signals.json reports one.
+    public var measuredWindow: Int
     public var percent: Int
     public var messages: Int
     public var reasoning: Int
@@ -33,6 +35,7 @@ public struct ContextBreakdown: Equatable, Sendable {
     public init(
         used: Int = 0,
         window: Int = 0,
+        measuredWindow: Int = 0,
         percent: Int = 0,
         messages: Int = 0,
         reasoning: Int = 0,
@@ -48,6 +51,7 @@ public struct ContextBreakdown: Equatable, Sendable {
     ) {
         self.used = used
         self.window = window
+        self.measuredWindow = measuredWindow
         self.percent = percent
         self.messages = messages
         self.reasoning = reasoning
@@ -82,7 +86,8 @@ public struct ContextBreakdown: Equatable, Sendable {
         skillCount: Int,
         mcpCount: Int,
         model: String,
-        sessionID: String
+        sessionID: String,
+        knownWindow: Int = 0
     ) -> ContextBreakdown {
         var messages = 0
         var reasoning = 0
@@ -105,30 +110,35 @@ public struct ContextBreakdown: Equatable, Sendable {
         }
         let estimated = messages + reasoning + tools
         var used = estimated
-        var window = 200_000
+        var window = max(knownWindow, 0)
+        var measuredWindow = 0
         var percent = 0
         if let sessionDirectory {
             let signals = sessionDirectory.appendingPathComponent("signals.json")
             if let data = try? Data(contentsOf: signals),
                let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                let signaled = object["contextTokensUsed"] as? Int ?? 0
-                used = max(signaled, estimated)
-                window = object["contextWindowTokens"] as? Int ?? window
-                percent = object["contextWindowUsage"] as? Int ?? 0
-                if let turns = object["turnCount"] as? Int, turns > 0 { turnCount = turns }
-                if let calls = object["toolCallCount"] as? Int { toolCallCount = calls }
+                used = max(jsonInt(object["contextTokensUsed"]), estimated)
+                let signaledWindow = jsonInt(object["contextWindowTokens"])
+                if signaledWindow > 0 {
+                    measuredWindow = signaledWindow
+                    window = signaledWindow
+                }
+                percent = jsonInt(object["contextWindowUsage"])
+                let turns = jsonInt(object["turnCount"])
+                if turns > 0 { turnCount = turns }
+                if object["toolCallCount"] != nil { toolCallCount = jsonInt(object["toolCallCount"]) }
             }
         }
-        if window <= 0 { window = 200_000 }
         if percent == 0, window > 0 {
             percent = min(100, Int((Double(used) / Double(window) * 100).rounded()))
         }
         let accounted = min(estimated, used)
         let other = max(used - accounted, 0)
-        let free = max(window - used, 0)
+        let free = window > 0 ? max(window - used, 0) : 0
         return ContextBreakdown(
             used: used,
             window: window,
+            measuredWindow: measuredWindow,
             percent: percent,
             messages: messages,
             reasoning: reasoning,
@@ -142,5 +152,56 @@ public struct ContextBreakdown: Equatable, Sendable {
             model: model,
             sessionID: sessionID
         )
+    }
+
+    /// `contextWindowTokens` from a session's signals file. 0 when the file has none.
+    public static func signaledWindow(in directory: URL?) -> Int {
+        guard let directory,
+              let data = try? Data(contentsOf: directory.appendingPathComponent("signals.json")),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return 0 }
+        return jsonInt(object["contextWindowTokens"])
+    }
+
+    private static func jsonInt(_ raw: Any?) -> Int {
+        let number: Double
+        if let value = raw as? Int {
+            number = Double(value)
+        } else if let value = raw as? NSNumber {
+            number = value.doubleValue
+        } else {
+            return 0
+        }
+        guard number.isFinite, number > 0, number < Double(Int.max) else { return 0 }
+        return Int(number.rounded())
+    }
+}
+
+public struct ContextWindowRewrite: Equatable, Sendable {
+    public var sessionID: String
+    public var previous: Int
+    public var current: Int
+
+    public init(sessionID: String, previous: Int, current: Int) {
+        self.sessionID = sessionID
+        self.previous = previous
+        self.current = current
+    }
+
+    public var key: String { "\(sessionID):\(previous):\(current)" }
+
+    /// Resume replaced the window stored for this session with a smaller one.
+    public static func detect(sessionID: String, previous: Int, current: Int) -> ContextWindowRewrite? {
+        guard !sessionID.isEmpty, previous > current, current > 0 else { return nil }
+        return ContextWindowRewrite(sessionID: sessionID, previous: previous, current: current)
+    }
+
+    public func message(chinese: Bool) -> String {
+        let from = PromptTimestamp.compactCount(previous)
+        let to = PromptTimestamp.compactCount(current)
+        if chinese {
+            return "这条会话原来按 \(from) 计。恢复时窗口改成了 \(to)，自动压缩也会更早。占用没有变多。"
+        }
+        return "This session was counted against \(from). Resume rewrote the window to \(to), so auto-compact starts sooner. Usage itself did not jump."
     }
 }

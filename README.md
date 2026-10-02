@@ -20,9 +20,9 @@ Community project. Not an official xAI / SpaceXAI product.
 
 ## Install
 
-**Download:** [Grok-Desktop-0.1.27.zip](https://github.com/wolfqing/GrokDesktop/releases/download/v0.1.27/Grok-Desktop-0.1.27.zip) · [All releases](https://github.com/wolfqing/GrokDesktop/releases) · [Changelog](CHANGELOG.md)
+**Download:** [Grok-Desktop-0.1.28.zip](https://github.com/wolfqing/GrokDesktop/releases/download/v0.1.28/Grok-Desktop-0.1.28.zip) · [All releases](https://github.com/wolfqing/GrokDesktop/releases) · [Changelog](CHANGELOG.md)
 
-**0.1.27:** the model menu includes Grok 4.7 and follows Grok's model catalog.
+**0.1.28:** coming back shows work that still needs you, and the conversation scrollbar jumps between prompts.
 
 1. macOS 14+
 2. Unzip and move `Grok Desktop.app` to Applications

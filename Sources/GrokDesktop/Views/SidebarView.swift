@@ -96,7 +96,7 @@ struct SidebarView: View {
                     model.showSearchField = true
                 }
                 iconButton("square.and.pencil", selected: model.destination == .build) { model.openChat() }
-                iconButton("circle.hexagongrid", selected: model.destination == .dashboard, badge: model.client.isLive) {
+                iconButton("circle.hexagongrid", selected: model.destination == .dashboard, badgeCount: model.attentionBadgeCount) {
                     model.destination = .dashboard
                 }
                 iconButton("photo", selected: model.destination == .imagine) { model.destination = .imagine }
@@ -132,7 +132,7 @@ struct SidebarView: View {
                 l10n.liveAgents,
                 systemImage: "circle.hexagongrid",
                 selected: model.destination == .dashboard,
-                badge: model.client.isLive
+                badgeCount: model.attentionBadgeCount
             ) {
                 model.destination = .dashboard
             }
@@ -169,22 +169,31 @@ struct SidebarView: View {
                                 .padding(.vertical, 4)
                         } else {
                             ForEach(model.visibleProjects) { project in
+                                let waiting = model.attentionCount(forPath: project.path)
                                 Button {
                                     model.openProject(project)
                                 } label: {
-                                    Text(project.name)
-                                        .font(.system(size: 13.5))
-                                        .foregroundStyle(palette.text)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .padding(.horizontal, 16)
-                                        .padding(.vertical, 6)
-                                        .background(
-                                            model.isCurrentProject(project) ? palette.selected : Color.clear,
-                                            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                        )
-                                        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                    HStack(spacing: 8) {
+                                        Text(project.name)
+                                            .font(.system(size: 13.5))
+                                            .foregroundStyle(palette.text)
+                                            .lineLimit(1)
+                                        Spacer(minLength: 0)
+                                        attentionCount(waiting)
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 6)
+                                    .background(
+                                        model.isCurrentProject(project) ? palette.selected : Color.clear,
+                                        in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    )
+                                    .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                                 }
                                 .buttonStyle(.plain)
+                                .help(waiting > 0
+                                    ? l10n.t("\(waiting) to handle in this project", "这个项目有 \(waiting) 件要处理")
+                                    : project.path)
                             }
                         }
                     }
@@ -340,7 +349,7 @@ struct SidebarView: View {
         systemImage: String,
         selected: Bool = false,
         prominent: Bool = false,
-        badge: Bool = false,
+        badgeCount: Int = 0,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
@@ -352,11 +361,7 @@ struct SidebarView: View {
                     .font(.system(size: 14, weight: selected || prominent ? .semibold : .regular))
                     .lineLimit(1)
                 Spacer(minLength: 0)
-                if badge {
-                    Circle()
-                        .fill(Color.orange)
-                        .frame(width: 7, height: 7)
-                }
+                attentionCount(badgeCount)
             }
             .foregroundStyle(selected || prominent ? palette.text : palette.secondary)
             .padding(.horizontal, 12)
@@ -412,6 +417,7 @@ struct SidebarView: View {
     private func historyFolder(_ folder: HistoryFolder) -> some View {
         let expanded = model.isHistoryFolderExpanded(folder)
         let current = model.isCurrentHistoryFolder(folder)
+        let waiting = model.attentionCount(forPath: folder.path)
         return VStack(alignment: .leading, spacing: 2) {
             Button {
                 withAnimation(.easeInOut(duration: 0.16)) {
@@ -430,6 +436,7 @@ struct SidebarView: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer(minLength: 0)
+                    attentionCount(waiting)
                 }
                 .foregroundStyle(current ? palette.text : palette.secondary)
                 .padding(.horizontal, 16)
@@ -437,7 +444,9 @@ struct SidebarView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help(folder.path.isEmpty ? folder.name : folder.path)
+            .help(waiting > 0
+                ? l10n.t("\(waiting) to handle in this project", "这个项目有 \(waiting) 件要处理")
+                : (folder.path.isEmpty ? folder.name : folder.path))
             .contextMenu {
                 Button(l10n.openProject) {
                     model.openProject(NamedProject(id: folder.id, name: folder.name, path: folder.path))
@@ -505,7 +514,7 @@ struct SidebarView: View {
         .buttonStyle(.plain)
     }
 
-    private func iconButton(_ systemImage: String, selected: Bool = false, badge: Bool = false, action: @escaping () -> Void) -> some View {
+    private func iconButton(_ systemImage: String, selected: Bool = false, badgeCount: Int = 0, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             ZStack(alignment: .topTrailing) {
                 Image(systemName: systemImage)
@@ -516,14 +525,22 @@ struct SidebarView: View {
                         selected ? palette.selected : palette.chip,
                         in: RoundedRectangle(cornerRadius: 10, style: .continuous)
                     )
-                if badge {
-                    Circle()
-                        .fill(Color.orange)
-                        .frame(width: 7, height: 7)
-                        .offset(x: 1, y: -1)
-                }
+                attentionCount(badgeCount)
+                    .offset(x: 6, y: -6)
             }
         }
         .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func attentionCount(_ count: Int) -> some View {
+        if count > 0 {
+            Text(count > 9 ? "9+" : "\(count)")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, count > 9 ? 4 : 0)
+                .frame(minWidth: 16, minHeight: 16)
+                .background(Color.orange, in: Capsule())
+        }
     }
 }

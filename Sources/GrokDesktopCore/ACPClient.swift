@@ -60,6 +60,12 @@ public final class ACPClient: ObservableObject {
     @Published public private(set) var isReconnecting = false
     @Published public private(set) var isLoadingSession = false
 
+    public var onWorkspaceIdle: ((SessionWorkspace) -> Void)?
+    public var onWorkspaceClaimed: ((String) -> Void)?
+    /// Session id, previous window, rewritten window. Fired once per shrink.
+    public var onContextWindowRewritten: ((String, Int, Int) -> Void)?
+    private var contextWindowBaselines: [String: Int] = [:]
+
     public var runningTools: Int { currentWorkspace?.runningTools ?? 0 }
 
     public var finishedTools: Int { currentWorkspace?.finishedTools ?? 0 }
@@ -221,7 +227,7 @@ public final class ACPClient: ObservableObject {
                 "protocolVersion": 1,
                 "clientInfo": [
                     "name": "GrokDesktop",
-                    "version": "0.1.27"
+                    "version": "0.1.28"
                 ],
                 "clientCapabilities": [
                     "fs": [
@@ -339,10 +345,12 @@ public final class ACPClient: ObservableObject {
         sessionID = id
         lastSessionID = id
         isLoadingSession = workspace.items.isEmpty && !workspace.hydratedFromDisk
+        rememberWindowBaseline(id: id, directory: sessionDirectory)
         syncFromCurrent()
 
         if workspace.loadedOnAgent {
             isLoadingSession = false
+            publishWindowRewrite(id: id, directory: workspace.directory ?? sessionDirectory)
             return
         }
 
@@ -371,7 +379,10 @@ public final class ACPClient: ObservableObject {
 
         do {
             try await ensureAgentLoaded(workspace)
-            guard generation == loadGeneration else { return }
+            guard generation == loadGeneration else {
+                publishWindowRewrite(id: id, directory: workspace.directory)
+                return
+            }
             if sessionID == id {
                 lastError = nil
                 isReconnecting = false
@@ -380,9 +391,13 @@ public final class ACPClient: ObservableObject {
                     let artifacts = await Task.detached {
                         SessionWorkspace.readArtifacts(directory: directory)
                     }.value
-                    guard generation == loadGeneration else { return }
+                    guard generation == loadGeneration else {
+                        publishWindowRewrite(id: id, directory: workspace.directory)
+                        return
+                    }
                     workspace.applyArtifacts(artifacts)
                 }
+                publishWindowRewrite(id: id, directory: workspace.directory)
                 syncFromCurrent()
             }
         } catch {
@@ -407,6 +422,34 @@ public final class ACPClient: ObservableObject {
             }
             throw error
         }
+    }
+
+    public func windowBaseline(for sessionID: String) -> Int? {
+        contextWindowBaselines[sessionID]
+    }
+
+    public func clearWindowBaseline(_ sessionID: String) {
+        contextWindowBaselines[sessionID] = nil
+    }
+
+    /// Keeps the first window read for this session so a later shrink can be explained once.
+    public func rememberWindowBaseline(id: String, directory: URL?) {
+        guard contextWindowBaselines[id] == nil else { return }
+        let previous = ContextBreakdown.signaledWindow(in: directory)
+        guard previous > 0 else { return }
+        contextWindowBaselines[id] = previous
+    }
+
+    /// Reports a shrink against the remembered window and forgets that baseline.
+    public func publishWindowRewrite(id: String, directory: URL?) {
+        publishWindowRewrite(id: id, measured: ContextBreakdown.signaledWindow(in: directory))
+    }
+
+    public func publishWindowRewrite(id: String, measured: Int) {
+        guard let previous = contextWindowBaselines[id] else { return }
+        guard ContextWindowRewrite.detect(sessionID: id, previous: previous, current: measured) != nil else { return }
+        contextWindowBaselines[id] = nil
+        onContextWindowRewritten?(id, previous, measured)
     }
 
     private func ensureAgentLoaded(_ workspace: SessionWorkspace) async throws {
@@ -473,6 +516,11 @@ public final class ACPClient: ObservableObject {
                 begun.finishTurn()
                 lastError = error.localizedDescription
                 syncFromCurrent()
+                if begun.stopRequested {
+                    noteClaimed(begun.id)
+                } else {
+                    noteIdle(begun)
+                }
             }
             throw error
         }
@@ -519,17 +567,20 @@ public final class ACPClient: ObservableObject {
             workspace.armedQueueID = nil
             workspace.holdQueue = false
             syncFromCurrent()
+            noteClaimed(workspace.id)
             return
         }
         if workspace.holdQueue {
             workspace.holdQueue = false
             workspace.armedQueueID = nil
             syncFromCurrent()
+            noteClaimed(workspace.id)
             return
         }
         guard let next = workspace.promptQueue.first else {
             workspace.armedQueueID = nil
             syncFromCurrent()
+            noteIdle(workspace)
             return
         }
         let nextText = next.text
@@ -608,6 +659,7 @@ public final class ACPClient: ObservableObject {
         outgoingPreview = nil
         if !workspace.isTurnRunning {
             workspace.beginTurn()
+            noteClaimed(workspace.id)
         }
         isStopping = false
         workspace.assistantBufferID = nil
@@ -650,6 +702,7 @@ public final class ACPClient: ObservableObject {
             if let workspace = workspaceByID[id] {
                 let runningTaskIDs = workspace.tasks.filter(\.isRunning).map(\.id)
                 workspace.markWorkStopped()
+                noteClaimed(id)
                 if let permission = workspace.permission {
                     workspace.permission = nil
                     respond(id: permission.id, result: ["outcome": ["outcome": "cancelled"]])
@@ -1200,9 +1253,10 @@ public final class ACPClient: ObservableObject {
             workspace.fold(updates: updates)
             if workspace.stopRequested {
                 workspace.markWorkStopped()
-            }
-            if let completed = updates.last(where: { $0.kind == .turnCompleted }) {
+                noteClaimed(workspace.id)
+            } else if let completed = updates.last(where: { $0.kind == .turnCompleted }) {
                 workspace.finishTurn(at: completed.timestamp ?? Date())
+                noteIdle(workspace)
             }
             if updates.contains(where: { $0.kind == .plan }), let directory = workspace.directory {
                 let workspaceID = workspace.id
@@ -1306,6 +1360,16 @@ public final class ACPClient: ObservableObject {
 
     private func refreshLive() {
         liveWorkspaces = workspaceByID.values.filter(\.isLive).sorted { $0.id < $1.id }
+    }
+
+    private func noteIdle(_ workspace: SessionWorkspace) {
+        guard !workspace.stopRequested, !workspace.isLive else { return }
+        workspace.refreshArtifacts()
+        onWorkspaceIdle?(workspace)
+    }
+
+    private func noteClaimed(_ id: String) {
+        onWorkspaceClaimed?(id)
     }
 
     private func present(questionID id: JSONRPCID, params: [String: Any]) {

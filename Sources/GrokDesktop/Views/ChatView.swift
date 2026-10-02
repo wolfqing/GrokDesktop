@@ -234,6 +234,7 @@ struct ChatView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            contextWindowNote
 
             if let reason = model.firstRunReason, model.client.items.isEmpty, model.client.outgoingPreview == nil {
                 FirstRunView(reason: reason)
@@ -454,10 +455,6 @@ struct ChatView: View {
         }
     }
 
-    private func compactContext(_ value: Int) -> String {
-        PromptTimestamp.compactCount(value)
-    }
-
     @ViewBuilder
     private var turnStatusBlock: some View {
         if model.client.isTurnRunning || model.client.isStopping {
@@ -521,6 +518,29 @@ struct ChatView: View {
         .padding(.bottom, 22)
     }
 
+    @ViewBuilder
+    private var contextWindowNote: some View {
+        if let text = model.contextWindowNoteText {
+            HStack(alignment: .top, spacing: 8) {
+                Text(text)
+                    .font(.system(size: 12))
+                    .foregroundStyle(palette.text)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                Button(l10n.t("Close", "关掉")) {
+                    model.dismissContextWindowNote()
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(palette.secondary)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(palette.chip)
+        }
+    }
+
     private var header: some View {
         HStack(spacing: 10) {
             Button {
@@ -552,12 +572,12 @@ struct ChatView: View {
                     model.refreshContextBreakdown()
                     model.showContextSheet = true
                 } label: {
-                    Text("\(model.displayedContextPercent)% · \(compactContext(model.displayedContextUsed))/\(compactContext(model.displayedContextWindow))")
+                    Text(model.contextChipLabel)
                         .font(.system(size: 11, weight: .medium, design: .monospaced))
                         .foregroundStyle(palette.secondary)
                 }
                 .buttonStyle(.plain)
-                .help(l10n.sessionContext)
+                .help(model.contextWindowNoteText ?? l10n.sessionContext)
             }
 
             Button {
@@ -761,7 +781,10 @@ struct ChatView: View {
     private func chatScrollbar(_ proxy: ScrollViewProxy) -> some View {
         OverlayScrollbar(
             metrics: scrollMetrics,
+            marks: turnMarks,
             isDark: palette.isDark,
+            previousLabel: l10n.t("Previous prompt", "上一条"),
+            nextLabel: l10n.t("Next prompt", "下一条"),
             driver: scrollDriver,
             onBegan: {
                 pinningToLatest = false
@@ -780,10 +803,39 @@ struct ChatView: View {
                 if progress >= 0.985 {
                     jumpToLatest(proxy)
                 }
+            },
+            onMark: { id in
+                jumpToRow(id, proxy)
+            },
+            onLatest: {
+                jumpToLatest(proxy)
             }
         )
-        .frame(width: 14)
-        .padding(.vertical, 6)
+        .frame(width: 20)
+        .padding(.vertical, 4)
+    }
+
+    private var turnMarks: [TurnRailMark] {
+        let rows = displayedRows
+        let count = rows.count
+        guard count > 0 else { return [] }
+        return rows.enumerated().compactMap { index, row in
+            guard case .message(.user(_, let text)) = row else { return nil }
+            let shown = TranscriptLoader.displayUserText(text)
+            let label = shown.trimmingCharacters(in: .whitespacesAndNewlines)
+            return TurnRailMark(
+                id: row.id,
+                progress: TurnRail.progress(index: index, count: count),
+                label: String((label.isEmpty ? l10n.t("Prompt", "提问") : label).prefix(80))
+            )
+        }
+    }
+
+    private func jumpToRow(_ id: String, _ proxy: ScrollViewProxy) {
+        pinningToLatest = false
+        stickToLatest = false
+        ignoreScrollUntil = Date().addingTimeInterval(0.45)
+        proxy.scrollTo(id, anchor: .top)
     }
 
     private var lastDisplayID: String? {

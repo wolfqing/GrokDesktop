@@ -354,11 +354,19 @@ struct ContextSheet: View {
         OverlaySheet(width: 560, onDismiss: { model.showContextSheet = false }) {
             Text(l10n.t("Context", "上下文"))
                 .font(.system(size: 16, weight: .semibold))
+            if let text = model.contextWindowNoteText {
+                Text(text)
+                    .font(.system(size: 12))
+                    .foregroundStyle(palette.text)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             HStack {
-                Text("\(model.contextBreakdown.percent)%")
-                    .font(.system(size: 22, weight: .semibold, design: .monospaced))
+                if model.displayedContextWindow > 0 {
+                    Text("\(model.displayedContextPercent)%")
+                        .font(.system(size: 22, weight: .semibold, design: .monospaced))
+                }
                 Spacer()
-                Text("\(model.contextBreakdown.used) / \(model.contextBreakdown.window)")
+                Text(model.contextRatioLabel)
                     .font(.system(size: 12, design: .monospaced))
                     .foregroundStyle(palette.secondary)
             }
@@ -410,7 +418,8 @@ struct ContextSheet: View {
     }
 
     private func fraction(_ tokens: Int) -> CGFloat {
-        let total = max(model.contextBreakdown.window, 1)
+        let total = model.displayedContextWindow
+        guard total > 0 else { return 0 }
         return CGFloat(min(max(tokens, 0), total)) / CGFloat(total)
     }
 }

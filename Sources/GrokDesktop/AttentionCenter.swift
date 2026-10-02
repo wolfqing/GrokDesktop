@@ -22,12 +22,13 @@ final class AttentionCenter: NSObject, UNUserNotificationCenterDelegate {
 
     func sync(
         needs: [AttentionNeed],
+        badgeCount: Int,
         focusedSessionID: String?,
         destinationIsChat: Bool,
         enabled: Bool
     ) {
         let keys = Set(needs.map(\.key))
-        NSApp.dockTile.badgeLabel = keys.isEmpty ? nil : "\(keys.count)"
+        NSApp.dockTile.badgeLabel = badgeCount == 0 ? nil : "\(badgeCount)"
 
         if !enabled {
             clearPosted()
@@ -40,6 +41,8 @@ final class AttentionCenter: NSObject, UNUserNotificationCenterDelegate {
             if posted.contains(need.key) { continue }
             let lookingAtIt = appActive && destinationIsChat && focusedSessionID == need.sessionID
             if lookingAtIt { continue }
+            // A finished turn is visible on the dashboard while the app is in front.
+            if need.kind == .finished, appActive { continue }
             posted.insert(need.key)
             post(need)
         }
@@ -103,6 +106,7 @@ struct AttentionNeed: Hashable {
     enum Kind: String {
         case permission
         case question
+        case finished
     }
 
     var sessionID: String

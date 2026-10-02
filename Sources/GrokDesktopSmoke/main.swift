@@ -177,12 +177,16 @@ expect(BuildModel(rawValue: "grok-4.7-build-fast") == .grok47Fast, "4.7 fast is 
 expect(BuildModel.allCases.first == .grok47, "latest builtin model is listed first")
 let catalogURL = FileManager.default.temporaryDirectory.appendingPathComponent("gd-models-\(UUID().uuidString).json")
 let catalogJSON = """
-{"models":{"grok-4.2-fast":{"info":{"id":"grok-4.2-fast","name":"Grok 4.2 Fast","hidden":false}},"grok-9":{"info":{"id":"grok-9","name":"Grok 9","description":"Newest"}},"grok-8":{"info":{"id":"grok-8","name":"Grok 8","hidden":true}}}}
+{"models":{"grok-4.2-fast":{"info":{"id":"grok-4.2-fast","name":"Grok 4.2 Fast","hidden":false}},"grok-9":{"info":{"id":"grok-9","name":"Grok 9","description":"Newest","context_window":256000}},"grok-8":{"info":{"id":"grok-8","name":"Grok 8","hidden":true,"context_window":999}}}}
 """
 try! catalogJSON.write(to: catalogURL, atomically: true, encoding: .utf8)
 let catalog = ModelCatalog.load(cacheURL: catalogURL)
 expect(catalog.map(\.id) == ["grok-9", "grok-4.2-fast"], "catalog lists newest model first and skips hidden")
 expect(catalog.first?.shortTitle == "9", "catalog short title drops the Grok prefix")
+expect(catalog.first?.contextWindow == 256_000, "catalog keeps the model context window")
+expect(catalog.last?.contextWindow == 0, "missing context window stays unknown")
+expect(ModelCatalog.contextWindow(for: "grok-9", choices: catalog) == 256_000, "context window lookup")
+expect(ModelCatalog.contextWindow(for: "grok-4.2-fast", choices: catalog) == 0, "unknown model window is not invented")
 expect(ModelCatalog.load(cacheURL: URL(fileURLWithPath: "/tmp/missing-models-cache.json")).first?.id == "grok-4.7", "missing catalog falls back")
 
 expect(AuthPresence.probe(environment: ["XAI_API_KEY": "xai-test"]).isReady, "api key counts as signed in")
@@ -1105,7 +1109,43 @@ let breakdown = ContextBreakdown.make(
 )
 expect(breakdown.messages > 0, "context messages")
 expect(breakdown.free >= 0, "context free")
+expect(breakdown.window == 0, "context window is not a hardcoded 200k")
+expect(breakdown.measuredWindow == 0, "unmeasured session has no signaled window")
 expect(breakdown.slices.count == 5, "context slices")
+let catalogWindow = ContextBreakdown.make(
+    items: searchItems,
+    sessionDirectory: nil,
+    skillCount: 0,
+    mcpCount: 0,
+    model: "grok-9",
+    sessionID: "s2",
+    knownWindow: 256_000
+)
+expect(catalogWindow.window == 256_000, "known model window fills an empty session")
+expect(catalogWindow.measuredWindow == 0, "catalog window is not a session measurement")
+expect(catalogWindow.free == 256_000 - catalogWindow.used, "free space uses the model window")
+let signalDir = FileManager.default.temporaryDirectory.appendingPathComponent("gd-ctx-\(UUID().uuidString)", isDirectory: true)
+try! FileManager.default.createDirectory(at: signalDir, withIntermediateDirectories: true)
+try! #"{"contextTokensUsed":1200,"contextWindowTokens":500000,"contextWindowUsage":1,"turnCount":2,"toolCallCount":4}"#.write(
+    to: signalDir.appendingPathComponent("signals.json"),
+    atomically: true,
+    encoding: .utf8
+)
+let signaled = ContextBreakdown.make(
+    items: searchItems,
+    sessionDirectory: signalDir,
+    skillCount: 0,
+    mcpCount: 0,
+    model: "grok-9",
+    sessionID: "s3",
+    knownWindow: 256_000
+)
+expect(signaled.window == 500_000, "session signals replace the catalog window")
+expect(signaled.measuredWindow == 500_000, "signaled window is measured")
+expect(signaled.used >= 1200, "signaled usage is kept")
+expect(signaled.percent == 1, "signaled percent is kept")
+expect(signaled.turnCount == 2, "signaled turn count")
+expect(signaled.toolCallCount == 4, "signaled tool count")
 
 let persona = AgentCatalog.parsePersona(
     """
@@ -1509,6 +1549,125 @@ expect(
     ),
     "leaving the bottom republishes jump chrome"
 )
+
+let badgeUnseen = UnseenTurn(
+    id: "s1",
+    cwd: "/tmp/Alpha",
+    prompt: "fix the badge",
+    failed: false,
+    finishedAt: Date(timeIntervalSince1970: 10)
+)
+var badgeTurns = UnseenStore.record([], turn: badgeUnseen)
+expect(badgeTurns.count == 1 && badgeTurns[0].cwdName == "Alpha", "record unseen")
+badgeTurns = UnseenStore.record(
+    badgeTurns,
+    turn: UnseenTurn(id: "s1", cwd: "/tmp/Alpha", prompt: "again", failed: true, finishedAt: Date(timeIntervalSince1970: 20))
+)
+expect(badgeTurns.count == 1 && badgeTurns[0].failed, "same session replaces unseen")
+var badgeCapped: [UnseenTurn] = []
+for index in 0..<14 {
+    badgeCapped = UnseenStore.record(
+        badgeCapped,
+        turn: UnseenTurn(id: "s\(index)", cwd: "/tmp/R", prompt: "p", failed: false, finishedAt: Date(timeIntervalSince1970: Double(index)))
+    )
+}
+expect(badgeCapped.count == 12 && badgeCapped[0].id == "s13", "unseen keeps the newest 12")
+expect(UnseenStore.clear(badgeCapped, sessionID: "s13").contains { $0.id == "s13" } == false, "clear unseen")
+let badgeSignal = Set([AttentionSignal(sessionID: "s1", kind: "unseen", token: "1")])
+expect(
+    AttentionLanding.shouldSwitch(needs: badgeSignal, surfaced: [], onWebChat: false, draftEmpty: true, alreadyThere: false),
+    "fresh unseen lands"
+)
+expect(
+    !AttentionLanding.shouldSwitch(needs: badgeSignal, surfaced: badgeSignal, onWebChat: false, draftEmpty: true, alreadyThere: false),
+    "seen attention stays"
+)
+expect(
+    !AttentionLanding.shouldSwitch(needs: badgeSignal, surfaced: [], onWebChat: true, draftEmpty: true, alreadyThere: false),
+    "web chat stays"
+)
+expect(
+    !AttentionLanding.shouldSwitch(needs: badgeSignal, surfaced: [], onWebChat: false, draftEmpty: false, alreadyThere: false),
+    "draft stays"
+)
+expect(
+    !AttentionLanding.shouldSwitch(needs: [], surfaced: [], onWebChat: false, draftEmpty: true, alreadyThere: false),
+    "running alone does not land"
+)
+expect(!UnseenPolicy.shouldRecord(stopRequested: true, isLive: false, watching: false), "stop does not record")
+expect(!UnseenPolicy.shouldRecord(stopRequested: false, isLive: true, watching: false), "live work does not record")
+expect(!UnseenPolicy.shouldRecord(stopRequested: false, isLive: false, watching: true), "watching does not record")
+expect(UnseenPolicy.shouldRecord(stopRequested: false, isLive: false, watching: false), "idle unseen records")
+let promptWorkspace = SessionWorkspace(id: "s", cwd: URL(fileURLWithPath: "/tmp/Alpha"))
+promptWorkspace.items = [
+    .user(id: "u1", text: "first"),
+    .assistant(id: "a1", text: "ok", done: true),
+    .user(id: "u2", text: "  second line  ")
+]
+expect(promptWorkspace.latestUserPrompt == "second line", "latest user prompt")
+let unseenFile = FileManager.default.temporaryDirectory.appendingPathComponent("grokdesktop-unseen-\(UUID().uuidString).json")
+UnseenStore.save([badgeUnseen], to: unseenFile)
+expect(UnseenStore.load(from: unseenFile).first?.prompt == "fix the badge", "unseen round trip")
+try? FileManager.default.removeItem(at: unseenFile)
+
+let railMarks = [
+    TurnRailMark(id: "u0", progress: TurnRail.progress(index: 0, count: 5), label: "first"),
+    TurnRailMark(id: "u2", progress: TurnRail.progress(index: 2, count: 5), label: "middle"),
+    TurnRailMark(id: "u4", progress: TurnRail.progress(index: 4, count: 5), label: "last")
+]
+expect(railMarks.map(\.progress) == [0, 0.5, 1], "turn marks follow row position")
+expect(TurnRail.step(marks: railMarks, progress: 0.5, forward: false) == "u0", "up leaves the current prompt")
+expect(TurnRail.step(marks: railMarks, progress: 0.62, forward: false) == "u2", "up returns to the prompt above")
+expect(TurnRail.step(marks: railMarks, progress: 0.5, forward: true) == "u4", "down goes to the next prompt")
+expect(TurnRail.step(marks: railMarks, progress: 1, forward: true) == nil, "down at the end stays")
+expect(TurnRail.activeID(marks: railMarks, progress: 0.62) == "u2", "active mark is the prompt in view")
+
+let quiet = UnseenTurn(id: "s", cwd: "/tmp/Alpha", prompt: "hi", failed: false, finishedAt: Date(timeIntervalSince1970: 1))
+expect(quiet.resultLine(chinese: true) == "Alpha · 没有改文件", "no diff line")
+let touched = UnseenTurn(
+    id: "s",
+    cwd: "/tmp/Alpha",
+    prompt: "hi",
+    failed: false,
+    finishedAt: Date(timeIntervalSince1970: 1),
+    changedFiles: 3
+)
+expect(touched.resultLine(chinese: true) == "Alpha · 3 个文件", "diff line")
+expect(UnseenTurn.changePhrase(count: 1, chinese: false) == "1 file", "one file")
+expect(UnseenTurn.changePhrase(count: 2, chinese: false) == "2 files", "many files")
+expect(
+    UnseenTurn.changedFileCount([
+        FileHunk(id: "a", path: "A.swift", added: 1, removed: 0),
+        FileHunk(id: "a2", path: "A.swift", added: 2, removed: 0),
+        FileHunk(id: "b", path: "B.swift", added: 1, removed: 1)
+    ]) == 2,
+    "changed files are unique paths"
+)
+let legacy = "{\"id\":\"old\",\"cwd\":\"/tmp/Beta\",\"prompt\":\"p\",\"failed\":false,\"finishedAt\":\"2026-10-02T00:00:00Z\"}"
+let legacyDecoder = JSONDecoder()
+legacyDecoder.dateDecodingStrategy = .iso8601
+guard let legacyTurn = try? legacyDecoder.decode(UnseenTurn.self, from: Data(legacy.utf8)) else {
+    fail("older unseen records should decode")
+}
+expect(legacyTurn.changedFiles == 0, "older unseen records have no file count")
+
+let repoNeeds = ["/tmp/Alpha", "/tmp/Alpha/", "/tmp/Beta"]
+expect(RepoAttention.count(path: "/tmp/Alpha", needs: repoNeeds) == 2, "project row counts both needs")
+expect(RepoAttention.count(path: "/tmp/Beta", needs: repoNeeds) == 1, "other project keeps its own count")
+expect(RepoAttention.count(path: "", needs: repoNeeds) == 0, "empty project path has no count")
+expect(RepoAttention.count(path: "/tmp/Alpha", needs: []) == 0, "running alone adds no project count")
+
+expect(ContextWindowRewrite.detect(sessionID: "s", previous: 500_000, current: 256_000)?.key == "s:500000:256000", "shrink is a rewrite")
+expect(ContextWindowRewrite.detect(sessionID: "s", previous: 256_000, current: 256_000) == nil, "same window is quiet")
+expect(ContextWindowRewrite.detect(sessionID: "s", previous: 256_000, current: 500_000) == nil, "a larger window is quiet")
+expect(ContextWindowRewrite.detect(sessionID: "", previous: 500_000, current: 256_000) == nil, "rewrite needs a session")
+let rewriteNote = ContextWindowRewrite(sessionID: "s", previous: 500_000, current: 256_000)
+expect(
+    rewriteNote.message(chinese: true) == "这条会话原来按 500k 计。恢复时窗口改成了 256k，自动压缩也会更早。占用没有变多。",
+    "rewrite note names both windows"
+)
+expect(rewriteNote.message(chinese: false).contains("500k"), "english note names the old window")
+expect(rewriteNote.message(chinese: false).contains("256k"), "english note names the new window")
 
 print("GrokDesktopSmoke ok")
 

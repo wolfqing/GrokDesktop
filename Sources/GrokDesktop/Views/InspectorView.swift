@@ -366,12 +366,17 @@ struct InspectorView: View {
                 .buttonStyle(.plain)
             }
             HStack(alignment: .firstTextBaseline) {
-                Text("\(model.displayedContextPercent)%")
-                    .font(.system(size: 16, weight: .semibold, design: .monospaced))
-                Spacer()
-                Text("\(compactTokens(model.displayedContextUsed)) / \(compactTokens(model.displayedContextWindow))")
+                if model.displayedContextWindow > 0 {
+                    Text("\(model.displayedContextPercent)%")
+                        .font(.system(size: 16, weight: .semibold, design: .monospaced))
+                    Spacer()
+                }
+                Text(model.contextRatioLabel)
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(palette.secondary)
+                if model.displayedContextWindow == 0 {
+                    Spacer()
+                }
             }
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
@@ -382,6 +387,12 @@ struct InspectorView: View {
                 }
             }
             .frame(height: 6)
+            if let text = model.contextWindowNoteText {
+                Text(text)
+                    .font(.system(size: 11))
+                    .foregroundStyle(palette.text)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Button {
                 model.chooseWorkingDirectory()
             } label: {

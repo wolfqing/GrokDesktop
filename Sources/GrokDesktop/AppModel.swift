@@ -61,6 +61,18 @@ enum FirstRunReason: Equatable {
     case agent(String)
 }
 
+struct PendingDispatch: Identifiable, Equatable {
+    var id: String
+    var text: String
+    var cwd: String
+    var sessionID: String?
+    var error: String?
+
+    var cwdName: String {
+        URL(fileURLWithPath: cwd).lastPathComponent
+    }
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     @Published var client: ACPClient
@@ -97,6 +109,9 @@ final class AppModel: ObservableObject {
     @Published var catalogsLoading = false
     @Published var automations: [AutomationRecord] = []
     @Published var namedProjects: [NamedProject] = []
+    @Published var unseenTurns: [UnseenTurn] = []
+    @Published var contextWindowNote: ContextWindowRewrite?
+    @Published var pendingDispatches: [PendingDispatch] = []
     @Published var skillsQuery = ""
     @Published var skillsTab = 0
     @Published var newProjectName = ""
@@ -234,6 +249,9 @@ final class AppModel: ObservableObject {
     let mcpCatalog = MCPCatalog()
     let agentCatalog = AgentCatalog()
     private var clientCancellables = Set<AnyCancellable>()
+    private var surfacedAttention: Set<AttentionSignal> = []
+    private var explainedContextRewrites: Set<String> = []
+    private static let explainedContextRewritesKey = "explainedContextRewrites"
 
     init(
         locator: GrokBinaryLocator = GrokBinaryLocator(),
@@ -251,6 +269,7 @@ final class AppModel: ObservableObject {
         client.buildModel = grokConfig.defaultModel.isEmpty ? ModelCatalog.fallbackID : grokConfig.defaultModel
         client.effort = grokConfig.defaultEffortLevel
         firstRunReason = bootstrapReason()
+        explainedContextRewrites = Set(UserDefaults.standard.stringArray(forKey: Self.explainedContextRewritesKey) ?? [])
         refreshWorkspace()
         refreshAccountUsage()
         bindClient()
@@ -259,6 +278,10 @@ final class AppModel: ObservableObject {
         }
         AttentionCenter.shared.onOpenSession = { [weak self] id in
             self?.openWaitingSession(id)
+        }
+        if !DemoStudio.isEnabled {
+            loadUnseen()
+            landOnFreshAttention()
         }
         if !DemoStudio.isEnabled, locator.locate() != nil {
             Task { [weak self] in
@@ -345,18 +368,58 @@ final class AppModel: ObservableObject {
         InspectorPane.allCases.filter { hiddenInspectorPanes.contains($0.rawValue) }
     }
 
-    var displayedContextPercent: Int {
-        if workspace.contextPercent > 0 { return workspace.contextPercent }
-        return contextBreakdown.percent
+    private var contextMatchesSession: Bool {
+        contextBreakdown.sessionID == (client.sessionID ?? "")
+    }
+
+    private var contextUsesMeasuredWindow: Bool {
+        contextMatchesSession && contextBreakdown.measuredWindow > 0
     }
 
     var displayedContextUsed: Int {
-        max(workspace.contextUsed, contextBreakdown.used)
+        if DemoStudio.isEnabled, !contextUsesMeasuredWindow {
+            return max(workspace.contextUsed, contextBreakdown.used)
+        }
+        guard contextMatchesSession else { return 0 }
+        return contextBreakdown.used
     }
 
+    /// Session signals win. Otherwise the current model's catalog window. Never a fixed fallback.
     var displayedContextWindow: Int {
-        let window = workspace.contextWindow > 0 ? workspace.contextWindow : contextBreakdown.window
-        return window > 0 ? window : 200_000
+        if DemoStudio.isEnabled, !contextUsesMeasuredWindow, workspace.contextWindow > 0 {
+            return workspace.contextWindow
+        }
+        if contextUsesMeasuredWindow { return contextBreakdown.measuredWindow }
+        let catalog = ModelCatalog.contextWindow(for: client.buildModel, choices: modelChoices)
+        if catalog > 0 { return catalog }
+        return 0
+    }
+
+    var displayedContextPercent: Int {
+        let window = displayedContextWindow
+        guard window > 0 else { return 0 }
+        if DemoStudio.isEnabled, !contextUsesMeasuredWindow, workspace.contextPercent > 0 {
+            return min(workspace.contextPercent, 100)
+        }
+        if contextUsesMeasuredWindow, contextBreakdown.percent > 0 {
+            return min(contextBreakdown.percent, 100)
+        }
+        let used = displayedContextUsed
+        return min(100, Int((Double(used) / Double(window) * 100).rounded()))
+    }
+
+    var contextChipLabel: String {
+        let used = PromptTimestamp.compactCount(displayedContextUsed)
+        let window = displayedContextWindow
+        guard window > 0 else { return used }
+        return "\(displayedContextPercent)% · \(used)/\(PromptTimestamp.compactCount(window))"
+    }
+
+    var contextRatioLabel: String {
+        let used = PromptTimestamp.compactCount(displayedContextUsed)
+        let window = displayedContextWindow
+        guard window > 0 else { return used }
+        return "\(used) / \(PromptTimestamp.compactCount(window))"
     }
 
     private func applyDemoStudio() {
@@ -423,6 +486,15 @@ final class AppModel: ObservableObject {
 
     private func bindClient() {
         clientCancellables.removeAll()
+        client.onWorkspaceIdle = { [weak self] workspace in
+            self?.recordUnseen(workspace)
+        }
+        client.onWorkspaceClaimed = { [weak self] id in
+            self?.clearUnseen(id)
+        }
+        client.onContextWindowRewritten = { [weak self] id, previous, current in
+            self?.showContextWindowRewrite(sessionID: id, previous: previous, current: current)
+        }
         client.objectWillChange
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
@@ -431,6 +503,13 @@ final class AppModel: ObservableObject {
             }
             .store(in: &clientCancellables)
         NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.syncAttention()
+                self?.landOnFreshAttention()
+            }
+            .store(in: &clientCancellables)
+        NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 self?.syncAttention()
@@ -446,16 +525,10 @@ final class AppModel: ObservableObject {
     }
 
     func openWaitingSession(_ id: String) {
-        if client.focusIfLoaded(id) {
-            destination = .build
+        if unseenTurns.contains(where: { $0.id == id }) || client.focusIfLoaded(id) {
             showInspector = true
-            return
         }
-        if let record = sessions.first(where: { $0.id == id }) {
-            open(record)
-            return
-        }
-        destination = .build
+        openDashboardItem(id)
     }
 
     func dispatchWork(_ text: String) {
@@ -463,18 +536,91 @@ final class AppModel: ObservableObject {
         guard !trimmed.isEmpty else { return }
         recordPrompt(trimmed)
         destination = .dashboard
+        let cwd = client.workingDirectory
+        let pendingID = UUID().uuidString
+        pendingDispatches.insert(
+            PendingDispatch(id: pendingID, text: trimmed, cwd: cwd.path, sessionID: nil, error: nil),
+            at: 0
+        )
         Task {
             do {
-                try await client.newSession(cwd: client.workingDirectory)
+                try await client.newSession(cwd: cwd)
+                if let index = pendingDispatches.firstIndex(where: { $0.id == pendingID }) {
+                    pendingDispatches[index].sessionID = client.sessionID
+                }
                 try await client.send(text: trimmed)
+                pendingDispatches.removeAll { $0.id == pendingID }
                 if !isPrivateChat {
                     refreshSessions()
                 }
                 refreshWorkspace()
             } catch {
+                if let index = pendingDispatches.firstIndex(where: { $0.id == pendingID }) {
+                    pendingDispatches[index].error = error.localizedDescription
+                }
                 present(error)
             }
         }
+    }
+
+    func dismissDispatch(_ id: String) {
+        pendingDispatches.removeAll { $0.id == id }
+    }
+
+    func setDispatchDirectory(_ url: URL) {
+        rememberWorkingDirectory(url)
+    }
+
+    func chooseDispatchDirectory() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.prompt = copy.chooseFolder
+        panel.directoryURL = client.workingDirectory
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        setDispatchDirectory(url)
+    }
+
+    var dispatchProjects: [NamedProject] {
+        var projects = visibleProjects
+        let current = client.workingDirectory
+        let key = current.standardizedFileURL.path
+        if !projects.contains(where: { $0.standardizedPath == key }) {
+            projects.insert(
+                NamedProject(id: key, name: current.lastPathComponent, path: current.path),
+                at: 0
+            )
+        }
+        return projects
+    }
+
+    var visiblePendingDispatches: [PendingDispatch] {
+        let covered = Set(client.liveWorkspaces.map(\.id)).union(unseenTurns.map(\.id))
+        return pendingDispatches.filter { pending in
+            guard let sessionID = pending.sessionID else { return true }
+            return !covered.contains(sessionID)
+        }
+    }
+
+    func openDashboardItem(_ id: String) {
+        if client.focusIfLoaded(id) {
+            clearUnseen(id)
+            destination = .build
+            refreshWorkspace()
+            return
+        }
+        if let record = sessions.first(where: { $0.id == id }) ?? sessionIndex.record(id: id) {
+            open(record)
+            return
+        }
+        clearUnseen(id)
+        flash(copy.t("That session is gone.", "这条会话已经不在了。"))
+    }
+
+    func noteDashboardVisible() {
+        surfacedAttention.formUnion(attentionSignals)
     }
 
     var attentionNeeds: [AttentionNeed] {
@@ -502,15 +648,143 @@ final class AppModel: ObservableObject {
             }
             return nil
         }
+        + unseenTurns.filter { turn in
+            !client.liveWorkspaces.contains { $0.id == turn.id }
+        }.map { turn in
+            let chinese = language.resolved() == .chinese
+            let result = UnseenTurn.changePhrase(count: turn.changedFiles, chinese: chinese)
+            let lead = turn.prompt.isEmpty ? turn.cwdName : turn.prompt
+            return AttentionNeed(
+                sessionID: turn.id,
+                kind: .finished,
+                title: turn.failed
+                    ? (chinese ? "出错了" : "Failed")
+                    : (chinese ? "跑完了" : "Finished"),
+                body: "\(lead) · \(result)"
+            )
+        }
     }
 
     func syncAttention() {
+        if destination == .dashboard {
+            surfacedAttention.formUnion(attentionSignals)
+        }
         AttentionCenter.shared.sync(
             needs: attentionNeeds,
+            badgeCount: attentionBadgeCount,
             focusedSessionID: client.sessionID,
             destinationIsChat: destination == .build,
             enabled: notifyThinking
         )
+    }
+
+    var attentionSignals: Set<AttentionSignal> {
+        var signals: Set<AttentionSignal> = []
+        let liveIDs = Set(client.liveWorkspaces.map(\.id))
+        for workspace in client.liveWorkspaces {
+            if let question = workspace.userQuestion {
+                signals.insert(AttentionSignal(sessionID: workspace.id, kind: "question", token: question.id))
+            } else if let permission = workspace.permission {
+                signals.insert(AttentionSignal(sessionID: workspace.id, kind: "permission", token: Self.rpcToken(permission.id)))
+            }
+        }
+        for turn in unseenTurns where !liveIDs.contains(turn.id) {
+            signals.insert(
+                AttentionSignal(
+                    sessionID: turn.id,
+                    kind: "unseen",
+                    token: String(turn.finishedAt.timeIntervalSince1970)
+                )
+            )
+        }
+        return signals
+    }
+
+    var attentionBadgeCount: Int { attentionSignals.count }
+
+    /// Directories for the same three needs the Dock badge counts, one entry each.
+    var attentionCwds: [String] {
+        let liveIDs = Set(client.liveWorkspaces.map(\.id))
+        var cwds: [String] = []
+        for workspace in client.liveWorkspaces where workspace.userQuestion != nil || workspace.permission != nil {
+            cwds.append(workspace.cwd.path)
+        }
+        for turn in unseenTurns where !liveIDs.contains(turn.id) {
+            cwds.append(turn.cwd)
+        }
+        return cwds
+    }
+
+    func attentionCount(forPath path: String) -> Int {
+        RepoAttention.count(path: path, needs: attentionCwds)
+    }
+
+    func landOnFreshAttention() {
+        let needs = attentionSignals
+        if destination == .dashboard {
+            surfacedAttention.formUnion(needs)
+            return
+        }
+        guard AttentionLanding.shouldSwitch(
+            needs: needs,
+            surfaced: surfacedAttention,
+            onWebChat: destination == .webChat,
+            draftEmpty: draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            alreadyThere: false
+        ) else { return }
+        destination = .dashboard
+        surfacedAttention.formUnion(needs)
+    }
+
+    private func loadUnseen() {
+        let loaded = UnseenStore.load(from: UnseenStore.fileURL())
+        unseenTurns = loaded.filter { sessionIndex.record(id: $0.id) != nil }
+        if unseenTurns.count != loaded.count {
+            saveUnseen()
+        }
+    }
+
+    private func saveUnseen() {
+        UnseenStore.save(unseenTurns, to: UnseenStore.fileURL())
+    }
+
+    private func recordUnseen(_ workspace: SessionWorkspace) {
+        guard UnseenPolicy.shouldRecord(
+            stopRequested: workspace.stopRequested,
+            isLive: workspace.isLive,
+            watching: isWatching(workspace.id)
+        ) else { return }
+        let prompt = workspace.latestUserPrompt
+        let turn = UnseenTurn(
+            id: workspace.id,
+            cwd: workspace.cwd.path,
+            prompt: prompt.isEmpty ? workspace.title : String(prompt.prefix(280)),
+            failed: workspace.lastError?.isEmpty == false,
+            finishedAt: Date(),
+            changedFiles: UnseenTurn.changedFileCount(workspace.hunks)
+        )
+        unseenTurns = UnseenStore.record(unseenTurns, turn: turn)
+        saveUnseen()
+        syncAttention()
+    }
+
+    private func clearUnseen(_ sessionID: String) {
+        let next = UnseenStore.clear(unseenTurns, sessionID: sessionID)
+        guard next != unseenTurns else { return }
+        unseenTurns = next
+        saveUnseen()
+        syncAttention()
+    }
+
+    private func isWatching(_ sessionID: String) -> Bool {
+        NSApp.isActive && destination == .build && client.sessionID == sessionID
+    }
+
+    private static func rpcToken(_ id: JSONRPCID) -> String {
+        switch id {
+        case .int(let value): return "\(value)"
+        case .string(let value): return value
+        }
     }
 
     var liveSessions: [SessionRecord] {
@@ -654,8 +928,36 @@ final class AppModel: ObservableObject {
             skillCount: skills.count,
             mcpCount: mcpServers.count,
             model: client.buildModel,
-            sessionID: client.sessionID ?? ""
+            sessionID: client.sessionID ?? "",
+            knownWindow: ModelCatalog.contextWindow(for: client.buildModel, choices: modelChoices)
         )
+        if let sessionID = client.sessionID {
+            client.publishWindowRewrite(id: sessionID, measured: contextBreakdown.measuredWindow)
+        }
+    }
+
+    var contextWindowNoteText: String? {
+        guard let note = contextWindowNote, note.sessionID == client.sessionID else { return nil }
+        return note.message(chinese: language.resolved() == .chinese)
+    }
+
+    func dismissContextWindowNote() {
+        contextWindowNote = nil
+    }
+
+    private func showContextWindowRewrite(sessionID: String, previous: Int, current: Int) {
+        guard let rewrite = ContextWindowRewrite.detect(sessionID: sessionID, previous: previous, current: current) else { return }
+        client.clearWindowBaseline(sessionID)
+        guard explainedContextRewrites.insert(rewrite.key).inserted else { return }
+        var stored = UserDefaults.standard.stringArray(forKey: Self.explainedContextRewritesKey) ?? []
+        if !stored.contains(rewrite.key) {
+            stored.append(rewrite.key)
+            if stored.count > 200 {
+                stored.removeFirst(stored.count - 200)
+            }
+            UserDefaults.standard.set(stored, forKey: Self.explainedContextRewritesKey)
+        }
+        contextWindowNote = rewrite
     }
 
     var findHits: [ChatSearchHit] {
@@ -977,6 +1279,7 @@ final class AppModel: ObservableObject {
     }
 
     func open(_ record: SessionRecord) {
+        clearUnseen(record.id)
         destination = .build
         isPrivateChat = false
         firstRunReason = nil
@@ -1013,6 +1316,7 @@ final class AppModel: ObservableObject {
     func delete(_ record: SessionRecord) {
         try? sessionIndex.delete(record)
         client.dropWorkspace(record.id)
+        clearUnseen(record.id)
         refreshSessions()
     }
 
@@ -2129,9 +2433,12 @@ final class AppModel: ObservableObject {
 
     func presentContextReport() {
         refreshWorkspace()
-        let used = workspace.contextUsed
-        let window = workspace.contextWindow
+        let used = displayedContextUsed
+        let window = displayedContextWindow
         let free = max(window - used, 0)
+        let context = window > 0
+            ? "context: \(displayedContextPercent)% (\(used)/\(window), free \(free))"
+            : "context: \(used) used"
         let todos = client.todos
         let done = todos.filter { $0.status == "completed" }.count
         cliReportTitle = "/context"
@@ -2144,7 +2451,7 @@ final class AppModel: ObservableObject {
             "auth: \(client.authPresence.isReady ? "signed in" : "unsigned")",
             "turns: \(client.items.filter { if case .user = $0 { return true }; return false }.count)",
             "messages: \(client.items.count)",
-            "context: \(workspace.contextPercent)% (\(used)/\(window), free \(free))",
+            context,
             "todos: \(done)/\(todos.count)",
             "tasks: \(client.tasks.filter(\.isRunning).count)/\(client.tasks.count)",
             "subagents: \(client.subagents.filter(\.isRunning).count)/\(client.subagents.count)",
@@ -2536,7 +2843,7 @@ final class AppModel: ObservableObject {
 
     func exportDiagnostics() {
         let text = DiagnosticExport.make(
-            version: "0.1.27",
+            version: "0.1.28",
             grokVersion: client.grokVersion,
             state: String(describing: client.state),
             lastError: client.lastError,
@@ -2678,7 +2985,8 @@ final class AppModel: ObservableObject {
 
     func sessionInfoLine() -> String {
         let id = client.sessionID.map { String($0.prefix(8)) } ?? "—"
-        return "\(client.buildModel) · \(client.effort.rawValue) · \(workspace.contextPercent)% · \(id)"
+        let percent = displayedContextWindow > 0 ? "\(displayedContextPercent)%" : "—"
+        return "\(client.buildModel) · \(client.effort.rawValue) · \(percent) · \(id)"
     }
 
     private static func writePasteImage(_ image: NSImage) -> URL? {

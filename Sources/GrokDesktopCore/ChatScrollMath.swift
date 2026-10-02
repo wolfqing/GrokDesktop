@@ -55,3 +55,36 @@ public enum ChatScrollMath {
         oldNearBottom != newNearBottom || oldCanScroll != newCanScroll
     }
 }
+
+public struct TurnRailMark: Equatable, Sendable {
+    public var id: String
+    public var progress: CGFloat
+    public var label: String
+
+    public init(id: String, progress: CGFloat, label: String) {
+        self.id = id
+        self.progress = progress
+        self.label = label
+    }
+}
+
+public enum TurnRail {
+    public static func progress(index: Int, count: Int) -> CGFloat {
+        guard count > 1 else { return 0 }
+        return CGFloat(index) / CGFloat(count - 1)
+    }
+
+    /// The mark at the viewport, or the nearest one above it.
+    public static func activeID(marks: [TurnRailMark], progress: CGFloat) -> String? {
+        marks.last { $0.progress <= progress + 0.012 }?.id ?? marks.first?.id
+    }
+
+    /// Next user turn below the viewport, or the previous one above it.
+    public static func step(marks: [TurnRailMark], progress: CGFloat, forward: Bool) -> String? {
+        let epsilon: CGFloat = 0.012
+        if forward {
+            return marks.first { $0.progress > progress + epsilon }?.id
+        }
+        return marks.last { $0.progress < progress - epsilon }?.id
+    }
+}

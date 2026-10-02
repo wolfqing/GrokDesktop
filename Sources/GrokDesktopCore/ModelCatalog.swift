@@ -5,12 +5,21 @@ public struct ModelChoice: Identifiable, Hashable, Sendable {
     public var name: String
     public var shortTitle: String
     public var detail: String
+    /// Model context window in tokens. 0 means the catalog did not say.
+    public var contextWindow: Int
 
-    public init(id: String, name: String, shortTitle: String, detail: String = "") {
+    public init(
+        id: String,
+        name: String,
+        shortTitle: String,
+        detail: String = "",
+        contextWindow: Int = 0
+    ) {
         self.id = id
         self.name = name
         self.shortTitle = shortTitle
         self.detail = detail
+        self.contextWindow = contextWindow
     }
 }
 
@@ -41,7 +50,8 @@ public enum ModelCatalog {
                     id: id,
                     name: name,
                     shortTitle: shortTitle(id: id, name: name),
-                    detail: detail
+                    detail: detail,
+                    contextWindow: wholeNumber(info["context_window"])
                 )
             )
         }
@@ -67,6 +77,12 @@ public enum ModelCatalog {
             return match.name
         }
         return id
+    }
+
+    /// Tokens in this model's context window, from the catalog. 0 if unknown.
+    public static func contextWindow(for id: String, choices: [ModelChoice]) -> Int {
+        let window = choices.first { $0.id == id }?.contextWindow ?? 0
+        return window > 0 ? window : 0
     }
 
     static func rank(_ choices: [ModelChoice]) -> [ModelChoice] {
@@ -119,5 +135,20 @@ public enum ModelCatalog {
         if let value = raw as? Bool { return value }
         if let value = raw as? NSNumber { return value.boolValue }
         return false
+    }
+
+    private static func wholeNumber(_ raw: Any?) -> Int {
+        let number: Double
+        if let value = raw as? Int {
+            number = Double(value)
+        } else if let value = raw as? NSNumber {
+            number = value.doubleValue
+        } else if let value = raw as? String, let parsed = Double(value) {
+            number = parsed
+        } else {
+            return 0
+        }
+        guard number.isFinite, number > 0, number < Double(Int.max) else { return 0 }
+        return Int(number.rounded())
     }
 }

@@ -90,6 +90,16 @@ public final class SessionWorkspace: Identifiable {
         turnStartedAt = nil
     }
 
+    public var latestUserPrompt: String {
+        for item in items.reversed() {
+            if case .user(_, let text) = item {
+                let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { return trimmed }
+            }
+        }
+        return ""
+    }
+
     public var runningTools: Int {
         items.reduce(0) { count, item in
             if case .tool(_, _, let status, _) = item, status == "running" || status == "pending" {

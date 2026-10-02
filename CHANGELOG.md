@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.28 - 2026-10-02
+
+Coming back shows work that still needs you. The conversation can jump between your prompts.
+
+- Opening the app, or bringing it forward, lands on the live list when a session is waiting for an answer, waiting for approval, or finished out of view. A running task alone does not switch pages. A draft or the web chat stays put.
+- A turn that finishes while you are not watching it stays on that list: your prompt, the repo, and how many files changed. Opening the session clears the card. The list is kept on this Mac, up to 12.
+- That finished or failed turn notifies once when the app is in the background. Stop does not notify. The Dock badge counts the same three needs, and each project row shows how many belong to that repo.
+- The box on the live list can choose the repo for the next task. Choosing a repo does not open an empty session.
+- The conversation scrollbar marks each of your prompts. The arrows jump to the previous or next one.
+- The context readout uses the session's own window, then the current model's catalog. When resume shrinks an older window, one note explains that the usage itself did not jump.
+
 ## 0.1.27 - 2026-10-02
 
 The model menu follows the models installed with Grok.
