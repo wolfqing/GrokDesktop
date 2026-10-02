@@ -44,6 +44,10 @@ final class ScrollKnobView: NSView {
     private var hovering = false {
         didSet { needsDisplay = true }
     }
+    private var hoveredMarkID: String? {
+        didSet { if hoveredMarkID != oldValue { needsDisplay = true } }
+    }
+    private var labelFrame: NSRect?
     private var grabOffset: CGFloat = 0
     private var dragProgress: CGFloat = 0
     nonisolated(unsafe) private var monitor: Any?
@@ -83,19 +87,28 @@ final class ScrollKnobView: NSView {
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        guard metrics.canScroll, bounds.contains(point) else { return nil }
-        return self
+        guard metrics.canScroll, let superview else { return nil }
+        let local = convert(point, from: superview)
+        guard bounds.contains(local) else { return nil }
+        if local.x >= bounds.width - 24 { return self }
+        if let labelFrame, labelFrame.insetBy(dx: -6, dy: -4).contains(local) { return self }
+        return nil
     }
 
-    override func mouseEntered(with event: NSEvent) { hovering = true }
+    override func mouseEntered(with event: NSEvent) {
+        guard let local = localPoint(for: event, requireInside: true) else { return }
+        refreshHover(at: local)
+    }
     override func mouseExited(with event: NSEvent) {
-        if !dragging { hovering = false }
-        toolTip = nil
+        clearHover()
+        labelFrame = nil
     }
     override func mouseMoved(with event: NSEvent) {
-        guard let local = localPoint(for: event, requireInside: true) else { return }
-        let tip = tip(at: local)
-        if toolTip != tip { toolTip = tip }
+        guard let local = localPoint(for: event, requireInside: true) else {
+            clearHover()
+            return
+        }
+        refreshHover(at: local)
     }
     override func mouseDown(with event: NSEvent) { _ = consume(event) }
     override func mouseDragged(with event: NSEvent) { _ = consume(event) }
@@ -105,8 +118,6 @@ final class ScrollKnobView: NSView {
         guard metrics.canScroll || dragging else { return }
         let geometry = trackGeometry()
         let progress = dragging ? dragProgress : metrics.progress
-        let active = TurnRail.activeID(marks: marks, progress: progress)
-        drawTicks(in: geometry, active: active)
         let y = geometry.inset + ChatScrollMath.thumbTop(
             progress: progress,
             track: geometry.track,
@@ -116,8 +127,8 @@ final class ScrollKnobView: NSView {
         let rect = NSRect(x: bounds.width - width - 3, y: y, width: width, height: geometry.thumb)
         thumbColor(strong: dragging || hovering).setFill()
         NSBezierPath(roundedRect: rect, xRadius: width / 2, yRadius: width / 2).fill()
-        drawChevron(up: true, enabled: TurnRail.step(marks: marks, progress: progress, forward: false) != nil || progress > 0.02)
-        drawChevron(up: false, enabled: TurnRail.step(marks: marks, progress: progress, forward: true) != nil || progress < 0.98)
+        let shown = cluster(progress: progress)
+        drawTicks(shown, progress: progress)
     }
 
     private func thumbColor(strong: Bool) -> NSColor {
@@ -126,48 +137,98 @@ final class ScrollKnobView: NSView {
             : NSColor.black.withAlphaComponent(strong ? 0.5 : 0.32)
     }
 
-    private func drawTicks(in geometry: (inset: CGFloat, track: CGFloat, thumb: CGFloat), active: String?) {
-        var lastY = -CGFloat.greatestFiniteMagnitude
-        for mark in marks {
-            let y = geometry.inset + mark.progress * geometry.track
-            let on = mark.id == active
-            if !on, y - lastY < 3 { continue }
-            lastY = y
-            let tickWidth: CGFloat = on ? 11 : 7
-            let tickHeight: CGFloat = on ? 2 : 1.5
-            let rect = NSRect(
-                x: bounds.width - tickWidth - 3,
-                y: y - tickHeight / 2,
-                width: tickWidth,
-                height: tickHeight
-            )
-            let alpha: CGFloat = on ? 0.92 : 0.4
+    private struct MarkCluster {
+        var marks: [TurnRailMark]
+        var centers: [CGFloat]
+        var up: CGFloat
+        var down: CGFloat
+    }
+
+    private func cluster(progress: CGFloat) -> MarkCluster {
+        let active = TurnRail.activeID(marks: marks, progress: progress)
+        let activeIndex = marks.firstIndex { $0.id == active } ?? 0
+        let range = TurnRail.visibleIndices(
+            count: marks.count,
+            active: activeIndex,
+            limit: TurnRail.capacity(height: bounds.height)
+        )
+        let shown = Array(marks[range])
+        let centers = TurnRail.centers(count: shown.count, height: bounds.height)
+        let up = (centers.first ?? bounds.height / 2) - TurnRail.pitch
+        let down = (centers.last ?? bounds.height / 2) + TurnRail.pitch
+        return MarkCluster(marks: shown, centers: centers, up: up, down: down)
+    }
+
+    private func drawTicks(_ cluster: MarkCluster, progress: CGFloat) {
+        labelFrame = nil
+        guard !cluster.marks.isEmpty else { return }
+        let active = TurnRail.activeID(marks: marks, progress: progress)
+        let right: CGFloat = bounds.width - 12
+        var hovered: (TurnRailMark, CGFloat)?
+        for (mark, y) in zip(cluster.marks, cluster.centers) {
+            let emphasized = mark.id == active || mark.id == hoveredMarkID
+            if mark.id == hoveredMarkID { hovered = (mark, y) }
+            let tickWidth: CGFloat = emphasized ? 16 : 8
+            let tickHeight: CGFloat = emphasized ? 2 : 1
+            let rect = NSRect(x: right - tickWidth, y: y - tickHeight / 2, width: tickWidth, height: tickHeight)
+            let alpha: CGFloat = mark.id == hoveredMarkID ? 1 : (mark.id == active ? 0.92 : 0.38)
             let color = isDark
                 ? NSColor.white.withAlphaComponent(alpha)
-                : NSColor.black.withAlphaComponent(on ? 0.72 : 0.28)
+                : NSColor.black.withAlphaComponent(emphasized ? 0.78 : 0.28)
             color.setFill()
             NSBezierPath(roundedRect: rect, xRadius: 1, yRadius: 1).fill()
         }
+        drawChevron(up: true, at: cluster.up, enabled: TurnRail.step(marks: marks, progress: progress, forward: false) != nil)
+        drawChevron(up: false, at: cluster.down, enabled: TurnRail.step(marks: marks, progress: progress, forward: true) != nil)
+        if let hovered {
+            drawLabel(hovered.0.label, tickY: hovered.1, tickLeft: right - 16)
+        }
     }
 
-    private func drawChevron(up: Bool, enabled: Bool) {
-        let alpha: CGFloat = enabled ? 0.78 : 0.22
+    private func drawLabel(_ text: String, tickY: CGFloat, tickLeft: CGFloat) {
+        let style = NSMutableParagraphStyle()
+        style.lineBreakMode = .byTruncatingTail
+        let color = isDark
+            ? NSColor.white.withAlphaComponent(0.92)
+            : NSColor.black.withAlphaComponent(0.86)
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 11),
+            .foregroundColor: color,
+            .paragraphStyle: style
+        ]
+        let measured = (text as NSString).size(withAttributes: attributes)
+        let width = min(max(measured.width + 16, 36), 200)
+        let height: CGFloat = 22
+        var rect = NSRect(x: tickLeft - 8 - width, y: tickY - height / 2, width: width, height: height)
+        if rect.minX < 4 { rect.origin.x = 4 }
+        labelFrame = rect
+        let fill = isDark
+            ? NSColor(calibratedWhite: 0.16, alpha: 0.96)
+            : NSColor(calibratedWhite: 0.97, alpha: 0.96)
+        fill.setFill()
+        NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6).fill()
+        let stroke = isDark
+            ? NSColor.white.withAlphaComponent(0.16)
+            : NSColor.black.withAlphaComponent(0.1)
+        stroke.setStroke()
+        NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6).stroke()
+        (text as NSString).draw(in: rect.insetBy(dx: 8, dy: 3), withAttributes: attributes)
+    }
+
+    private func drawChevron(up: Bool, at centerY: CGFloat, enabled: Bool) {
+        guard centerY > 6, centerY < bounds.height - 6 else { return }
+        let alpha: CGFloat = enabled ? 0.78 : 0.34
         let color = isDark
             ? NSColor.white.withAlphaComponent(alpha)
-            : NSColor.black.withAlphaComponent(enabled ? 0.62 : 0.2)
+            : NSColor.black.withAlphaComponent(enabled ? 0.62 : 0.22)
         color.setFill()
-        let midX = bounds.width - 8
-        let tipY: CGFloat = up ? 5 : bounds.height - 5
+        let midX = bounds.width - 16
+        let tipY = up ? centerY - 2.5 : centerY + 2.5
+        let baseY = up ? centerY + 2.5 : centerY - 2.5
         let path = NSBezierPath()
-        if up {
-            path.move(to: NSPoint(x: midX, y: tipY))
-            path.line(to: NSPoint(x: midX - 3.5, y: tipY + 4.5))
-            path.line(to: NSPoint(x: midX + 3.5, y: tipY + 4.5))
-        } else {
-            path.move(to: NSPoint(x: midX, y: tipY))
-            path.line(to: NSPoint(x: midX - 3.5, y: tipY - 4.5))
-            path.line(to: NSPoint(x: midX + 3.5, y: tipY - 4.5))
-        }
+        path.move(to: NSPoint(x: midX, y: tipY))
+        path.line(to: NSPoint(x: midX - 3.5, y: baseY))
+        path.line(to: NSPoint(x: midX + 3.5, y: baseY))
         path.close()
         path.fill()
     }
@@ -193,7 +254,7 @@ final class ScrollKnobView: NSView {
         guard window != nil, metrics.canScroll || dragging else { return false }
         switch event.type {
         case .leftMouseDown:
-            guard let local = localPoint(for: event, requireInside: true) else { return false }
+            guard let local = localPoint(for: event, requireInside: true), hitsRail(local) else { return false }
             if activate(at: local) { return true }
             beginDrag(at: local)
             return true
@@ -243,18 +304,24 @@ final class ScrollKnobView: NSView {
         dragging ? dragProgress : metrics.progress
     }
 
-    /// Chevrons and turn ticks jump. The rest of the rail still drags.
+    /// Chevrons and prompt ticks jump. The thumb still drags.
     private func activate(at point: NSPoint) -> Bool {
+        guard hitsRail(point) else { return false }
+        if labelContains(point), let id = hoveredMarkID {
+            onMark(id)
+            return true
+        }
+        guard point.x >= bounds.width - 28 else { return false }
         let progress = currentProgress()
-        if point.y < 16 {
+        let shown = cluster(progress: progress)
+        guard !shown.marks.isEmpty else { return false }
+        if abs(point.y - shown.up) <= 7 {
             if let id = TurnRail.step(marks: marks, progress: progress, forward: false) {
                 onMark(id)
-            } else if marks.isEmpty, progress > 0.02 {
-                page(forward: false)
             }
             return true
         }
-        if point.y > bounds.height - 16 {
+        if abs(point.y - shown.down) <= 7 {
             if let id = TurnRail.step(marks: marks, progress: progress, forward: true) {
                 onMark(id)
             } else if progress < 0.98 {
@@ -263,7 +330,7 @@ final class ScrollKnobView: NSView {
             return true
         }
         if thumbContains(point) { return false }
-        if let mark = markHit(point) {
+        if let mark = mark(at: point, cluster: shown) {
             onMark(mark.id)
             return true
         }
@@ -281,20 +348,43 @@ final class ScrollKnobView: NSView {
         return rect.contains(point)
     }
 
-    private func page(forward: Bool) {
-        let portion = min(max(metrics.visible / max(metrics.content, 1), 0.08), 0.9)
-        let next = min(max(currentProgress() + (forward ? portion : -portion), 0), 1)
-        onSeek(next)
-        onEnded(next)
+    /// The overlay is wide enough for the hover label. Only the gutter and that label take clicks.
+    private func hitsRail(_ point: NSPoint) -> Bool {
+        if point.x >= bounds.width - 28 { return true }
+        return labelContains(point)
     }
 
-    private func markHit(_ point: NSPoint) -> TurnRailMark? {
-        let geometry = trackGeometry()
+    private func labelContains(_ point: NSPoint) -> Bool {
+        guard let labelFrame else { return false }
+        return labelFrame.insetBy(dx: -6, dy: -4).contains(point)
+    }
+
+    private func refreshHover(at local: NSPoint) {
+        let onRail = local.x >= bounds.width - 28
+        if !dragging { hovering = onRail }
+        guard onRail || labelContains(local) else {
+            if hoveredMarkID != nil { hoveredMarkID = nil }
+            if toolTip != nil { toolTip = nil }
+            return
+        }
+        if labelContains(local) { return }
+        let shown = cluster(progress: currentProgress())
+        hoveredMarkID = mark(at: local, cluster: shown)?.id
+        let tip = tip(at: local, cluster: shown)
+        if toolTip != tip { toolTip = tip }
+    }
+
+    private func clearHover() {
+        if !dragging { hovering = false }
+        if hoveredMarkID != nil { hoveredMarkID = nil }
+        if toolTip != nil { toolTip = nil }
+    }
+
+    private func mark(at point: NSPoint, cluster: MarkCluster) -> TurnRailMark? {
         var best: (TurnRailMark, CGFloat)?
-        for mark in marks {
-            let y = geometry.inset + mark.progress * geometry.track
+        for (mark, y) in zip(cluster.marks, cluster.centers) {
             let distance = abs(point.y - y)
-            guard distance <= 6 else { continue }
+            guard distance <= TurnRail.pitch / 2 + 2 else { continue }
             if best == nil || distance < best!.1 {
                 best = (mark, distance)
             }
@@ -302,10 +392,11 @@ final class ScrollKnobView: NSView {
         return best?.0
     }
 
-    private func tip(at point: NSPoint) -> String? {
-        if point.y < 16 { return previousLabel.isEmpty ? nil : previousLabel }
-        if point.y > bounds.height - 16 { return nextLabel.isEmpty ? nil : nextLabel }
-        return markHit(point)?.label
+    private func tip(at point: NSPoint, cluster: MarkCluster) -> String? {
+        if mark(at: point, cluster: cluster) != nil { return nil }
+        if abs(point.y - cluster.up) <= 7 { return previousLabel.isEmpty ? nil : previousLabel }
+        if abs(point.y - cluster.down) <= 7 { return nextLabel.isEmpty ? nil : nextLabel }
+        return nil
     }
 
     private func beginDrag(at point: NSPoint) {

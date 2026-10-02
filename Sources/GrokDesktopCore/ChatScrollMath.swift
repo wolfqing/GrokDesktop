@@ -69,9 +69,44 @@ public struct TurnRailMark: Equatable, Sendable {
 }
 
 public enum TurnRail {
+    /// Fixed gap between prompt ticks, in points. The cluster stays centered at this pitch
+    /// instead of stretching each prompt along the scrollbar.
+    public static let pitch: CGFloat = 16
+
     public static func progress(index: Int, count: Int) -> CGFloat {
         guard count > 1 else { return 0 }
         return CGFloat(index) / CGFloat(count - 1)
+    }
+
+    /// How many ticks fit in a short band in the middle of `height`.
+    public static func capacity(height: CGFloat, pitch: CGFloat = TurnRail.pitch) -> Int {
+        let band = min(max(height - 36, pitch), 220)
+        return max(Int((band / pitch).rounded(.down)) + 1, 1)
+    }
+
+    /// Ticks around the current prompt. A short chat shows every prompt.
+    public static func visibleIndices(count: Int, active: Int, limit: Int) -> Range<Int> {
+        guard count > 0, limit > 0 else { return 0..<0 }
+        if count <= limit { return 0..<count }
+        let current = min(max(active, 0), count - 1)
+        var start = current - (limit - 1) / 2
+        var end = start + limit
+        if start < 0 {
+            start = 0
+            end = limit
+        } else if end > count {
+            end = count
+            start = count - limit
+        }
+        return start..<end
+    }
+
+    /// Fixed-pitch centers. The group sits in the middle of `height`.
+    public static func centers(count: Int, height: CGFloat, pitch: CGFloat = TurnRail.pitch) -> [CGFloat] {
+        guard count > 0 else { return [] }
+        let span = pitch * CGFloat(count - 1)
+        let origin = (height - span) / 2
+        return (0..<count).map { origin + CGFloat($0) * pitch }
     }
 
     /// The mark at the viewport, or the nearest one above it.

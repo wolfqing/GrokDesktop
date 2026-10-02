@@ -811,7 +811,7 @@ struct ChatView: View {
                 jumpToLatest(proxy)
             }
         )
-        .frame(width: 20)
+        .frame(width: 240)
         .padding(.vertical, 4)
     }
 
