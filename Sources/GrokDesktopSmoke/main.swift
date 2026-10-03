@@ -1629,6 +1629,15 @@ expect(TurnRail.visibleIndices(count: 20, active: 0, limit: 5) == 0..<5, "window
 expect(TurnRail.visibleIndices(count: 20, active: 19, limit: 5) == 15..<20, "window ends at the last prompt")
 expect(TurnRail.visibleIndices(count: 20, active: 10, limit: 5) == 8..<13, "window stays around the current prompt")
 expect(TurnRail.capacity(height: 800) == 14, "a long chat keeps a short center cluster")
+let railPinnedMarks = [
+    TurnRailMark(id: "p0", progress: 0, label: "a"),
+    TurnRailMark(id: "p1", progress: 0.34, label: "b"),
+    TurnRailMark(id: "p2", progress: 0.69, label: "c")
+]
+let railPinned = TurnRail.markSpace(scrollProgress: 3400.0 / 9200.0, content: 10000, visible: 800)
+expect(abs(railPinned - 0.34) < 0.0001, "a prompt pinned to the top stays on the prompt scale")
+expect(TurnRail.step(marks: railPinnedMarks, progress: railPinned, forward: false) == "p0", "up leaves the prompt already at the top")
+expect(TurnRail.step(marks: railPinnedMarks, progress: 3400.0 / 9200.0, forward: false) == "p1", "raw scroll progress sticks on the current prompt")
 
 let quiet = UnseenTurn(id: "s", cwd: "/tmp/Alpha", prompt: "hi", failed: false, finishedAt: Date(timeIntervalSince1970: 1))
 expect(quiet.resultLine(chinese: true) == "Alpha · 没有改文件", "no diff line")

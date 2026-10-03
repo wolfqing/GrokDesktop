@@ -127,8 +127,9 @@ final class ScrollKnobView: NSView {
         let rect = NSRect(x: bounds.width - width - 3, y: y, width: width, height: geometry.thumb)
         thumbColor(strong: dragging || hovering).setFill()
         NSBezierPath(roundedRect: rect, xRadius: width / 2, yRadius: width / 2).fill()
-        let shown = cluster(progress: progress)
-        drawTicks(shown, progress: progress)
+        let prompts = promptProgress(progress)
+        let shown = cluster(progress: prompts)
+        drawTicks(shown, progress: prompts)
     }
 
     private func thumbColor(strong: Bool) -> NSColor {
@@ -304,29 +305,38 @@ final class ScrollKnobView: NSView {
         dragging ? dragProgress : metrics.progress
     }
 
+    /// Prompt marks live on the transcript scale. Scroll progress does not.
+    private func promptProgress(_ scrollProgress: CGFloat) -> CGFloat {
+        TurnRail.markSpace(
+            scrollProgress: scrollProgress,
+            content: metrics.content,
+            visible: metrics.visible
+        )
+    }
+
     /// Chevrons and prompt ticks jump. The thumb still drags.
     private func activate(at point: NSPoint) -> Bool {
         guard hitsRail(point) else { return false }
-        if labelContains(point), let id = hoveredMarkID {
-            onMark(id)
-            return true
-        }
-        guard point.x >= bounds.width - 28 else { return false }
-        let progress = currentProgress()
+        let scroll = currentProgress()
+        let progress = promptProgress(scroll)
         let shown = cluster(progress: progress)
         guard !shown.marks.isEmpty else { return false }
-        if abs(point.y - shown.up) <= 7 {
+        if point.x >= bounds.width - 28, abs(point.y - shown.up) <= 10 {
             if let id = TurnRail.step(marks: marks, progress: progress, forward: false) {
                 onMark(id)
             }
             return true
         }
-        if abs(point.y - shown.down) <= 7 {
+        if point.x >= bounds.width - 28, abs(point.y - shown.down) <= 10 {
             if let id = TurnRail.step(marks: marks, progress: progress, forward: true) {
                 onMark(id)
-            } else if progress < 0.98 {
+            } else if scroll < 0.98 {
                 onLatest()
             }
+            return true
+        }
+        if labelContains(point), let id = hoveredMarkID {
+            onMark(id)
             return true
         }
         if thumbContains(point) { return false }
@@ -368,7 +378,7 @@ final class ScrollKnobView: NSView {
             return
         }
         if labelContains(local) { return }
-        let shown = cluster(progress: currentProgress())
+        let shown = cluster(progress: promptProgress(currentProgress()))
         hoveredMarkID = mark(at: local, cluster: shown)?.id
         let tip = tip(at: local, cluster: shown)
         if toolTip != tip { toolTip = tip }
@@ -393,9 +403,9 @@ final class ScrollKnobView: NSView {
     }
 
     private func tip(at point: NSPoint, cluster: MarkCluster) -> String? {
+        if abs(point.y - cluster.up) <= 10 { return previousLabel.isEmpty ? nil : previousLabel }
+        if abs(point.y - cluster.down) <= 10 { return nextLabel.isEmpty ? nil : nextLabel }
         if mark(at: point, cluster: cluster) != nil { return nil }
-        if abs(point.y - cluster.up) <= 7 { return previousLabel.isEmpty ? nil : previousLabel }
-        if abs(point.y - cluster.down) <= 7 { return nextLabel.isEmpty ? nil : nextLabel }
         return nil
     }
 

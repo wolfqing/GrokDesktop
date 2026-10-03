@@ -109,12 +109,23 @@ public enum TurnRail {
         return (0..<count).map { origin + CGFloat($0) * pitch }
     }
 
+    /// Scroll progress is `offset / (content - visible)`. Prompt marks track `offset / content`.
+    /// A prompt pinned to the top sits past its own mark on the raw scroll scale, so the up arrow
+    /// would jump to the prompt already on screen.
+    public static func markSpace(scrollProgress: CGFloat, content: CGFloat, visible: CGFloat) -> CGFloat {
+        let height = max(content, 1)
+        let travel = max(height - visible, 0)
+        return min(max(scrollProgress, 0), 1) * travel / height
+    }
+
     /// The mark at the viewport, or the nearest one above it.
+    /// `progress` is in mark space (`markSpace`), not raw scroll progress.
     public static func activeID(marks: [TurnRailMark], progress: CGFloat) -> String? {
         marks.last { $0.progress <= progress + 0.012 }?.id ?? marks.first?.id
     }
 
     /// Next user turn below the viewport, or the previous one above it.
+    /// `progress` is in mark space (`markSpace`), not raw scroll progress.
     public static func step(marks: [TurnRailMark], progress: CGFloat, forward: Bool) -> String? {
         let epsilon: CGFloat = 0.012
         if forward {
