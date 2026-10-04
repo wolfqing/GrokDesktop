@@ -1,8 +1,15 @@
 # Changelog
 
-## 0.1.28 - 2026-10-02
+## 0.1.28 - 2026-10-03
 
-Coming back shows work that still needs you. The conversation can jump between your prompts.
+The right sidebar opens a project shell only when you ask for it. Coming back still shows work that needs you, and the conversation can jump between your prompts.
+
+- The terminal stays closed until you turn it on from the … menu. Closing it takes it out of the sidebar.
+- The same menu opens and closes context, tasks, agent commands, changes, hooks, and the aside.
+- While it is open, it starts in the session folder and restarts there when you switch projects. Drag the handle to resize it. Double-click restores the height. Restart starts a fresh shell. Open launches Terminal.app in the same folder.
+- Commands Grok itself is running stay in the Agent commands section.
+- Arrow keys in the terminal no longer recall the composer history.
+- The glasses control is gone. A side question stays in the right sidebar. Training and retention stay in Settings.
 
 - Opening the app, or bringing it forward, lands on the live list when a session is waiting for an answer, waiting for approval, or finished out of view. A running task alone does not switch pages. A draft or the web chat stays put.
 - A turn that finishes while you are not watching it stays on that list: your prompt, the repo, and how many files changed. Opening the session clears the card. The list is kept on this Mac, up to 12.

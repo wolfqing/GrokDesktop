@@ -502,20 +502,10 @@ struct ChatView: View {
     }
 
     private var composerBlock: some View {
-        VStack(spacing: 10) {
-            ComposerView()
-                .frame(maxWidth: 760)
-            if model.isPrivateChat {
-                HStack(spacing: 6) {
-                    Image(systemName: "eyeglasses")
-                    Text(l10n.privateBanner)
-                }
-                .font(.system(size: 12))
-                .foregroundStyle(palette.secondary)
-            }
-        }
-        .padding(.horizontal, 24)
-        .padding(.bottom, 22)
+        ComposerView()
+            .frame(maxWidth: 760)
+            .padding(.horizontal, 24)
+            .padding(.bottom, 22)
     }
 
     @ViewBuilder
@@ -580,20 +570,7 @@ struct ChatView: View {
                 .help(model.contextWindowNoteText ?? l10n.sessionContext)
             }
 
-            Button {
-                model.isPrivateChat.toggle()
-            } label: {
-                Image(systemName: "eyeglasses")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(model.isPrivateChat ? Color.blue : palette.secondary)
-                    .frame(width: 26, height: 26)
-                    .background(
-                        model.isPrivateChat ? palette.selected : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    )
-            }
-            .buttonStyle(.plain)
-            .help(l10n.privateChat)
+            InspectorPanelsMenu()
 
             Button {
                 model.showInspector.toggle()

@@ -55,8 +55,13 @@ struct InspectorView: View {
                 Spacer(minLength: 0)
             }
 
-            Divider().overlay(palette.hairline)
-            steerPanel
+            if model.inspectorPaneVisible(.aside) {
+                Divider().overlay(palette.hairline)
+                steerPanel
+            }
+            if model.inspectorPaneVisible(.shell) {
+                SidebarTerminalPane()
+            }
         }
         .background(palette.sidebar)
         .onAppear {
@@ -82,25 +87,7 @@ struct InspectorView: View {
             Text(l10n.inspector)
                 .font(.system(size: 13, weight: .semibold))
             Spacer(minLength: 4)
-            if !model.hiddenInspectorPaneList.isEmpty {
-                Menu {
-                    ForEach(model.hiddenInspectorPaneList) { pane in
-                        Button(pane.title(chinese: l10n.language == .chinese)) {
-                            model.showInspectorPane(pane)
-                        }
-                    }
-                    Divider()
-                    Button(l10n.t("Show all", "全部显示")) {
-                        model.showAllInspectorPanes()
-                    }
-                } label: {
-                    Text(l10n.t("Sections", "区块"))
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(palette.secondary)
-                }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-            }
+            InspectorPanelsMenu()
             if model.previewedFile != nil {
                 Button {
                     model.inspectorDetailsVisible.toggle()
@@ -304,7 +291,7 @@ struct InspectorView: View {
 
     private var terminalsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            paneHeader(.terminals, title: l10n.t("Terminals", "终端")) { EmptyView() }
+            paneHeader(.terminals, title: l10n.t("Agent commands", "代理命令")) { EmptyView() }
             ForEach(model.client.terminals) { terminal in
                 terminalRow(terminal)
             }
@@ -943,6 +930,36 @@ struct InspectorView: View {
             return String(format: "%.0fk", Double(value) / 1000)
         }
         return "\(value)"
+    }
+}
+
+struct InspectorPanelsMenu: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.palette) private var palette
+    @Environment(\.l10n) private var l10n
+
+    var body: some View {
+        Menu {
+            ForEach(InspectorPane.allCases) { pane in
+                Toggle(
+                    pane.title(chinese: l10n.language == .chinese),
+                    isOn: Binding(
+                        get: { model.inspectorPaneVisible(pane) },
+                        set: { model.setInspectorPane(pane, visible: $0) }
+                    )
+                )
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(palette.secondary)
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(l10n.t("Open or close sidebar tools", "打开或关闭右边栏里的功能"))
     }
 }
 

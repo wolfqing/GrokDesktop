@@ -1,6 +1,13 @@
 import AppKit
 import SwiftUI
 
+@MainActor
+enum ComposerFocus {
+    static func ownsKey() -> Bool {
+        NSApp.keyWindow?.firstResponder is PromptTextView
+    }
+}
+
 struct PromptEditor: View {
     @Binding var text: String
     var placeholder: String

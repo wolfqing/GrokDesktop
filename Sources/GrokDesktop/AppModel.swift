@@ -86,6 +86,8 @@ final class AppModel: ObservableObject {
     @Published var inspectorWidth: CGFloat = GrokTheme.inspectorWidth
     @Published var previewedFile: URL?
     @Published var inspectorDetailsVisible = true
+    @Published var shellHeight: CGFloat = GrokTheme.shellHeight
+    let sidebarShell = SidebarShell()
     @Published var hiddenInspectorPanes: Set<String> = []
     @Published var showSearchField = false
     @Published var showAttachMenu = false
@@ -101,7 +103,6 @@ final class AppModel: ObservableObject {
     @Published var showInAppLogin = false
     @Published var inAppLoginURL: URL?
     @Published var webChatSignedIn = false
-    @Published var isPrivateChat = false
     @Published var settingsSection: SettingsSection = .account
     @Published var firstRunReason: FirstRunReason?
     @Published var account = AccountProfile()
@@ -262,6 +263,7 @@ final class AppModel: ObservableObject {
         self.client = ACPClient(locator: locator)
         restoreInspectorWidth()
         restoreInspectorPanes()
+        restoreShellPane()
         restoreWorkingDirectory()
         restoreProductSurface()
         refreshAll()
@@ -338,6 +340,20 @@ final class AppModel: ObservableObject {
         !hiddenInspectorPanes.contains(pane.rawValue)
     }
 
+    func setInspectorPane(_ pane: InspectorPane, visible: Bool) {
+        if pane == .shell {
+            UserDefaults.standard.set(true, forKey: Self.shellChosenKey)
+        }
+        if visible {
+            showInspector = true
+            hiddenInspectorPanes.remove(pane.rawValue)
+            inspectorDetailsVisible = true
+        } else {
+            hiddenInspectorPanes.insert(pane.rawValue)
+        }
+        persistInspectorPanes()
+    }
+
     func hideInspectorPane(_ pane: InspectorPane) {
         afterHitTest { [weak self] in
             guard let self else { return }
@@ -349,6 +365,7 @@ final class AppModel: ObservableObject {
     func showInspectorPane(_ pane: InspectorPane) {
         afterHitTest { [weak self] in
             guard let self else { return }
+            self.showInspector = true
             self.hiddenInspectorPanes.remove(pane.rawValue)
             self.inspectorDetailsVisible = true
             self.persistInspectorPanes()
@@ -437,7 +454,7 @@ final class AppModel: ObservableObject {
         lastBuildDestination = .build
         showInspector = true
         inspectorDetailsVisible = true
-        hiddenInspectorPanes = []
+        hiddenInspectorPanes = InspectorPane.closedUntilChosen
         previewedFile = nil
         client.applyDemo(
             items: DemoStudio.items,
@@ -467,6 +484,8 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private static let shellChosenKey = "inspectorShellChosen"
+
     private func persistInspectorPanes() {
         UserDefaults.standard.set(Array(hiddenInspectorPanes), forKey: "hiddenInspectorPanes")
     }
@@ -474,6 +493,23 @@ final class AppModel: ObservableObject {
     private func restoreInspectorPanes() {
         if let stored = UserDefaults.standard.array(forKey: "hiddenInspectorPanes") as? [String] {
             hiddenInspectorPanes = Set(stored)
+        }
+        if !UserDefaults.standard.bool(forKey: Self.shellChosenKey) {
+            hiddenInspectorPanes.formUnion(InspectorPane.closedUntilChosen)
+        }
+    }
+
+    func setShellHeight(_ height: CGFloat) {
+        let next = min(max(height, GrokTheme.shellMinHeight), GrokTheme.shellMaxHeight)
+        guard shellHeight != next else { return }
+        shellHeight = next
+        UserDefaults.standard.set(Double(next), forKey: "shellHeight")
+    }
+
+    private func restoreShellPane() {
+        let stored = UserDefaults.standard.double(forKey: "shellHeight")
+        if stored >= Double(GrokTheme.shellMinHeight) {
+            shellHeight = min(CGFloat(stored), GrokTheme.shellMaxHeight)
         }
     }
 
@@ -550,9 +586,7 @@ final class AppModel: ObservableObject {
                 }
                 try await client.send(text: trimmed)
                 pendingDispatches.removeAll { $0.id == pendingID }
-                if !isPrivateChat {
-                    refreshSessions()
-                }
+                refreshSessions()
                 refreshWorkspace()
             } catch {
                 if let index = pendingDispatches.firstIndex(where: { $0.id == pendingID }) {
@@ -1281,7 +1315,6 @@ final class AppModel: ObservableObject {
     func open(_ record: SessionRecord) {
         clearUnseen(record.id)
         destination = .build
-        isPrivateChat = false
         firstRunReason = nil
         sidebarNotice = nil
         expandHistoryFolder(path: record.cwd)
@@ -1482,9 +1515,7 @@ final class AppModel: ObservableObject {
         Task {
             do {
                 try await client.send(text: text, kind: aside ? .aside : .followUp)
-                if !isPrivateChat {
-                    refreshSessions()
-                }
+                refreshSessions()
                 refreshWorkspace()
                 refreshWorkflowRuns()
             } catch {
@@ -1502,9 +1533,7 @@ final class AppModel: ObservableObject {
         Task {
             do {
                 try await client.send(text: trimmed, kind: SessionFold.isAside(trimmed) ? .aside : .followUp)
-                if !isPrivateChat {
-                    refreshSessions()
-                }
+                refreshSessions()
                 refreshWorkspace()
             } catch {
                 present(error)
@@ -1569,9 +1598,7 @@ final class AppModel: ObservableObject {
         Task {
             do {
                 try await client.sendNow(text: text)
-                if !isPrivateChat {
-                    refreshSessions()
-                }
+                refreshSessions()
                 refreshWorkspace()
             } catch {
                 present(error)
@@ -1595,9 +1622,7 @@ final class AppModel: ObservableObject {
         Task {
             do {
                 try await client.sendNow(id: id)
-                if !isPrivateChat {
-                    refreshSessions()
-                }
+                refreshSessions()
                 refreshWorkspace()
             } catch {
                 present(error)
@@ -2369,6 +2394,7 @@ final class AppModel: ObservableObject {
 
     func handleComposerKey(keyCode: UInt16, modifierFlags: UInt) -> Bool {
         guard destination == .build else { return false }
+        guard ComposerFocus.ownsKey() else { return false }
         if showSettings || showAbout || showResumePicker || showPromptHistory || showCLIReport
             || showDocsPicker || showFeedbackSheet || showShortcuts || showClaudeImport || showAddWorkflow || showAddMCP
             || showInAppLogin {

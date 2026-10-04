@@ -69,16 +69,23 @@ enum InspectorPane: String, CaseIterable, Identifiable {
     case terminals
     case changes
     case hooks
+    case aside
+    case shell
 
     var id: String { rawValue }
+
+    /// The shell stays closed until someone turns it on. It is not part of the rail by default.
+    static let closedUntilChosen: Set<String> = [InspectorPane.shell.rawValue]
 
     func title(chinese: Bool) -> String {
         switch self {
         case .context: return chinese ? "上下文" : "Context"
         case .work: return chinese ? "任务" : "Tasks"
-        case .terminals: return chinese ? "终端" : "Terminals"
+        case .terminals: return chinese ? "代理命令" : "Agent commands"
         case .changes: return chinese ? "变更" : "Changes"
         case .hooks: return chinese ? "钩子" : "Hooks"
+        case .aside: return chinese ? "顺便问" : "Aside"
+        case .shell: return chinese ? "终端" : "Terminal"
         }
     }
 }
@@ -88,6 +95,9 @@ enum GrokTheme {
     static let sidebarWidth: CGFloat = 260
     static let collapsedSidebarWidth: CGFloat = 64
     static let inspectorWidth: CGFloat = 320
+    static let shellHeight: CGFloat = 220
+    static let shellMinHeight: CGFloat = 140
+    static let shellMaxHeight: CGFloat = 520
     static let inspectorMinWidth: CGFloat = 240
     static let inspectorMaxWidth: CGFloat = 720
     static let inspectorPreviewWidth: CGFloat = 420
