@@ -13,6 +13,23 @@ public struct PlanEntry: Hashable, Identifiable, Sendable {
     }
 }
 
+public enum PlanSurface {
+    /// The plan stays beside the session after approve until a later plan replaces it.
+    public static func keepsBody(entryCount: Int, markdown: String) -> Bool {
+        entryCount > 0 || !markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Approve, revise, and quit stay only while the session is still in plan mode.
+    public static func showsApprove(modeIsPlan: Bool) -> Bool {
+        modeIsPlan
+    }
+
+    /// Todos occupy the checklist. The plan is listed again so it does not disappear.
+    public static func listsPlanBesideTodos(todoCount: Int, entryCount: Int) -> Bool {
+        todoCount > 0 && entryCount > 0
+    }
+}
+
 public struct FileHunk: Hashable, Identifiable, Sendable {
     public var id: String
     public var path: String

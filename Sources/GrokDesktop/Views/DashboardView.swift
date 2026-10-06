@@ -152,7 +152,7 @@ struct DashboardView: View {
                     : l10n.t("Didn't start", "没发出去")
             )
             promptLine(pending.text)
-            repoLine(pending.cwdName, path: pending.cwd)
+            repoLine(placeLine(folder: pending.cwdName, isolated: pending.isolated), path: pending.cwd)
             if let error = pending.error {
                 Text(error)
                     .font(.system(size: 12))
@@ -183,7 +183,10 @@ struct DashboardView: View {
                         trailing: workspace.mode.title(chinese: model.language.resolved() == .chinese)
                     )
                     promptLine(headline(workspace))
-                    repoLine(workspace.cwd.lastPathComponent, path: workspace.cwd.path)
+                    repoLine(
+                        placeLine(folder: workspace.cwd.lastPathComponent, isolated: workspace.isolatedCopy),
+                        path: workspace.cwd.path
+                    )
                     if !workspace.subagents.isEmpty {
                         Text("\(workspace.subagents.filter(\.isRunning).count)/\(workspace.subagents.count) \(l10n.subagents)")
                             .font(.system(size: 11))
@@ -218,29 +221,47 @@ struct DashboardView: View {
     }
 
     private func unseenCard(_ turn: UnseenTurn) -> some View {
-        Button {
-            model.openDashboardItem(turn.id)
-        } label: {
-            VStack(alignment: .leading, spacing: 10) {
-                statusLine(
-                    active: false,
-                    symbol: turn.failed ? "exclamationmark.circle" : "checkmark.circle",
-                    tint: turn.failed ? .orange : palette.secondary,
-                    title: turn.failed
-                        ? l10n.t("Failed, not opened", "出错了，还没看")
-                        : l10n.t("Finished, not opened", "跑完了，还没看")
-                )
-                promptLine(turn.prompt.isEmpty ? turn.cwdName : turn.prompt)
-                repoLine(
-                    turn.resultLine(chinese: model.language.resolved() == .chinese),
-                    path: turn.cwd
+        VStack(alignment: .leading, spacing: 10) {
+            Button {
+                model.openDashboardItem(turn.id)
+            } label: {
+                VStack(alignment: .leading, spacing: 10) {
+                    statusLine(
+                        active: false,
+                        symbol: turn.failed ? "exclamationmark.circle" : "checkmark.circle",
+                        tint: turn.failed ? .orange : palette.secondary,
+                        title: turn.failed
+                            ? l10n.t("Failed, not opened", "出错了，还没看")
+                            : l10n.t("Finished, not opened", "跑完了，还没看")
+                    )
+                    promptLine(turn.prompt.isEmpty ? turn.cwdName : turn.prompt)
+                    repoLine(
+                        turn.cardLine(chinese: model.language.resolved() == .chinese),
+                        path: turn.cwd
+                    )
+                }
+            }
+            .buttonStyle(.plain)
+            ForEach(model.unseenHunks[turn.id] ?? []) { hunk in
+                ChangeNoteField(
+                    sessionID: turn.id,
+                    path: hunk.path,
+                    excerpt: DiffNote.countLine(added: hunk.added, removed: hunk.removed),
+                    asDiff: false
                 )
             }
         }
-        .buttonStyle(.plain)
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(palette.chip, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private func placeLine(folder: String, isolated: Bool) -> String {
+        DispatchIsolation.line(
+            folder: folder,
+            place: isolated ? .isolatedCopy : .currentDirectory,
+            chinese: model.language.resolved() == .chinese
+        )
     }
 
     private func statusLine(

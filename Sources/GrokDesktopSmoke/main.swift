@@ -1412,6 +1412,7 @@ SessionFold.apply(
 )
 expect(harnessSnap.hookEvents.first?.blocked == true, "fold hook execution")
 expect(harnessSnap.checkpoints.first?.tokensBefore == 8000, "fold compaction checkpoint")
+expect(harnessSnap.checkpoints.first?.promptIndex == nil, "a checkpoint without an index does not invent one")
 expect(harnessSnap.scheduledTasks.first?.id == "loop-1", "fold scheduled task")
 SessionFold.apply(SessionUpdate(kind: .scheduledTaskDeleted, raw: ["task_id": "loop-1"]), onto: &harnessSnap)
 expect(harnessSnap.scheduledTasks.isEmpty, "fold scheduled delete")
@@ -1667,6 +1668,74 @@ guard let legacyTurn = try? legacyDecoder.decode(UnseenTurn.self, from: Data(leg
     fail("older unseen records should decode")
 }
 expect(legacyTurn.changedFiles == 0, "older unseen records have no file count")
+expect(legacyTurn.isolated == false, "older unseen records stay in the current directory")
+expect(quiet.cardLine(chinese: true) == "Alpha · 当前目录 · 没有改文件", "finished card names the current directory")
+let isolatedUnseen = UnseenTurn(
+    id: "s",
+    cwd: "/tmp/Alpha",
+    prompt: "hi",
+    failed: false,
+    finishedAt: Date(timeIntervalSince1970: 1),
+    changedFiles: 3,
+    isolated: true
+)
+expect(isolatedUnseen.cardLine(chinese: true) == "Alpha · 独立副本 · 3 个文件", "finished card names the copy")
+expect(isolatedUnseen.resultLine(chinese: true) == "Alpha · 3 个文件", "file count stays on its own")
+
+let diffNotePrompt = DiffNote.prompt(path: "App.swift", excerpt: "+let x = 1", note: "这里换一种写法", asDiff: true)
+expect(diffNotePrompt.contains("这里换一种写法"), "note keeps the comment")
+expect(diffNotePrompt.contains("App.swift"), "note names the file")
+expect(diffNotePrompt.contains("+let x = 1"), "note includes the hunk")
+expect(DiffNote.prompt(path: "A", excerpt: "+", note: "  ", asDiff: true).isEmpty, "blank note is not sent")
+let diffNoteFile = DiffFile(path: "App.swift", lines: [
+    DiffLine(kind: .meta, text: "diff --git a/App.swift b/App.swift"),
+    DiffLine(kind: .added, text: "+let x = 1")
+])
+expect(DiffNote.excerpt(from: diffNoteFile) == "+let x = 1", "excerpt skips diff metadata")
+
+expect(DispatchIsolation.choose(occupied: true, canIsolate: true) == .isolatedCopy, "a second task on a busy repo gets a copy")
+expect(DispatchIsolation.choose(occupied: false, canIsolate: true) == .currentDirectory, "a free repo stays in place")
+expect(DispatchIsolation.choose(occupied: true, canIsolate: false) == .currentDirectory, "a folder that cannot isolate stays in place")
+expect(DispatchIsolation.line(folder: "Alpha", place: .isolatedCopy, chinese: true) == "Alpha · 独立副本", "copy label")
+expect(DispatchIsolation.line(folder: "Alpha", place: .currentDirectory, chinese: false) == "Alpha · Current directory", "current label")
+let resolveFixture = URL(fileURLWithPath: "/Users/qingmacbookpro/Projects/grokdesktop-resolve-fixture", isDirectory: true)
+let expectedCommon = resolveFixture.appendingPathComponent(".git").standardizedFileURL.path
+expect(WorktreeCatalog.resolveGitPath(".git", cwd: resolveFixture) == expectedCommon, "relative common dir stays with the repo")
+expect(WorktreeCatalog.resolveGitPath(expectedCommon, cwd: resolveFixture) == expectedCommon, "absolute common dir is shared by worktrees")
+let resolveSibling = URL(fileURLWithPath: "/Users/qingmacbookpro/Projects/other-checkout", isDirectory: true)
+expect(
+    WorktreeCatalog.resolveGitPath("../grokdesktop-resolve-fixture/.git", cwd: resolveSibling) == expectedCommon,
+    "worktree common dir resolves against the checkout"
+)
+
+expect(PlanSurface.keepsBody(entryCount: 1, markdown: ""), "plan entries stay after approve")
+expect(!PlanSurface.keepsBody(entryCount: 0, markdown: "  "), "an empty plan does not stay")
+expect(PlanSurface.keepsBody(entryCount: 0, markdown: "# plan"), "plan markdown stays")
+expect(PlanSurface.showsApprove(modeIsPlan: true), "approve stays in plan mode")
+expect(!PlanSurface.showsApprove(modeIsPlan: false), "approve leaves with plan mode")
+expect(PlanSurface.listsPlanBesideTodos(todoCount: 2, entryCount: 1), "todos do not hide the plan")
+expect(!PlanSurface.listsPlanBesideTodos(todoCount: 0, entryCount: 1), "the plan list is the checklist when there are no todos")
+
+let liveCheckpoint = HarnessEvents.checkpoint(from: SessionUpdate(
+    kind: .compactionCheckpoint,
+    raw: ["checkpoint_id": "cp-live", "prompt_index_at_compaction": 4, "tokens_before": 10, "tokens_after": 2]
+))
+expect(liveCheckpoint.promptIndex == 4 && liveCheckpoint.id == "cp-live", "live checkpoint keeps the prompt index")
+let bareCheckpoint = HarnessEvents.checkpoint(from: SessionUpdate(
+    kind: .compactionCheckpoint,
+    raw: ["id": "cp-bare", "tokens_before": 3, "tokens_after": 1]
+))
+expect(bareCheckpoint.promptIndex == nil, "live checkpoint without an index does not invent one")
+let checkpointDirRoot = FileManager.default.temporaryDirectory.appendingPathComponent("gd-cp-\(UUID().uuidString)", isDirectory: true)
+let checkpointFiles = checkpointDirRoot.appendingPathComponent("compaction_checkpoints", isDirectory: true)
+try! FileManager.default.createDirectory(at: checkpointFiles, withIntermediateDirectories: true)
+try! #"{"checkpoint_id":"cp-real","prompt_index_at_compaction":7,"compacted_history":[{"type":"system","content":"secret"}]}"#
+    .write(to: checkpointFiles.appendingPathComponent("cp-real.json"), atomically: true, encoding: .utf8)
+let loadedCheckpoint = HarnessEvents.loadCheckpoints(sessionDirectory: checkpointDirRoot)
+expect(loadedCheckpoint.first?.promptIndex == 7, "checkpoint file keeps the prompt index")
+expect(loadedCheckpoint.first?.id == "cp-real", "checkpoint file uses checkpoint_id")
+expect(loadedCheckpoint.first?.recap.isEmpty == true, "checkpoint file does not dump history")
+try? FileManager.default.removeItem(at: checkpointDirRoot)
 
 let repoNeeds = ["/tmp/Alpha", "/tmp/Alpha/", "/tmp/Beta"]
 expect(RepoAttention.count(path: "/tmp/Alpha", needs: repoNeeds) == 2, "project row counts both needs")

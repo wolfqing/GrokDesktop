@@ -77,7 +77,7 @@ public struct JSONRPCEnvelope: @unchecked Sendable {
     }
 }
 
-public enum ACPError: Error, Equatable, LocalizedError {
+public enum ACPError: Error, Equatable, LocalizedError, Sendable {
     case invalidJSON(String)
     case grokNotFound
     case processExited(Int32)

@@ -37,6 +37,8 @@ public final class SessionWorkspace: Identifiable {
     public var checkpoints: [CompactionCheckpoint] = []
     public var scheduledTasks: [ScheduledTask] = []
     public var stopRequested = false
+    /// This dispatch started in a git worktree because the repo already had live work.
+    public var isolatedCopy = false
 
     public init(id: String, cwd: URL, directory: URL? = nil, title: String = "") {
         self.id = id

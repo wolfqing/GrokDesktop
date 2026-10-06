@@ -424,6 +424,17 @@ struct InspectorView: View {
                                 .foregroundStyle(palette.secondary)
                                 .lineLimit(3)
                         }
+                        if point.promptIndex != nil {
+                            Button(l10n.t("Back to here", "回到这里")) {
+                                model.rewindToCheckpoint(point)
+                            }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Color.orange)
+                            .help(point.promptIndex.map {
+                                l10n.t("Rewind to turn \($0 + 1)", "退回到第 \($0 + 1) 轮")
+                            } ?? "")
+                        }
                     }
                 }
             }
@@ -458,7 +469,7 @@ struct InspectorView: View {
     private var workSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                sectionTitle(model.client.mode == .plan ? l10n.t("Plan", "计划") : l10n.tasks)
+                sectionTitle(planIsChecklist ? l10n.t("Plan", "计划") : l10n.tasks)
                 Spacer()
                 if checklistProgress.total > 0 {
                     Text("\(checklistProgress.done)/\(checklistProgress.total)")
@@ -487,7 +498,7 @@ struct InspectorView: View {
                 }
                 .frame(height: 6)
             }
-            if checklist.isEmpty, model.client.mode == .plan {
+            if model.client.mode == .plan, checklist.isEmpty, !keepsPlan {
                 Text(l10n.t("No plan yet.", "还没有计划。"))
                     .font(.system(size: 12))
                     .foregroundStyle(palette.secondary)
@@ -521,14 +532,34 @@ struct InspectorView: View {
                     }
                 }
             }
-            if model.client.mode == .plan, !extraPlanMarkdown.isEmpty {
+            if PlanSurface.listsPlanBesideTodos(
+                todoCount: model.client.todos.count,
+                entryCount: model.client.planEntries.count
+            ) {
+                Text(l10n.t("Plan", "计划"))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(palette.secondary)
+                    .padding(.top, 4)
+                ForEach(model.client.planEntries) { entry in
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: todoIcon(entry.status))
+                            .font(.system(size: 12))
+                            .foregroundStyle(todoColor(entry.status))
+                            .padding(.top, 2)
+                        Text(entry.content)
+                            .font(.system(size: 12))
+                            .strikethrough(entry.status == "completed" || entry.status == "cancelled")
+                    }
+                }
+            }
+            if !extraPlanMarkdown.isEmpty {
                 Text(extraPlanMarkdown)
                     .font(.system(size: 11))
                     .foregroundStyle(palette.secondary)
                     .textSelection(.enabled)
                     .lineLimit(12)
             }
-            if model.client.mode == .plan {
+            if PlanSurface.showsApprove(modeIsPlan: model.client.mode == .plan) {
                 TextField(l10n.t("Request changes…", "打回意见…"), text: $planNote)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
@@ -729,10 +760,20 @@ struct InspectorView: View {
 
     private var showsWork: Bool {
         !checklist.isEmpty
+            || keepsPlan
             || !liveWorkItems.isEmpty
             || model.client.mode == .plan
             || !model.client.scheduledTasks.isEmpty
             || !finishedSubagents.isEmpty
+    }
+
+    private var keepsPlan: Bool {
+        PlanSurface.keepsBody(entryCount: model.client.planEntries.count, markdown: model.client.planMarkdown)
+    }
+
+    /// The checklist is the plan itself, so the section title stays "Plan" after approve.
+    private var planIsChecklist: Bool {
+        model.client.mode == .plan || (model.client.todos.isEmpty && !model.client.planEntries.isEmpty)
     }
 
     private var showsHooks: Bool {
@@ -794,7 +835,7 @@ struct InspectorView: View {
     private var extraPlanMarkdown: String {
         let text = model.client.planMarkdown.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return "" }
-        let listed = Set(checklist.map { $0.content.lowercased() })
+        let listed = Set((checklist.map(\.content) + model.client.planEntries.map(\.content)).map { $0.lowercased() })
         if listed.contains(where: { text.lowercased().contains($0) }), text.count < 400 {
             return ""
         }
@@ -857,6 +898,12 @@ struct InspectorView: View {
                     .font(.system(size: 11, design: .monospaced))
                     .textSelection(.enabled)
                     .lineLimit(10)
+                ChangeNoteField(
+                    sessionID: model.client.sessionID ?? "",
+                    path: "",
+                    excerpt: String(model.client.gitDiffText.prefix(DiffNote.excerptLimit)),
+                    asDiff: DiffNote.looksLikeDiff(model.client.gitDiffText)
+                )
             }
             if model.client.hunks.isEmpty && scannedDiffs.isEmpty && model.client.gitDiffText.isEmpty {
                 Text(l10n.t("No session diffs yet.", "这一轮还没有 diff。"))
@@ -866,25 +913,33 @@ struct InspectorView: View {
                 ForEach(model.client.hunks) { hunk in
                     let url = ChatLinkDetector.resolve(hunk.path, baseDirectory: model.client.workingDirectory)?.url
                         ?? URL(fileURLWithPath: hunk.path)
-                    Button {
-                        model.previewFile(url)
-                    } label: {
-                        HStack {
-                            Text(hunk.name)
-                                .lineLimit(1)
-                                .underline()
-                            Spacer()
-                            Text("+\(hunk.added)")
-                                .foregroundStyle(.green)
-                            Text("-\(hunk.removed)")
-                                .foregroundStyle(.red)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Button {
+                            model.previewFile(url)
+                        } label: {
+                            HStack {
+                                Text(hunk.name)
+                                    .lineLimit(1)
+                                    .underline()
+                                Spacer()
+                                Text("+\(hunk.added)")
+                                    .foregroundStyle(.green)
+                                Text("-\(hunk.removed)")
+                                    .foregroundStyle(.red)
+                            }
+                            .font(.system(size: 12))
+                            .contentShape(Rectangle())
                         }
-                        .font(.system(size: 12))
-                        .contentShape(Rectangle())
+                        .buttonStyle(.plain)
+                        .help(hunk.path)
+                        .contextMenu { ChatLinkContextButtons(url: url) }
+                        ChangeNoteField(
+                            sessionID: model.client.sessionID ?? "",
+                            path: hunk.path,
+                            excerpt: DiffNote.countLine(added: hunk.added, removed: hunk.removed),
+                            asDiff: false
+                        )
                     }
-                    .buttonStyle(.plain)
-                    .help(hunk.path)
-                    .contextMenu { ChatLinkContextButtons(url: url) }
                 }
             }
         }
@@ -1037,6 +1092,12 @@ private struct DiffFileBlock: View {
                             .foregroundStyle(palette.secondary)
                     }
                 }
+                ChangeNoteField(
+                    sessionID: model.client.sessionID ?? "",
+                    path: file.path,
+                    excerpt: DiffNote.excerpt(from: file),
+                    asDiff: true
+                )
             }
         }
     }
@@ -1056,5 +1117,43 @@ private struct DiffFileBlock: View {
         case .removed: return Color.red.opacity(0.12)
         default: return .clear
         }
+    }
+}
+
+struct ChangeNoteField: View {
+    let sessionID: String
+    let path: String
+    let excerpt: String
+    var asDiff: Bool
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.palette) private var palette
+    @Environment(\.l10n) private var l10n
+    @State private var note = ""
+
+    var body: some View {
+        HStack(spacing: 6) {
+            TextField(l10n.t("Comment on this change…", "对这里写一句…"), text: $note)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12))
+                .onSubmit(send)
+            Button(l10n.t("Send", "发送"), action: send)
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(canSend ? Color.orange : palette.secondary)
+                .disabled(!canSend)
+        }
+        .padding(8)
+        .background(palette.input, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private var canSend: Bool {
+        !sessionID.isEmpty && !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func send() {
+        let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sessionID.isEmpty, !trimmed.isEmpty else { return }
+        note = ""
+        model.commentOnChange(sessionID: sessionID, path: path, excerpt: excerpt, note: trimmed, asDiff: asDiff)
     }
 }

@@ -152,3 +152,47 @@ public enum DiffScan {
         return "diff"
     }
 }
+
+public enum DiffNote {
+    public static let excerptLimit = 1200
+
+    public static func excerpt(from file: DiffFile, limit: Int = DiffNote.excerptLimit) -> String {
+        let body = file.lines
+            .filter { $0.kind != .meta }
+            .map(\.text)
+            .joined(separator: "\n")
+        return String(body.prefix(limit))
+    }
+
+    public static func countLine(added: Int, removed: Int) -> String {
+        "+\(added) -\(removed)"
+    }
+
+    public static func looksLikeDiff(_ text: String) -> Bool {
+        text.contains("diff --git") || text.contains("\n@@") || text.hasPrefix("@@")
+    }
+
+    /// Queued into the session that owns the diff. An empty note produces nothing.
+    public static func prompt(path: String, excerpt: String, note: String, asDiff: Bool) -> String {
+        let comment = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !comment.isEmpty else { return "" }
+        var lines = ["Comment on this change:", comment]
+        let file = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !file.isEmpty {
+            lines.append("")
+            lines.append("File: \(file)")
+        }
+        let body = String(excerpt.trimmingCharacters(in: .whitespacesAndNewlines).prefix(excerptLimit))
+        if !body.isEmpty {
+            lines.append("")
+            if asDiff {
+                lines.append("```diff")
+                lines.append(body)
+                lines.append("```")
+            } else {
+                lines.append(body)
+            }
+        }
+        return lines.joined(separator: "\n")
+    }
+}

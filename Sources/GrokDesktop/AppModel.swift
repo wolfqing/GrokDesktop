@@ -67,6 +67,7 @@ struct PendingDispatch: Identifiable, Equatable {
     var cwd: String
     var sessionID: String?
     var error: String?
+    var isolated = false
 
     var cwdName: String {
         URL(fileURLWithPath: cwd).lastPathComponent
@@ -111,6 +112,7 @@ final class AppModel: ObservableObject {
     @Published var automations: [AutomationRecord] = []
     @Published var namedProjects: [NamedProject] = []
     @Published var unseenTurns: [UnseenTurn] = []
+    @Published var unseenHunks: [String: [FileHunk]] = [:]
     @Published var contextWindowNote: ContextWindowRewrite?
     @Published var pendingDispatches: [PendingDispatch] = []
     @Published var skillsQuery = ""
@@ -574,13 +576,32 @@ final class AppModel: ObservableObject {
         destination = .dashboard
         let cwd = client.workingDirectory
         let pendingID = UUID().uuidString
+        let place = dispatchPlace(for: cwd)
         pendingDispatches.insert(
-            PendingDispatch(id: pendingID, text: trimmed, cwd: cwd.path, sessionID: nil, error: nil),
+            PendingDispatch(
+                id: pendingID,
+                text: trimmed,
+                cwd: cwd.path,
+                sessionID: nil,
+                error: nil,
+                isolated: place == .isolatedCopy
+            ),
             at: 0
         )
+        let slug = "task-" + String(pendingID.replacingOccurrences(of: "-", with: "").prefix(8)).lowercased()
         Task {
             do {
-                try await client.newSession(cwd: cwd)
+                var target = cwd
+                if place == .isolatedCopy {
+                    let created = try await Task.detached {
+                        try WorktreeCatalog.create(named: slug, cwd: cwd)
+                    }.value
+                    target = created
+                    if let index = pendingDispatches.firstIndex(where: { $0.id == pendingID }) {
+                        pendingDispatches[index].cwd = created.path
+                    }
+                }
+                try await client.newSession(cwd: target, isolatedCopy: place == .isolatedCopy)
                 if let index = pendingDispatches.firstIndex(where: { $0.id == pendingID }) {
                     pendingDispatches[index].sessionID = client.sessionID
                 }
@@ -593,6 +614,51 @@ final class AppModel: ObservableObject {
                     pendingDispatches[index].error = error.localizedDescription
                 }
                 present(error)
+            }
+        }
+    }
+
+    /// Live work and in-flight dispatches on this repo count. The new card is not inserted yet.
+    private func dispatchPlace(for cwd: URL) -> DispatchPlace {
+        var keys: [String: String] = [:]
+        func key(for url: URL) -> String? {
+            let path = url.standardizedFileURL.path
+            if let cached = keys[path] { return cached }
+            guard let resolved = WorktreeCatalog.repoKey(cwd: url) else { return nil }
+            keys[path] = resolved
+            return resolved
+        }
+        guard let repo = key(for: cwd) else {
+            return DispatchIsolation.choose(occupied: false, canIsolate: false)
+        }
+        let occupied = client.liveWorkspaces.contains { key(for: $0.cwd) == repo }
+            || pendingDispatches.contains { pending in
+                pending.error == nil && key(for: URL(fileURLWithPath: pending.cwd)) == repo
+            }
+        return DispatchIsolation.choose(occupied: occupied, canIsolate: true)
+    }
+
+    func commentOnChange(sessionID: String, path: String, excerpt: String, note: String, asDiff: Bool) {
+        let text = DiffNote.prompt(path: path, excerpt: excerpt, note: note, asDiff: asDiff)
+        guard !sessionID.isEmpty, !text.isEmpty else { return }
+        Task {
+            do {
+                if client.workspace(id: sessionID) == nil {
+                    guard let record = sessions.first(where: { $0.id == sessionID }) ?? sessionIndex.record(id: sessionID) else {
+                        throw ACPError.rpc("No session")
+                    }
+                    try await client.stageSession(
+                        id: record.id,
+                        cwd: URL(fileURLWithPath: record.cwd),
+                        directory: record.directory
+                    )
+                }
+                guard client.workspace(id: sessionID) != nil else {
+                    throw ACPError.rpc("No session")
+                }
+                try await client.send(text: text, sessionID: sessionID, kind: .followUp)
+            } catch {
+                flash(error.localizedDescription)
             }
         }
     }
@@ -776,6 +842,7 @@ final class AppModel: ObservableObject {
         if unseenTurns.count != loaded.count {
             saveUnseen()
         }
+        loadMissingUnseenHunks()
     }
 
     private func saveUnseen() {
@@ -795,8 +862,10 @@ final class AppModel: ObservableObject {
             prompt: prompt.isEmpty ? workspace.title : String(prompt.prefix(280)),
             failed: workspace.lastError?.isEmpty == false,
             finishedAt: Date(),
-            changedFiles: UnseenTurn.changedFileCount(workspace.hunks)
+            changedFiles: UnseenTurn.changedFileCount(workspace.hunks),
+            isolated: workspace.isolatedCopy
         )
+        unseenHunks[workspace.id] = workspace.hunks
         unseenTurns = UnseenStore.record(unseenTurns, turn: turn)
         saveUnseen()
         syncAttention()
@@ -804,10 +873,35 @@ final class AppModel: ObservableObject {
 
     private func clearUnseen(_ sessionID: String) {
         let next = UnseenStore.clear(unseenTurns, sessionID: sessionID)
+        unseenHunks.removeValue(forKey: sessionID)
         guard next != unseenTurns else { return }
         unseenTurns = next
         saveUnseen()
         syncAttention()
+    }
+
+    private func loadMissingUnseenHunks() {
+        let jobs: [(String, URL)] = unseenTurns.compactMap { turn in
+            if unseenHunks[turn.id] != nil { return nil }
+            guard let record = sessionIndex.record(id: turn.id) ?? sessions.first(where: { $0.id == turn.id }) else {
+                unseenHunks[turn.id] = []
+                return nil
+            }
+            return (turn.id, record.directory)
+        }
+        guard !jobs.isEmpty else { return }
+        Task {
+            let loaded: [String: [FileHunk]] = await Task.detached {
+                var map: [String: [FileHunk]] = [:]
+                for (id, directory) in jobs {
+                    map[id] = TranscriptLoader.loadHunks(sessionDirectory: directory)
+                }
+                return map
+            }.value
+            for (id, hunks) in loaded where unseenTurns.contains(where: { $0.id == id }) {
+                unseenHunks[id] = hunks
+            }
+        }
     }
 
     private func isWatching(_ sessionID: String) -> Bool {
@@ -1969,6 +2063,15 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func rewindToCheckpoint(_ point: CompactionCheckpoint) {
+        guard let index = point.promptIndex else { return }
+        Task {
+            await client.rewind(toPromptIndex: index)
+            refreshSessions()
+            flash(copy.t("Rewound to turn \(index + 1)", "已回退到第 \(index + 1) 轮"))
+        }
+    }
+
     func createUserPersona() {
         do {
             _ = try agentCatalog.createPersona(name: newPersonaName, detail: newPersonaDetail, instructions: newPersonaBody)
@@ -2869,7 +2972,7 @@ final class AppModel: ObservableObject {
 
     func exportDiagnostics() {
         let text = DiagnosticExport.make(
-            version: "0.1.28",
+            version: "0.1.29",
             grokVersion: client.grokVersion,
             state: String(describing: client.state),
             lastError: client.lastError,

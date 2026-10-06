@@ -111,4 +111,63 @@ public enum WorktreeCatalog {
         }
         return dest
     }
+
+    /// Shared git directory for this checkout. Worktrees of one repo return the same key.
+    public static func repoKey(cwd: URL) -> String? {
+        guard canIsolate(cwd: cwd) else { return nil }
+        if let absolute = TimedProcess.git(
+            cwd: cwd,
+            ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+            timeout: 2
+        ) {
+            let resolved = resolveGitPath(absolute, cwd: cwd)
+            if !resolved.isEmpty { return resolved }
+        }
+        guard let raw = TimedProcess.git(cwd: cwd, ["rev-parse", "--git-common-dir"], timeout: 2) else {
+            return nil
+        }
+        let resolved = resolveGitPath(raw, cwd: cwd)
+        return resolved.isEmpty ? nil : resolved
+    }
+
+    public static func canIsolate(cwd: URL) -> Bool {
+        TimedProcess.git(cwd: cwd, ["rev-parse", "--is-inside-work-tree"], timeout: 2) == "true"
+    }
+
+    /// Resolves `git rev-parse --git-common-dir`, which may be relative to the checkout.
+    public static func resolveGitPath(_ raw: String, cwd: URL) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        let url: URL
+        if trimmed.hasPrefix("/") {
+            url = URL(fileURLWithPath: trimmed, isDirectory: true)
+        } else {
+            url = URL(fileURLWithPath: trimmed, isDirectory: true, relativeTo: cwd)
+        }
+        return url.standardizedFileURL.path
+    }
+}
+
+public enum DispatchPlace: Equatable, Sendable {
+    case currentDirectory
+    case isolatedCopy
+
+    public func phrase(chinese: Bool) -> String {
+        switch self {
+        case .isolatedCopy: return chinese ? "独立副本" : "Isolated copy"
+        case .currentDirectory: return chinese ? "当前目录" : "Current directory"
+        }
+    }
+}
+
+public enum DispatchIsolation {
+    /// A second task on a repo that already has live work uses an isolated checkout.
+    /// A repo with no other live task, and any folder git cannot copy, stays put.
+    public static func choose(occupied: Bool, canIsolate: Bool) -> DispatchPlace {
+        occupied && canIsolate ? .isolatedCopy : .currentDirectory
+    }
+
+    public static func line(folder: String, place: DispatchPlace, chinese: Bool) -> String {
+        "\(folder) · \(place.phrase(chinese: chinese))"
+    }
 }

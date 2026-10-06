@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.29 - 2026-10-06
+
+Coming back to a change, you can comment on it, start a second task in its own checkout, and still see the plan.
+
+- Each change in the inspector, and each file on a finished card you have not opened, has a comment field. Sending it continues that session with the file and the diff.
+- A second task on a repo that already has work in progress starts in its own git checkout. The card says whether it is an isolated copy or the current directory. A repo with nothing else running stays where it is.
+- The plan stays beside the session after you approve it, until a later plan replaces it. A compaction checkpoint that remembers a prompt can rewind there.
+
 ## 0.1.28 - 2026-10-03
 
 The right sidebar opens a project shell only when you ask for it. Coming back still shows work that needs you, and the conversation can jump between your prompts.

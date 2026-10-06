@@ -227,7 +227,7 @@ public final class ACPClient: ObservableObject {
                 "protocolVersion": 1,
                 "clientInfo": [
                     "name": "GrokDesktop",
-                    "version": "0.1.28"
+                    "version": "0.1.29"
                 ],
                 "clientCapabilities": [
                     "fs": [
@@ -249,7 +249,7 @@ public final class ACPClient: ObservableObject {
         }
     }
 
-    public func newSession(cwd: URL? = nil) async throws {
+    public func newSession(cwd: URL? = nil, isolatedCopy: Bool = false) async throws {
         let target = cwd ?? pendingWorkingDirectory ?? workingDirectory
         pendingWorkingDirectory = target
         workingDirectory = target
@@ -309,11 +309,34 @@ public final class ACPClient: ObservableObject {
         workspace.stopRequested = false
         workspace.isTurnRunning = false
         workspace.hydratedFromDisk = false
+        workspace.isolatedCopy = isolatedCopy
         rememberLoaded(sessionID)
         lastError = nil
         state = .ready
         syncFromCurrent()
         refreshPlanArtifacts()
+    }
+
+    public func workspace(id: String) -> SessionWorkspace? {
+        workspaceByID[id]
+    }
+
+    /// Puts a saved session on the agent so a follow-up can queue there, without focusing it.
+    public func stageSession(id: String, cwd: URL, directory: URL?) async throws {
+        let workspace = ensureWorkspace(id: id, cwd: cwd, directory: directory)
+        workspace.cwd = cwd
+        if workspace.directory == nil {
+            workspace.directory = directory
+        }
+        if !workspace.hydratedFromDisk, let directory {
+            let transcript = await Task.detached(priority: .userInitiated) {
+                TranscriptLoader.load(sessionDirectory: directory, includeHunks: true)
+            }.value
+            workspace.adopt(transcript)
+            workspace.hydratedFromDisk = true
+        }
+        try await ensureAgentLoaded(workspace)
+        refreshLive()
     }
 
     @discardableResult

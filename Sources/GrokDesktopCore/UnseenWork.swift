@@ -7,6 +7,7 @@ public struct UnseenTurn: Codable, Equatable, Sendable, Identifiable {
     public var failed: Bool
     public var finishedAt: Date
     public var changedFiles: Int
+    public var isolated: Bool
 
     public init(
         id: String,
@@ -14,7 +15,8 @@ public struct UnseenTurn: Codable, Equatable, Sendable, Identifiable {
         prompt: String,
         failed: Bool,
         finishedAt: Date,
-        changedFiles: Int = 0
+        changedFiles: Int = 0,
+        isolated: Bool = false
     ) {
         self.id = id
         self.cwd = cwd
@@ -22,10 +24,11 @@ public struct UnseenTurn: Codable, Equatable, Sendable, Identifiable {
         self.failed = failed
         self.finishedAt = finishedAt
         self.changedFiles = changedFiles
+        self.isolated = isolated
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, cwd, prompt, failed, finishedAt, changedFiles
+        case id, cwd, prompt, failed, finishedAt, changedFiles, isolated
     }
 
     public init(from decoder: Decoder) throws {
@@ -36,6 +39,7 @@ public struct UnseenTurn: Codable, Equatable, Sendable, Identifiable {
         failed = try container.decode(Bool.self, forKey: .failed)
         finishedAt = try container.decode(Date.self, forKey: .finishedAt)
         changedFiles = try container.decodeIfPresent(Int.self, forKey: .changedFiles) ?? 0
+        isolated = try container.decodeIfPresent(Bool.self, forKey: .isolated) ?? false
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -46,6 +50,7 @@ public struct UnseenTurn: Codable, Equatable, Sendable, Identifiable {
         try container.encode(failed, forKey: .failed)
         try container.encode(finishedAt, forKey: .finishedAt)
         try container.encode(changedFiles, forKey: .changedFiles)
+        try container.encode(isolated, forKey: .isolated)
     }
 
     public var cwdName: String {
@@ -66,6 +71,11 @@ public struct UnseenTurn: Codable, Equatable, Sendable, Identifiable {
 
     public func resultLine(chinese: Bool) -> String {
         "\(cwdName) · \(Self.changePhrase(count: changedFiles, chinese: chinese))"
+    }
+
+    public func cardLine(chinese: Bool) -> String {
+        let place: DispatchPlace = isolated ? .isolatedCopy : .currentDirectory
+        return "\(cwdName) · \(place.phrase(chinese: chinese)) · \(Self.changePhrase(count: changedFiles, chinese: chinese))"
     }
 }
 

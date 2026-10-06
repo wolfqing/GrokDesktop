@@ -77,6 +77,8 @@ public struct CompactionCheckpoint: Identifiable, Hashable, Sendable {
     public var recap: String
     public var path: String
     public var createdAt: Date?
+    /// Prompt index the existing rewind API can restore. Missing means there is no way back.
+    public var promptIndex: Int?
 
     public init(
         id: String,
@@ -84,7 +86,8 @@ public struct CompactionCheckpoint: Identifiable, Hashable, Sendable {
         tokensAfter: Int = 0,
         recap: String = "",
         path: String = "",
-        createdAt: Date? = nil
+        createdAt: Date? = nil,
+        promptIndex: Int? = nil
     ) {
         self.id = id
         self.tokensBefore = tokensBefore
@@ -92,6 +95,7 @@ public struct CompactionCheckpoint: Identifiable, Hashable, Sendable {
         self.recap = recap
         self.path = path
         self.createdAt = createdAt
+        self.promptIndex = promptIndex
     }
 }
 
@@ -175,8 +179,27 @@ public enum HarnessEvents {
             tokensAfter: after,
             recap: raw["summary"] as? String ?? raw["recap"] as? String ?? update.text,
             path: raw["path"] as? String ?? "",
-            createdAt: update.timestamp
+            createdAt: update.timestamp,
+            promptIndex: promptIndex(in: raw)
         )
+    }
+
+    /// The index grok records on a compaction checkpoint, when the file or event has one.
+    public static func promptIndex(in raw: [String: Any]) -> Int? {
+        for key in ["prompt_index_at_compaction", "prompt_index", "promptIndex"] {
+            if let value = integer(raw[key]) { return value }
+        }
+        return nil
+    }
+
+    static func integer(_ value: Any?) -> Int? {
+        if let number = value as? Int { return number }
+        if value is Bool { return nil }
+        if let number = value as? NSNumber { return number.intValue }
+        if let text = value as? String {
+            return Int(text.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        return nil
     }
 
     public static func scheduledTask(from update: SessionUpdate) -> ScheduledTask {
@@ -214,13 +237,17 @@ public enum HarnessEvents {
             if url.pathExtension.lowercased() == "json",
                let data = try? Data(contentsOf: url),
                let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                let summary = object["summary"] as? String ?? object["recap"] as? String ?? ""
                 return CompactionCheckpoint(
-                    id: object["id"] as? String ?? url.lastPathComponent,
-                    tokensBefore: object["tokens_before"] as? Int ?? object["tokensBefore"] as? Int ?? 0,
-                    tokensAfter: object["tokens_after"] as? Int ?? object["tokensAfter"] as? Int ?? 0,
-                    recap: object["summary"] as? String ?? object["recap"] as? String ?? recap,
+                    id: object["id"] as? String
+                        ?? object["checkpoint_id"] as? String
+                        ?? url.deletingPathExtension().lastPathComponent,
+                    tokensBefore: integer(object["tokens_before"]) ?? integer(object["tokensBefore"]) ?? 0,
+                    tokensAfter: integer(object["tokens_after"]) ?? integer(object["tokensAfter"]) ?? 0,
+                    recap: summary.trimmingCharacters(in: .whitespacesAndNewlines),
                     path: url.path,
-                    createdAt: modified
+                    createdAt: modified,
+                    promptIndex: promptIndex(in: object)
                 )
             }
             return CompactionCheckpoint(

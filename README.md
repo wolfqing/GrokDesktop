@@ -20,9 +20,9 @@ Community project. Not an official xAI / SpaceXAI product.
 
 ## Install
 
-**Download:** [Grok-Desktop-0.1.28.zip](https://github.com/wolfqing/GrokDesktop/releases/download/v0.1.28/Grok-Desktop-0.1.28.zip) · [All releases](https://github.com/wolfqing/GrokDesktop/releases) · [Changelog](CHANGELOG.md)
+**Download:** [Grok-Desktop-0.1.29.zip](https://github.com/wolfqing/GrokDesktop/releases/download/v0.1.29/Grok-Desktop-0.1.29.zip) · [All releases](https://github.com/wolfqing/GrokDesktop/releases) · [Changelog](CHANGELOG.md)
 
-**0.1.28:** open a project shell from the … menu when you need it. Side questions stay in the right sidebar.
+**0.1.29:** comment on a change, give a second task its own checkout, and keep the plan beside the session.
 
 1. macOS 14+
 2. Unzip and move `Grok Desktop.app` to Applications
