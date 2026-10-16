@@ -6,9 +6,7 @@ struct AboutView: View {
     @Environment(\.palette) private var palette
     @Environment(\.l10n) private var l10n
 
-    private var version: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.29"
-    }
+    private var version: String { AppBuild.marketingVersion }
 
     var body: some View {
         ZStack {
@@ -33,6 +31,15 @@ struct AboutView: View {
                 Text("Version \(version)")
                     .font(.system(size: 12))
                     .foregroundStyle(palette.secondary)
+                if case .ready(let next) = model.appUpdateNotice {
+                    Text(l10n.t(
+                        "Version \(next) installs the next time you open the app.",
+                        "版本 \(next) 会在下次打开时安装。"
+                    ))
+                    .font(.system(size: 11))
+                    .foregroundStyle(palette.secondary)
+                    .multilineTextAlignment(.center)
+                }
 
                 Button {
                     if let url = URL(string: "https://github.com/wolfqing") {

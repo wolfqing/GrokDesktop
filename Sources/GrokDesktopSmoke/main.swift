@@ -1755,6 +1755,100 @@ expect(
 expect(rewriteNote.message(chinese: false).contains("500k"), "english note names the old window")
 expect(rewriteNote.message(chinese: false).contains("256k"), "english note names the new window")
 
+expect(AppVersion(parsing: "v0.1.29") == AppVersion(parsing: "0.1.29"), "v prefix is the same version")
+expect(AppVersion(parsing: "0.1.9")! < AppVersion(parsing: "0.1.10")!, "0.1.9 is older than 0.1.10")
+expect(AppVersion(parsing: "0.1.29")! < AppVersion(parsing: "0.1.30")!, "patch numbers compare in order")
+expect(!(AppVersion(parsing: "0.1.30")! < AppVersion(parsing: "0.1.30")!), "equal versions are not older")
+expect(AppVersion(parsing: "nope") == nil, "words are not versions")
+
+let current = AppVersion(parsing: "0.1.29")!
+let sameFeed = """
+{"tag_name":"v0.1.29","body":"same","html_url":"https://github.com/wolfqing/GrokDesktop/releases/tag/v0.1.29","assets":[{"name":"Grok-Desktop-0.1.29.zip","size":4088223,"browser_download_url":"https://github.com/wolfqing/GrokDesktop/releases/download/v0.1.29/Grok-Desktop-0.1.29.zip"}]}
+""".data(using: .utf8)!
+expect(AppUpdateFeed.parseLatest(sameFeed, current: current) == .success(.upToDate), "the running version is current")
+
+let nextFeed = """
+{"tag_name":"v0.1.30","body":"next","assets":[{"name":"Grok-Desktop-0.1.30.zip","size":1200,"browser_download_url":"https://github.com/wolfqing/GrokDesktop/releases/download/v0.1.30/Grok-Desktop-0.1.30.zip"},{"name":"notes.txt","size":10,"browser_download_url":"https://example.com/notes.txt"}]}
+""".data(using: .utf8)!
+guard case .success(.download(let release)) = AppUpdateFeed.parseLatest(nextFeed, current: current) else {
+    fail("newer release should download")
+}
+expect(release.version.raw == "0.1.30", "release version")
+expect(release.fileName == "Grok-Desktop-0.1.30.zip", "release file name")
+
+let evilFeed = """
+{"tag_name":"v0.1.30","assets":[{"name":"Grok-Desktop-0.1.30.zip","size":1200,"browser_download_url":"https://evil.example/Grok-Desktop-0.1.30.zip"}]}
+""".data(using: .utf8)!
+expect(AppUpdateFeed.parseLatest(evilFeed, current: current) == .failure(.noZip), "a foreign host is not a download")
+let hugeFeed = """
+{"tag_name":"v0.1.30","assets":[{"name":"Grok-Desktop-0.1.30.zip","size":999999999,"browser_download_url":"https://github.com/wolfqing/GrokDesktop/releases/download/v0.1.30/Grok-Desktop-0.1.30.zip"}]}
+""".data(using: .utf8)!
+expect(AppUpdateFeed.parseLatest(hugeFeed, current: current) == .failure(.tooLarge), "an oversized asset is refused")
+expect(
+    AppUpdateFeed.isTrustedRedirect(URL(string: "https://release-assets.githubusercontent.com/github-production-release-asset/a")!),
+    "GitHub's asset host is allowed"
+)
+expect(
+    !AppUpdateFeed.isTrustedRedirect(URL(string: "http://github.com/wolfqing/GrokDesktop/releases/download/v0.1.30/Grok-Desktop-0.1.30.zip")!),
+    "plain http is refused"
+)
+expect(
+    !AppUpdateFeed.isTrustedRedirect(URL(string: "https://release-assets.githubusercontent.com:444/file")!),
+    "a non-443 port is refused"
+)
+expect(AppUpdateFeed.parseLatest(Data("{}".utf8), current: current) == .failure(.malformed), "an empty feed is malformed")
+
+let updateRoot = FileManager.default.temporaryDirectory.appendingPathComponent("grokdesktop-update-\(UUID().uuidString)", isDirectory: true)
+let cache = AppUpdateCache(root: updateRoot)
+let stagedVersion = AppVersion(parsing: "0.1.30")!
+let fakeApp = updateRoot.appendingPathComponent("src/Grok Desktop.app")
+try FileManager.default.createDirectory(at: fakeApp.appendingPathComponent("Contents/MacOS"), withIntermediateDirectories: true)
+let fakePlist = """
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>com.wolfqing.GrokDesktop</string>
+<key>CFBundleShortVersionString</key><string>0.1.30</string>
+<key>CFBundleExecutable</key><string>GrokDesktop</string>
+</dict></plist>
+"""
+try fakePlist.write(to: fakeApp.appendingPathComponent("Contents/Info.plist"), atomically: true, encoding: .utf8)
+FileManager.default.createFile(atPath: fakeApp.appendingPathComponent("Contents/MacOS/GrokDesktop").path, contents: Data("#!/bin/sh\n".utf8))
+let zip = cache.zipURL(version: stagedVersion)
+try FileManager.default.createDirectory(at: zip.deletingLastPathComponent(), withIntermediateDirectories: true)
+let zipped = TimedProcess.capture(
+    executable: URL(fileURLWithPath: "/usr/bin/ditto"),
+    arguments: ["-c", "-k", "--keepParent", fakeApp.path, zip.path],
+    cwd: updateRoot,
+    timeout: 20
+)
+expect(zipped.ok, "fixture zip builds")
+expect(AppUpdateInstaller.looksLikeZip(zip), "fixture zip has a zip header")
+guard let stagedApp = AppUpdateInstaller.stage(zip: zip, version: stagedVersion, cache: cache) else {
+    fail("stage should verify the bundle")
+}
+expect(stagedApp.lastPathComponent == "Grok Desktop.app", "staged bundle name")
+expect(cache.verifiedApp(version: stagedVersion) == stagedApp.resolvingSymlinksInPath().standardizedFileURL || cache.verifiedApp(version: stagedVersion)?.lastPathComponent == "Grok Desktop.app", "manifest points at the staged app")
+
+let installed = updateRoot.appendingPathComponent("Applications/Grok Desktop.app")
+try FileManager.default.createDirectory(at: installed.appendingPathComponent("Contents/MacOS"), withIntermediateDirectories: true)
+let oldPlist = fakePlist.replacingOccurrences(of: "0.1.30", with: "0.1.29")
+try oldPlist.write(to: installed.appendingPathComponent("Contents/Info.plist"), atomically: true, encoding: .utf8)
+FileManager.default.createFile(atPath: installed.appendingPathComponent("Contents/MacOS/GrokDesktop").path, contents: Data("old".utf8))
+try AppUpdateInstaller.swap(stagedApp: stagedApp, destination: installed)
+expect(AppBundleCheck.matchesRelease(installed, version: stagedVersion), "swap replaces the app with the new version")
+expect(
+    FileManager.default.fileExists(atPath: installed.deletingLastPathComponent().appendingPathComponent("Grok Desktop.app.previous").path),
+    "the previous app is kept beside it"
+)
+let wrong = AppVersion(parsing: "9.9.9")!
+expect(cache.verifiedApp(version: wrong) == nil, "a different version cannot reuse the staged app")
+cache.clear()
+expect(!FileManager.default.fileExists(atPath: updateRoot.path), "clear removes the cache")
+
+expect(RunningApp.blocker(appURL: URL(fileURLWithPath: "/tmp/GrokDesktop")) == .notInstalledApp, "a bare binary is not updated in place")
+expect(RunningApp.blocker(appURL: URL(fileURLWithPath: "/private/var/folders/x/AppTranslocation/d/Grok Desktop.app")) == .translocated, "a translocated app must be moved first")
+
 print("GrokDesktopSmoke ok")
 
 

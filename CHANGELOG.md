@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.30 - 2026-10-16
+
+Grok Desktop updates itself from GitHub Releases.
+
+- Opening the app checks for a newer release. While it stays open, it checks again every 4 hours.
+- A newer zip downloads on its own. The next launch installs it. A banner can restart now.
+- The app has to live in a writable folder such as Applications. A copy opened straight from the zip is left where it is.
+
 ## 0.1.29 - 2026-10-06
 
 Coming back to a change, you can comment on it, start a second task in its own checkout, and still see the plan.

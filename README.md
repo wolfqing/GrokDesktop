@@ -20,9 +20,9 @@ Community project. Not an official xAI / SpaceXAI product.
 
 ## Install
 
-**Download:** [Grok-Desktop-0.1.29.zip](https://github.com/wolfqing/GrokDesktop/releases/download/v0.1.29/Grok-Desktop-0.1.29.zip) · [All releases](https://github.com/wolfqing/GrokDesktop/releases) · [Changelog](CHANGELOG.md)
+**Download:** [Grok-Desktop-0.1.30.zip](https://github.com/wolfqing/GrokDesktop/releases/download/v0.1.30/Grok-Desktop-0.1.30.zip) · [All releases](https://github.com/wolfqing/GrokDesktop/releases) · [Changelog](CHANGELOG.md)
 
-**0.1.29:** comment on a change, give a second task its own checkout, and keep the plan beside the session.
+**0.1.30:** checks GitHub on launch and every 4 hours, downloads a newer release, and installs it the next time you open the app.
 
 1. macOS 14+
 2. Unzip and move `Grok Desktop.app` to Applications
@@ -37,6 +37,8 @@ grok login
 Grok Desktop does **not** ship the `grok` binary. It looks on `PATH`, then `~/.local/bin/grok`, `~/.grok/bin/grok`, `/opt/homebrew/bin/grok`, and `/usr/local/bin/grok`.
 
 The zip is unsigned unless a release says otherwise. First open: right-click the app → Open.
+
+After it is in Applications, the app checks GitHub on launch and every 4 hours. A newer release downloads in the background and installs the next time you open it. Move the app out of the zip or disk image first; a copy opened from there cannot replace itself.
 
 If it won't install, won't open, or you want a feature: [open an issue](https://github.com/wolfqing/GrokDesktop/issues/new/choose).
 

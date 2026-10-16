@@ -7,6 +7,7 @@ struct GrokDesktopApp: App {
     @Environment(\.colorScheme) private var systemScheme
 
     init() {
+        AppUpdateLaunch.installStagedAndRelaunchIfNeeded()
         NSApplication.shared.setActivationPolicy(.regular)
     }
 
@@ -120,6 +121,9 @@ struct GrokDesktopApp: App {
                 .keyboardShortcut("/", modifiers: [.command, .shift])
                 Button("/doctor") { model.handleCommand("/doctor") }
                 Button("/inspect") { model.handleCommand("/inspect") }
+                Button(model.copy.t("Check for app updates", "检查应用更新")) {
+                    model.checkAppUpdate()
+                }
                 Button(model.copy.t("Check CLI updates", "检查 CLI 更新")) {
                     model.handleCommand("/update")
                 }

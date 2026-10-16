@@ -199,6 +199,11 @@ final class AppModel: ObservableObject {
     @Published var cliUpdate = CLIUpdateStatus()
     @Published var isCheckingCLIUpdate = false
     @Published var isUpdatingCLI = false
+    @Published var appUpdateNotice: AppUpdateNotice?
+    @Published var appUpdateChecking = false
+    @Published var appUpdateLatest = ""
+    @Published var appUpdateFailure: AppUpdateFailure?
+    let appUpdates = AppUpdateCenter()
 
     @AppStorage("appearancePreference") var appearanceRaw = AppearancePreference.system.rawValue
     @AppStorage("languagePreference") var languageRaw = AppLanguage.system.rawValue
@@ -292,6 +297,7 @@ final class AppModel: ObservableObject {
                 try? await self?.client.connectIfNeeded()
             }
         }
+        appUpdates.start(model: self)
         ChatLinkActions.previewFile = { [weak self] url in
             self?.previewFile(url)
         }
@@ -2817,6 +2823,14 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func checkAppUpdate() {
+        appUpdates.check(userInitiated: true)
+    }
+
+    func installDownloadedAppUpdate() {
+        appUpdates.installDownloadedUpdate()
+    }
+
     func checkCLIUpdate(force: Bool = false) {
         if isCheckingCLIUpdate || isUpdatingCLI { return }
         if !force, let checked = cliUpdate.checkedAt, Date().timeIntervalSince(checked) < 45 {
@@ -2972,7 +2986,7 @@ final class AppModel: ObservableObject {
 
     func exportDiagnostics() {
         let text = DiagnosticExport.make(
-            version: "0.1.29",
+            version: AppBuild.marketingVersion,
             grokVersion: client.grokVersion,
             state: String(describing: client.state),
             lastError: client.lastError,

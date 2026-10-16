@@ -625,7 +625,7 @@ struct SettingsView: View {
             ))
             .foregroundStyle(palette.secondary)
             HStack {
-                Text("Grok Desktop 0.1.29")
+                Text("Grok Desktop \(AppBuild.marketingVersion)")
                 Spacer()
                 Text(model.client.grokVersion ?? "grok ?")
                     .foregroundStyle(palette.secondary)
@@ -824,7 +824,40 @@ struct SettingsView: View {
     private var advancedPage: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 10) {
-                versionRow(l10n.t("App", "应用"), "0.1.29")
+                versionRow(l10n.t("App", "应用"), AppBuild.marketingVersion)
+                if !model.appUpdateLatest.isEmpty, model.appUpdateLatest != AppBuild.marketingVersion {
+                    versionRow(l10n.t("Latest", "最新版本"), model.appUpdateLatest)
+                }
+                Text(appUpdateMessage)
+                    .font(.system(size: 13))
+                    .foregroundStyle(model.appUpdateFailure == nil ? palette.secondary : Color.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    Button {
+                        model.checkAppUpdate()
+                    } label: {
+                        if model.appUpdateChecking {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Text(l10n.t("Check now", "立即检查"))
+                        }
+                    }
+                    .buttonStyle(GrokSecondaryButtonStyle())
+                    .disabled(model.appUpdateChecking || isDownloadingAppUpdate)
+
+                    if canRestartToInstall {
+                        Button(l10n.t("Restart to install", "重启并安装")) {
+                            model.installDownloadedAppUpdate()
+                        }
+                        .buttonStyle(GrokPrimaryButtonStyle())
+                    }
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(palette.hairline))
+
+            VStack(alignment: .leading, spacing: 10) {
                 versionRow(
                     "grok CLI",
                     model.cliUpdate.current.isEmpty
@@ -850,7 +883,7 @@ struct SettingsView: View {
                         if model.isCheckingCLIUpdate {
                             ProgressView().controlSize(.small)
                         } else {
-                            Text(l10n.t("Check for updates", "检查更新"))
+                            Text(l10n.t("Check CLI", "检查 CLI"))
                         }
                     }
                     .buttonStyle(GrokSecondaryButtonStyle())
@@ -907,6 +940,50 @@ struct SettingsView: View {
         .font(.system(size: 13))
         .padding(.top, 8)
         .onAppear { model.checkCLIUpdate() }
+    }
+
+    private var isDownloadingAppUpdate: Bool {
+        if case .downloading = model.appUpdateNotice { return true }
+        return false
+    }
+
+    private var canRestartToInstall: Bool {
+        if case .ready = model.appUpdateNotice { return true }
+        return false
+    }
+
+    private var appUpdateMessage: String {
+        let hours = Int(AppUpdateFeed.checkInterval / 3600)
+        if model.appUpdateChecking, model.appUpdateNotice == nil {
+            return l10n.t("Checking…", "正在检查…")
+        }
+        switch model.appUpdateNotice {
+        case .downloading(let version):
+            return l10n.t("Downloading \(version)…", "正在下载 \(version)…")
+        case .ready(let version):
+            return l10n.t(
+                "\(version) is downloaded. It installs the next time you open the app.",
+                "\(version) 已下载，下次打开时安装。"
+            )
+        case .moveToApplications:
+            return l10n.t(
+                "Move Grok Desktop into the Applications folder to install updates.",
+                "把 Grok Desktop 移到“应用程序”文件夹后才能安装更新。"
+            )
+        case .failed(let failure):
+            return appUpdateFailureText(failure, l10n: l10n)
+        case nil:
+            if let failure = model.appUpdateFailure {
+                return appUpdateFailureText(failure, l10n: l10n)
+            }
+            if !model.appUpdateLatest.isEmpty, model.appUpdateLatest == AppBuild.marketingVersion {
+                return l10n.t("This app is up to date.", "当前应用已是最新。")
+            }
+            return l10n.t(
+                "Checks at launch and every \(hours) hours. A newer version downloads on its own.",
+                "启动时检查，之后每 \(hours) 小时再检查。有新版本会自动下载。"
+            )
+        }
     }
 
     private var canInstallCLI: Bool {

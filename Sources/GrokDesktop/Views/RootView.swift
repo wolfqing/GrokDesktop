@@ -12,46 +12,50 @@ struct RootView: View {
     var body: some View {
         ZStack {
             palette.canvas.ignoresSafeArea()
-            HStack(spacing: 0) {
-                SidebarView()
-                    .frame(width: model.sidebarCollapsed ? GrokTheme.collapsedSidebarWidth : GrokTheme.sidebarWidth)
-                    .frame(maxHeight: .infinity)
-                    .zIndex(1)
-                ZStack {
-                    Group {
-                        switch model.destination {
-                        case .webChat:
-                            Color.clear
-                        case .build:
-                            ChatView()
-                        case .dashboard:
-                            DashboardView()
-                        case .imagine:
-                            ImagineView()
-                        case .automations:
-                            AutomationsView()
-                        case .skills:
-                            SkillsView()
+            VStack(spacing: 0) {
+                AppUpdateBanner()
+                HStack(spacing: 0) {
+                    SidebarView()
+                        .frame(width: model.sidebarCollapsed ? GrokTheme.collapsedSidebarWidth : GrokTheme.sidebarWidth)
+                        .frame(maxHeight: .infinity)
+                        .zIndex(1)
+                    ZStack {
+                        Group {
+                            switch model.destination {
+                            case .webChat:
+                                Color.clear
+                            case .build:
+                                ChatView()
+                            case .dashboard:
+                                DashboardView()
+                            case .imagine:
+                                ImagineView()
+                            case .automations:
+                                AutomationsView()
+                            case .skills:
+                                SkillsView()
+                            }
+                        }
+                        if !DemoStudio.isEnabled, model.destination == .webChat {
+                            GrokWebChatView { signedIn in
+                                model.webChatSignedIn = signedIn
+                            }
                         }
                     }
-                    if !DemoStudio.isEnabled, model.destination == .webChat {
-                        GrokWebChatView { signedIn in
-                            model.webChatSignedIn = signedIn
-                        }
+                    .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                    .clipped()
+                    .background(palette.canvas)
+                    if model.showInspector && model.destination == .build {
+                        InspectorResizeHandle(
+                            width: model.inspectorWidth,
+                            onChange: { model.setInspectorWidth($0) },
+                            onReset: { model.resetInspectorWidth() }
+                        )
+                        InspectorView()
+                            .frame(width: model.inspectorWidth)
                     }
                 }
                 .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
-                .clipped()
-                .background(palette.canvas)
-                if model.showInspector && model.destination == .build {
-                    InspectorResizeHandle(
-                        width: model.inspectorWidth,
-                        onChange: { model.setInspectorWidth($0) },
-                        onReset: { model.resetInspectorWidth() }
-                    )
-                    InspectorView()
-                        .frame(width: model.inspectorWidth)
-                }
             }
             .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
 
@@ -186,6 +190,7 @@ struct RootView: View {
         .animation(.easeInOut(duration: 0.18), value: model.sidebarCollapsed)
         .animation(.easeInOut(duration: 0.18), value: model.appearanceRaw)
         .animation(.easeInOut(duration: 0.18), value: model.languageRaw)
+        .animation(.easeInOut(duration: 0.18), value: model.appUpdateNotice)
     }
 
     private var renameSheet: some View {
