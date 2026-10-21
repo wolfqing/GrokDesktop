@@ -20,9 +20,9 @@ Community project. Not an official xAI / SpaceXAI product.
 
 ## Install
 
-**Download:** [Grok-Desktop-0.1.30.zip](https://github.com/wolfqing/GrokDesktop/releases/download/v0.1.30/Grok-Desktop-0.1.30.zip) · [All releases](https://github.com/wolfqing/GrokDesktop/releases) · [Changelog](CHANGELOG.md)
+**Download:** [Grok-Desktop-0.1.31.zip](https://github.com/wolfqing/GrokDesktop/releases/download/v0.1.31/Grok-Desktop-0.1.31.zip) · [All releases](https://github.com/wolfqing/GrokDesktop/releases) · [Changelog](CHANGELOG.md)
 
-**0.1.30:** checks GitHub on launch and every 4 hours, downloads a newer release, and installs it the next time you open the app.
+**0.1.31:** trusted project folders, a phone mirror that continues a session you already have, message bridges, and a remote host over SSH.
 
 1. macOS 14+
 2. Unzip and move `Grok Desktop.app` to Applications

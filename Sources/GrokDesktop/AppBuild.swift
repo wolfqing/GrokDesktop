@@ -9,10 +9,10 @@ enum AppBuild {
         if let version = AppVersion(parsing: trimmed) {
             return version.raw
         }
-        return "0.1.30"
+        return "0.1.31"
     }
 
     static var version: AppVersion {
-        AppVersion(parsing: marketingVersion) ?? AppVersion(parsing: "0.1.30")!
+        AppVersion(parsing: marketingVersion) ?? AppVersion(parsing: "0.1.31")!
     }
 }

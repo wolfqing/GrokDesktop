@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.1.31 - 2026-10-21
+
+Sessions, trusted folders, a phone mirror, message bridges, and a remote host.
+
+- A follow-up can wait, or steer the turn that is running. A session can attach files, fork, and keep up to three earlier sessions in view. Search, rename, archive, and delete stay on this Mac. Import still reads the grok CLI sessions. Session files can stay in `~/.grok` or live in an app folder. The two stores are not merged.
+- A new folder starts untrusted. Removing it from the sidebar leaves the folder on disk. An untrusted folder cannot receive agent writes. Switching a worktree moves that session's folder.
+- A diff can be accepted, rejected, or reverted one file at a time or as a batch. Text files edit in place. Images, video, audio, PDF, and Office files preview when the path is inside a trusted project.
+- Ask is the default. Allow once, allow for the session, or deny. Always-approve is optional, and it can be set per project.
+- A saved bridge turns inbound text into a turn only for a project you already trust. `/p` starts a session there. `/r` resumes one that already exists. The app does not sign in to those networks.
+- The phone mirror listens on this Mac. It lists sessions and continues one you already have. A busy session queues the text instead of interrupting it. The token is not shown in the window. Keep it on this Mac, open it on the local network, or start a Cloudflare quick tunnel.
+- A remote session uses the OpenSSH already on this Mac. The agent runs on the remote host. Remote files, the remote terminal, and remote skills stay on that host.
+- One session can watch several pull requests. When `gh` can read them, a new comment, a review, a failing check, or a green check is queued as a follow-up.
+- More than one account can sign in. The API key stays in the keychain. Logs and the diagnostic export leave secrets out. A custom relay can use its own Grok home, or share `~/.grok` without rewriting the other copy.
+- MCP servers, plugins, skills, agents, and hooks can be turned off. A note you schedule runs on its own and keeps a log.
+- A small window can stay above other windows. From there you can dictate, send, and stop.
+- The first launch looks for `grok` and accepts a path you pick. A missing CLI, a sign-in problem, a network problem, and an agent crash stay separate.
+- An HTTP or SOCKS proxy is passed through. The sandbox can be off or restricted.
+- With no language chosen, the shell follows the system language. You can pick English, Simplified or Traditional Chinese, Japanese, Korean, German, French, Russian, Spanish, Brazilian Portuguese, Italian, Indonesian, Tamil, Ukrainian, Filipino, or Turkish. Chat and Build stay those words.
+
 ## 0.1.30 - 2026-10-16
 
 Grok Desktop updates itself from GitHub Releases.
