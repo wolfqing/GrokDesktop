@@ -26,9 +26,9 @@ struct SessionDeskSection: View {
                 Text(l10n.t("This folder", "当前目录"))
                 Spacer()
                 Picker("", selection: projectTierBinding) {
-                    Text(l10n.t("Follow default", "跟随默认")).tag(PermissionTier.ask)
-                    Text(l10n.t("Allow for session", "本次会话")).tag(PermissionTier.allowSession)
-                    Text(l10n.t("Deny", "拒绝")).tag(PermissionTier.deny)
+                    Text(l10n.t("Follow default", "跟随默认")).tag("follow")
+                    Text(l10n.t("Allow for session", "本次会话")).tag(PermissionTier.allowSession.rawValue)
+                    Text(l10n.t("Deny", "拒绝")).tag(PermissionTier.deny.rawValue)
                 }
                 .pickerStyle(.menu)
             }
@@ -74,14 +74,28 @@ struct SessionDeskSection: View {
     private var tierBinding: Binding<PermissionTier> {
         Binding(
             get: { PermissionTier(rawValue: desk.permissionTier) ?? .ask },
-            set: { desk.permissionTier = $0.rawValue }
+            set: { model.applyPermissionTier($0) }
         )
     }
 
-    private var projectTierBinding: Binding<PermissionTier> {
+    private var projectTierBinding: Binding<String> {
         Binding(
-            get: { desk.policy().effective(project: model.client.workingDirectory.path) },
-            set: { desk.setProjectTier(model.client.workingDirectory.path, tier: $0) }
+            get: {
+                let path = PermissionPolicy.normalize(model.client.workingDirectory.path)
+                switch desk.projectTiers[path] {
+                case .allowSession: return PermissionTier.allowSession.rawValue
+                case .deny: return PermissionTier.deny.rawValue
+                case .yolo: return PermissionTier.yolo.rawValue
+                default: return "follow"
+                }
+            },
+            set: { tag in
+                if tag == "follow" {
+                    model.followProjectDefault()
+                } else if let tier = PermissionTier(rawValue: tag) {
+                    model.setProjectPermission(tier)
+                }
+            }
         )
     }
 
@@ -168,20 +182,43 @@ struct ExtensionDeskSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if !model.mcpServers.isEmpty {
+                Text("MCP")
+                    .font(.system(size: 13, weight: .semibold))
+                ForEach(Array(model.mcpServers.prefix(8))) { server in
+                    extensionToggle(server.name, kind: "mcp")
+                }
+            }
+            if !model.plugins.isEmpty {
+                Text(l10n.t("Plugins", "插件"))
+                    .font(.system(size: 13, weight: .semibold))
+                ForEach(Array(model.plugins.prefix(8))) { plugin in
+                    extensionToggle(plugin.name, kind: "plugin")
+                }
+            }
+            if !model.personas.isEmpty {
+                Text(l10n.t("Agents", "Agent"))
+                    .font(.system(size: 13, weight: .semibold))
+                ForEach(Array(model.personas.prefix(8)), id: \.self) { name in
+                    extensionToggle(name, kind: "agent")
+                }
+            }
             if !model.hookDefinitions.isEmpty {
                 Text(l10n.t("Hook switches", "钩子开关"))
                     .font(.system(size: 13, weight: .semibold))
                 ForEach(Array(model.hookDefinitions.prefix(8))) { hook in
-                    Toggle(hook.title, isOn: Binding(
-                        get: { ExtensionToggles.isEnabled(desk.extensionToggles, kind: "hook", name: hook.title) },
-                        set: { enabled in
-                            desk.extensionToggles = ExtensionToggles.set(desk.extensionToggles, kind: "hook", name: hook.title, enabled: enabled)
-                        }
-                    ))
-                    .font(.system(size: 13))
+                    extensionToggle(hook.title, kind: "hook")
                 }
             }
         }
+    }
+
+    private func extensionToggle(_ name: String, kind: String) -> some View {
+        Toggle(name, isOn: Binding(
+            get: { ExtensionToggles.isEnabled(desk.extensionToggles, kind: kind, name: name) },
+            set: { model.setExtension(kind: kind, name: name, enabled: $0) }
+        ))
+        .font(.system(size: 13))
     }
 }
 
@@ -255,6 +292,10 @@ struct AdvancedDeskSection: View {
                     .textFieldStyle(.roundedBorder)
             }
             Button(l10n.t("Save bridge", "保存桥接")) { model.saveBridge() }
+                .buttonStyle(GrokSecondaryButtonStyle())
+            TextField(l10n.t("Inbound text", "进来的文字"), text: $desk.inboundDraft)
+                .textFieldStyle(.roundedBorder)
+            Button(l10n.t("Deliver inbound", "送进会话")) { model.deliverInboundDraft() }
                 .buttonStyle(GrokSecondaryButtonStyle())
             ForEach(desk.bridges, id: \.channel) { bridge in
                 Text("\(bridge.channel.rawValue) · \(bridge.isComplete ? l10n.t("ready", "已填好") : l10n.t("incomplete", "未填完"))")

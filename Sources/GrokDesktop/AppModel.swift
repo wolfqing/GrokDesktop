@@ -287,6 +287,16 @@ final class AppModel: ObservableObject {
         refreshWorkspace()
         refreshAccountUsage()
         bindClient()
+        client.permissionPolicy = desk.policy()
+        syncAgentHome()
+        loadExtensionToggles()
+        desk.sessionAPI.onQueued = { [weak self] id, _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.client.deliverMirrorContinues(server: self.desk.sessionAPI, sessionID: id)
+                self.publishMirrorSessions()
+            }
+        }
         if DemoStudio.isEnabled {
             applyDemoStudio()
         }
@@ -1294,6 +1304,21 @@ final class AppModel: ObservableObject {
             guard self.client.workingDirectory.standardizedFileURL.path == cwd.standardizedFileURL.path else { return }
             self.workspace = loaded
         }
+        if !DemoStudio.isEnabled {
+            reapIdleSessions()
+        }
+    }
+
+    func reapIdleSessions() {
+        var idle: [String: Int] = [:]
+        for id in client.workspaceIDs {
+            idle[id] = client.idleAge(id: id)
+        }
+        _ = client.reapSessions(idleSeconds: idle, focusedID: client.sessionID)
+    }
+
+    func shell(_ key: ShellString) -> String {
+        ShellLocale.chrome(key, preference: desk.localeID, preferredLanguages: Locale.preferredLanguages)
     }
 
     func openInFinder() {
@@ -1640,6 +1665,9 @@ final class AppModel: ObservableObject {
         let shared = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".grok", isDirectory: true)
         do {
             _ = try RelayHome.apply(mode: mode, profile: profile, independentRoot: independent, sharedRoot: shared)
+            UserDefaults.standard.set(mode == .independent, forKey: "relayHomeApplied")
+            UserDefaults.standard.set(mode.rawValue, forKey: "relayHomeMode")
+            syncAgentHome()
             desk.relayNote = copy.t("Relay saved. The key stays in the keychain.", "中转已保存。密钥留在钥匙串。")
         } catch {
             desk.relayNote = error.localizedDescription
@@ -1692,6 +1720,7 @@ final class AppModel: ObservableObject {
     func toggleMirror() {
         if desk.mirrorOn {
             desk.sessionAPI.stop()
+            desk.mirrorTunnel.stop()
             desk.mirrorOn = false
             return
         }
@@ -1702,8 +1731,11 @@ final class AppModel: ObservableObject {
             desk.mirrorPort = port
             desk.mirrorOn = true
             publishMirrorSessions()
+            if exposure == .tunnel {
+                try desk.mirrorTunnel.launch(port: port)
+            }
         } catch {
-            flash(error.localizedDescription)
+            flash(shell(.errorGeneric))
         }
     }
 
@@ -1730,15 +1762,34 @@ final class AppModel: ObservableObject {
     }
 
     func watchSSHHost() {
-        runSSHArgv(SSHWorkspace.watchArgv(host: desk.sshAlias), timeout: 4)
+        guard let argv = SSHWorkspace.watchArgv(host: desk.sshAlias) else {
+            flash(copy.t("That remote command was refused.", "这条远程命令不能用。"))
+            return
+        }
+        do {
+            try desk.sshWatch.launch(executable: "/usr/bin/ssh", arguments: Array(argv.dropFirst()))
+            desk.sshNote = copy.t("Watching.", "保持连接。")
+        } catch {
+            desk.sshNote = error.localizedDescription
+        }
     }
 
     func openRemoteSession() {
-        guard SSHWorkspace.sessionHost(desk.sshAlias) != nil, SSHWorkspace.localCwd(remotePath: desk.sshAlias) == nil else {
+        guard let host = SSHWorkspace.sessionHost(desk.sshAlias), SSHWorkspace.localCwd(remotePath: desk.sshAlias) == nil else {
             flash(copy.t("That host is not an SSH alias.", "这不是一个 SSH 主机别名。"))
             return
         }
-        startNewSession(cwd: client.workingDirectory, remoteHost: desk.sshAlias)
+        client.remoteHost = host
+        destination = .build
+        Task {
+            do {
+                try await client.newSession(cwd: client.workingDirectory)
+                firstRunReason = nil
+                refreshWorkspace()
+            } catch {
+                present(error)
+            }
+        }
     }
 
     func readRemoteText() {
@@ -1789,7 +1840,16 @@ final class AppModel: ObservableObject {
     }
 
     func forwardRemoteLoopback() {
-        runSSHArgv(SSHWorkspace.forwardArgv(host: desk.sshAlias, localPort: 8787, remotePort: 8787), timeout: 4)
+        guard let argv = SSHWorkspace.forwardArgv(host: desk.sshAlias, localPort: 8787, remotePort: 8787) else {
+            flash(copy.t("That remote command was refused.", "这条远程命令不能用。"))
+            return
+        }
+        do {
+            try desk.sshForward.launch(executable: "/usr/bin/ssh", arguments: Array(argv.dropFirst()))
+            desk.sshNote = copy.t("Forwarding.", "正在转发。")
+        } catch {
+            desk.sshNote = error.localizedDescription
+        }
     }
 
     private func runSSHArgv(_ argv: [String]?, timeout: TimeInterval) {
@@ -1840,8 +1900,8 @@ final class AppModel: ObservableObject {
                 }
                 desk.previousPRJSON = current
                 desk.prNote = follow.map(\.text).joined(separator: "\n")
-                if let text = follow.first?.text, let sessionID = client.sessionID, !sessionID.isEmpty {
-                    Task { try? await client.send(text: text, sessionID: sessionID, kind: .followUp) }
+                if let sessionID = client.sessionID, !sessionID.isEmpty, !follow.isEmpty {
+                    Task { await client.enqueueFollowUps(follow, sessionID: sessionID) }
                 }
             }
         }
@@ -3630,11 +3690,116 @@ final class AppModel: ObservableObject {
         return url
     }
 
+    func applyPermissionTier(_ tier: PermissionTier) {
+        desk.permissionTier = tier.rawValue
+        client.permissionPolicy = desk.policy()
+        let decision = tier == .allowOnce
+            ? PermissionTier.allowOnce
+            : client.permissionPolicy.decision(nil, project: client.workingDirectory.path)
+        client.answerWithPolicy(decision)
+    }
+
+    func setProjectPermission(_ tier: PermissionTier) {
+        desk.setProjectTier(client.workingDirectory.path, tier: tier)
+        client.permissionPolicy = desk.policy()
+        client.answerWithPolicy(client.permissionPolicy.decision(nil, project: client.workingDirectory.path))
+    }
+
+    func followProjectDefault() {
+        desk.setProjectTier(client.workingDirectory.path, tier: nil)
+        client.permissionPolicy = desk.policy().clearingProject(client.workingDirectory.path)
+    }
+
+    func answerPermissionChoice(_ choice: PermissionChoice, sessionID: String?) {
+        let path = client.workingDirectory.path
+        let tier = desk.policy().decision(choice, project: path)
+        switch choice {
+        case .yolo:
+            desk.permissionTier = PermissionTier.yolo.rawValue
+        case .deny:
+            desk.setProjectTier(path, tier: .deny)
+        case .allowSession:
+            desk.setProjectTier(path, tier: .allowSession)
+        case .allowOnce, .ask:
+            break
+        }
+        client.permissionPolicy = desk.policy()
+        client.answerWithPolicy(tier, sessionID: sessionID)
+    }
+
+    func deliverInboundDraft() {
+        let text = desk.inboundDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        Task { await receiveBridge(text: text) }
+    }
+
+    func receiveBridge(text: String) async {
+        let config = desk.bridges.first { $0.channel == desk.imChannel }
+            ?? IMBridgeConfig(channel: desk.imChannel, fields: desk.imFields)
+        let payload = ["channel": desk.imChannel.rawValue, "sender": "desk", "text": text]
+        guard let inbound = IMRouter.accept(payload: payload, config: config) else {
+            flash(shell(.errorGeneric))
+            return
+        }
+        let known = Set(sessions.map(\.id) + client.workspaceIDs)
+        let route = IMRouter.route(
+            inbound: inbound,
+            trustedProjects: Array(desk.trustedPaths),
+            sessions: Array(known),
+            boundProject: client.workingDirectory.path
+        )
+        let delivered = await IMDelivery.deliver(route: route, client: client)
+        if !delivered {
+            flash(shell(.errorGeneric))
+        }
+        refreshWorkspace()
+    }
+
+    func setExtension(kind: String, name: String, enabled: Bool) {
+        desk.extensionToggles = ExtensionToggles.set(desk.extensionToggles, kind: kind, name: name, enabled: enabled)
+        ExtensionGate.save(desk.extensionToggles, url: extensionToggleURL)
+        try? ExtensionGate.apply(home: currentAgentHome(), toggles: desk.extensionToggles)
+    }
+
+    func loadExtensionToggles() {
+        desk.extensionToggles = ExtensionGate.load(url: extensionToggleURL)
+    }
+
+    func currentAgentHome() -> URL {
+        if UserDefaults.standard.bool(forKey: "relayHomeApplied"),
+           UserDefaults.standard.string(forKey: "relayHomeMode") == RelayHomeMode.independent.rawValue {
+            return independentRelayHome
+        }
+        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".grok", isDirectory: true)
+    }
+
+    func syncAgentHome() {
+        if UserDefaults.standard.bool(forKey: "relayHomeApplied"),
+           UserDefaults.standard.string(forKey: "relayHomeMode") == RelayHomeMode.independent.rawValue {
+            client.grokHome = independentRelayHome.path
+        } else {
+            client.grokHome = ""
+        }
+    }
+
+    private var independentRelayHome: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("GrokDesktop/relay-home", isDirectory: true)
+    }
+
+    private var extensionToggleURL: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("GrokDesktop/extension-toggles.json")
+    }
+
     private func present(_ error: Error) {
-        flash(error.localizedDescription)
         if let acp = error as? ACPError, acp == .grokNotFound {
+            flash(shell(.errorCLI))
             firstRunReason = .missingCLI
-        } else if error.localizedDescription.lowercased().contains("auth")
+            return
+        }
+        flash(shell(.errorGeneric))
+        if error.localizedDescription.lowercased().contains("auth")
                     || error.localizedDescription.lowercased().contains("login")
                     || error.localizedDescription.lowercased().contains("unauthor") {
             firstRunReason = .unsigned

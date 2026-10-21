@@ -47,7 +47,22 @@ public final class SessionAPIServer: @unchecked Sendable {
     private var sessions: [ListedSession] = []
     private var queueLog: [String: [String]] = [:]
     private var stopped = false
+    private var queuedHandler: ((String, String) -> Void)?
     private let serveQueue = DispatchQueue(label: "com.wolfqing.GrokDesktop.session-api")
+
+    /// Fired after a continue is stored. The app drains it into the live session.
+    public var onQueued: ((String, String) -> Void)? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return queuedHandler
+        }
+        set {
+            lock.lock()
+            queuedHandler = newValue
+            lock.unlock()
+        }
+    }
 
     public private(set) var boundHost = "127.0.0.1"
     public private(set) var port: UInt16 = 0
@@ -70,6 +85,15 @@ public final class SessionAPIServer: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return queueLog[id] ?? []
+    }
+
+    /// Reads and clears the queued continues for one existing session.
+    public func takeQueued(id: String) -> [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        let items = queueLog[id] ?? []
+        queueLog[id] = nil
+        return items
     }
 
     public func start(token: String, exposure: MirrorExposure = .loopback) throws -> UInt16 {
@@ -198,7 +222,9 @@ public final class SessionAPIServer: @unchecked Sendable {
             }
             let busy = sessions[index].busy
             queueLog[id, default: []].append(text)
+            let callback = queuedHandler
             lock.unlock()
+            callback?(id, text)
             if busy {
                 writeJSON(client, status: 202, body: #"{"status":"queued"}"#)
             } else {

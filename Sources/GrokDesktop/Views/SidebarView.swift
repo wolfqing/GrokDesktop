@@ -311,7 +311,8 @@ struct SidebarView: View {
                             .frame(width: 28, height: 28)
                     }
                     .buttonStyle(.plain)
-                    .help(l10n.settings)
+                    .help(model.shell(.navSettings))
+                    .accessibilityLabel(model.shell(.navSettings))
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 12)

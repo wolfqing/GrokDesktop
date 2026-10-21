@@ -53,8 +53,8 @@ struct SettingsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 2) {
                 groupLabel(l10n.general)
-                item(.account, l10n.account, "person")
-                item(.appearance, l10n.appearance, "paintbrush")
+                item(.account, model.shell(.settingsAccount), "person")
+                item(.appearance, model.shell(.settingsAppearance), "paintbrush")
                 item(.behavior, l10n.behavior, "switch.2")
                 item(.session, l10n.t("Session", "会话"), "clock")
                 groupLabel(l10n.grok).padding(.top, 14)
@@ -180,10 +180,13 @@ struct SettingsView: View {
                     }
                 }
                 .frame(maxHeight: 220)
-                Text(LocaleCatalog.string(.settingsTitle, preference: model.desk.localeID, preferredLanguages: Locale.preferredLanguages))
+                Text(model.shell(.settingsTitle))
                     .font(.system(size: 12))
                     .foregroundStyle(palette.secondary)
             }
+            Text(model.shell(.navSettings))
+                .font(.system(size: 12))
+                .foregroundStyle(palette.secondary)
             AccountDeskSection()
             VStack(alignment: .leading, spacing: 8) {
                 statusLine(
@@ -237,7 +240,7 @@ struct SettingsView: View {
             model.desk.localeID = id
             switch id {
             case "en": model.language = .english
-            case "zh-Hans": model.language = .chinese
+            case "zh-Hans", "zh-Hant": model.language = .chinese
             case "system": model.language = .system
             default: break
             }
@@ -1116,8 +1119,8 @@ struct SettingsView: View {
 
     private func title(for section: SettingsSection) -> String {
         switch section {
-        case .account: return l10n.account
-        case .appearance: return l10n.appearance
+        case .account: return model.shell(.settingsAccount)
+        case .appearance: return model.shell(.settingsAppearance)
         case .behavior: return l10n.behavior
         case .session: return l10n.t("Session", "会话")
         case .customize: return l10n.customize

@@ -57,9 +57,9 @@ public enum SSHWorkspace {
         return ["ssh", "-o", "BatchMode=yes", "-o", "ServerAliveInterval=15", "-N", host]
     }
 
-    /// Arguments for `/usr/bin/ssh`. The host stays its own element.
+    /// Arguments for `/usr/bin/ssh`. BatchMode keeps a missing host from waiting on a password.
     public static func agentArguments(_ host: String) -> [String] {
-        [host, "grok agent --no-leader stdio"]
+        ["-o", "BatchMode=yes", "-o", "ConnectTimeout=2", host, "grok agent --no-leader stdio"]
     }
 
     public static func remoteReadArgv(host: String, relativePath: String) -> [String]? {

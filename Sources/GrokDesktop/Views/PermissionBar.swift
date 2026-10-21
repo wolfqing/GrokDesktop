@@ -65,13 +65,13 @@ struct PermissionBar: View {
             HStack(spacing: 8) {
                 if let allow = allowOption {
                     Button(l10n.t("Allow once", "允许一次")) {
-                        model.client.answerPermission(optionID: allow.id, sessionID: sessionID)
+                        model.answerPermissionChoice(.allowOnce, sessionID: sessionID)
                     }
                     .buttonStyle(GrokPrimaryButtonStyle())
 
                     Menu {
                         Button(l10n.t("Allow for this session", "本会话都允许")) {
-                            model.client.answerPermission(optionID: allow.id, rememberSession: true, sessionID: sessionID)
+                            model.answerPermissionChoice(.allowSession, sessionID: sessionID)
                         }
                         Button(l10n.t("Allow edits this session", "本会话允许编辑")) {
                             model.client.setAllowEditsThisSession(true)
@@ -93,7 +93,7 @@ struct PermissionBar: View {
                     .fixedSize()
                 }
                 Button(l10n.t("Deny", "拒绝")) {
-                    model.client.rejectPermission(sessionID: sessionID)
+                    model.answerPermissionChoice(.deny, sessionID: sessionID)
                 }
                 .buttonStyle(GrokSecondaryButtonStyle())
             }

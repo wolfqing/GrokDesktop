@@ -74,6 +74,42 @@ func runFeatureParity() {
     expect(denied.decision(nil, project: "/other") == .ask, "deny does not spread")
     expect(policy.setting(.yolo, project: "/repo").tier == .yolo, "yolo is explicit")
     expect(PermissionPolicy.fresh().isYOLODefault == false, "fresh policy is still ask")
+    var cleared = PermissionPolicy(tier: .ask, projectTiers: ["/repo": .deny])
+    cleared = cleared.clearingProject("/repo")
+    expect(cleared.projectTiers["/repo"] == nil, "follow default clears the override")
+    expect(cleared.decision(nil, project: "/repo") == .ask, "cleared project uses ask")
+    parityWait {
+        let board = ACPClient(
+            locator: GrokBinaryLocator(extraSearchPaths: [], pathEnvironment: "", fileExists: { _ in false }),
+            workingDirectory: parityRoot
+        )
+        for id in ["a", "b", "c", "d"] {
+            board.registerLocalSession(id: id, cwd: parityRoot, turnRunning: false)
+        }
+        let recycled = board.reapSessions(idleSeconds: ["a": 0, "b": 0, "c": 0, "d": 90], focusedID: "a")
+        expect(recycled == ["d"], "process cap recycles the idle session")
+        expect(!board.hasWorkspace("d"), "recycled session is dropped")
+        expect(board.hasWorkspace("a"), "focused session stays")
+    }
+    parityWait {
+        let root = parityRoot.appendingPathComponent("perm-agent", isDirectory: true)
+        let bin = try parityInstallStub(at: root)
+        try Data("on".utf8).write(to: root.appendingPathComponent("permission.on"))
+        let client = ACPClient(locator: parityLocator(bin), workingDirectory: root)
+        client.permissionPolicy = PermissionPolicy(tier: .deny)
+        defer { client.stop() }
+        do {
+            try await client.connectIfNeeded()
+        } catch {
+            fail("permission agent \(error)")
+        }
+        await parityUntil(8) {
+            (try? String(contentsOf: root.appendingPathComponent("rpc.log"), encoding: .utf8))?.contains("reject") == true
+        }
+        let log = (try? String(contentsOf: root.appendingPathComponent("rpc.log"), encoding: .utf8)) ?? ""
+        expect(log.contains("reject"), "permission decision rejects the prompt")
+        expect(client.permission == nil, "denied prompt is not left on the bar")
+    }
     expect(ModelTier.fast.effort == "low", "fast tier")
     expect(ModelTier.heavy.effort == "xhigh", "heavy uses extra-high")
     expect(EffortLevel.xhigh.rawValue == "xhigh", "xhigh effort exists")
@@ -250,6 +286,49 @@ func runFeatureParity() {
         boundProject: "/tmp/nope"
     )
     expect(turnedAway == .rejectedUntrusted, "plain text needs a trusted project")
+    parityWait {
+        let cold = ACPClient(
+            locator: GrokBinaryLocator(extraSearchPaths: [], pathEnvironment: "", fileExists: { _ in false }),
+            workingDirectory: parityRoot
+        )
+        let rejected = await IMDelivery.deliver(route: turnedAway, client: cold)
+        expect(rejected == false, "rejected inbound does not send")
+        expect(cold.launchedExecutable.isEmpty, "rejected inbound does not start an agent")
+        let root = parityRoot.appendingPathComponent("im-agent", isDirectory: true)
+        let bin = try parityInstallStub(at: root)
+        let client = ACPClient(locator: parityLocator(bin), workingDirectory: root)
+        defer { client.stop() }
+        let project = root.path
+        let startedRoute = IMRouter.route(
+            inbound: IMInbound(channel: .telegram, sender: "fixture", text: "/p \(root.lastPathComponent) fix-from-im"),
+            trustedProjects: [project],
+            sessions: [],
+            boundProject: nil
+        )
+        expect(startedRoute == .start(project: project, prompt: "fix-from-im"), "live /p route")
+        expect(await IMDelivery.deliver(route: startedRoute, client: client), "/p starts a turn")
+        await parityUntil(8) { parityLog(root).contains("fix-from-im") }
+        expect(parityLog(root).contains("fix-from-im"), "/p prompt reached the agent")
+        let session = client.sessionID ?? ""
+        expect(client.hasWorkspace(session), "/p created the session")
+        let resumeRoute = IMRouter.route(
+            inbound: IMInbound(channel: .slack, sender: "fixture", text: "/r \(session) resume-from-im"),
+            trustedProjects: [project],
+            sessions: client.workspaceIDs,
+            boundProject: project
+        )
+        expect(await IMDelivery.deliver(route: resumeRoute, client: client), "/r continues")
+        await parityUntil(8) { parityLog(root).contains("resume-from-im") }
+        let turnRoute = IMRouter.route(
+            inbound: IMInbound(channel: .discord, sender: "fixture", text: "ping"),
+            trustedProjects: [project],
+            sessions: client.workspaceIDs,
+            boundProject: project
+        )
+        expect(await IMDelivery.deliver(route: turnRoute, client: client), "plain text continues")
+        await parityUntil(8) { parityLog(root).contains("ping") }
+        expect(parityLog(root).contains("ping"), "fixture text reached the agent")
+    }
     print("pass im")
 
     let api = SessionAPIServer()
@@ -300,6 +379,43 @@ func runFeatureParity() {
         )
         expect(accepted.0 == 200 && accepted.1.contains("accepted"), "idle continue is accepted")
         expect(api.snapshot().count == 1, "accept does not add a session")
+        let signal = ParitySignal()
+        api.onQueued = { id, text in
+            signal.id = id
+            signal.text = text
+        }
+        let callback = parityHTTP(
+            method: "POST",
+            url: URL(string: "http://127.0.0.1:\(port)/v1/sessions/busy1/continue")!,
+            bearer: bearer,
+            body: #"{"text":"callback-text"}"#
+        )
+        expect(callback.0 == 200, "callback continue")
+        expect(signal.id == "busy1" && signal.text == "callback-text", "continue notifies the session")
+        parityWait {
+            let mirrorRoot = parityRoot.appendingPathComponent("mirror-agent", isDirectory: true)
+            let mirrorBin = try parityInstallStub(at: mirrorRoot)
+            let mirror = ACPClient(locator: parityLocator(mirrorBin), workingDirectory: mirrorRoot)
+            defer { mirror.stop() }
+            mirror.registerLocalSession(id: "busy1", cwd: mirrorRoot, turnRunning: true)
+            await mirror.deliverMirrorContinues(server: api, sessionID: "missing")
+            expect(mirror.workspaceIDs == ["busy1"], "unknown continue does not create a session")
+            await mirror.deliverMirrorContinues(server: api, sessionID: "busy1")
+            let queuedTexts = mirror.queuedTexts(sessionID: "busy1")
+            expect(queuedTexts.contains("follow up"), "busy continue reaches the session queue")
+            expect(queuedTexts.contains("callback-text"), "later continue stays queued")
+            expect(mirror.launchedExecutable.isEmpty, "busy continue does not start a second agent")
+            expect(!parityLog(mirrorRoot).contains("follow up"), "busy queue is not sent yet")
+            mirror.setTurnRunning("busy1", false)
+            try await mirror.drainFollowUps(sessionID: "busy1")
+            await parityUntil(8) { parityLog(mirrorRoot).contains("follow up") }
+            expect(parityLog(mirrorRoot).contains("follow up"), "drained continue reaches send")
+            let tunnel = MirrorTunnel()
+            try tunnel.launch(port: 9)
+            expect(tunnel.launchedArguments == MirrorBind.tunnelCommand(port: 9), "quick tunnel command")
+            expect(tunnel.launchedPID > 0, "quick tunnel launched")
+            tunnel.stop()
+        }
         api.stop()
     } catch {
         api.stop()
@@ -323,7 +439,34 @@ func runFeatureParity() {
     expect(SSHWorkspace.skillsArgv(host: "devbox") == ["ssh", "devbox", "grok skills list"], "remote skills argv")
     expect(SSHWorkspace.forwardArgv(host: "devbox", localPort: 8787, remotePort: 8787)?.last == "devbox", "loopback forward argv")
     expect(SSHWorkspace.terminalArguments(host: "devbox") == ["-t", "devbox"], "remote terminal argv")
-    expect(SSHWorkspace.agentArguments("devbox").first == "devbox", "remote agent host argument")
+    let agentArgs = SSHWorkspace.agentArguments("devbox")
+    expect(agentArgs.contains("devbox"), "remote agent host argument")
+    expect(agentArgs.contains("BatchMode=yes"), "remote agent does not prompt")
+    parityWait(20) {
+        let keep = SSHKeep()
+        try keep.launch(executable: "/bin/sleep", arguments: ["12"])
+        try await Task.sleep(nanoseconds: 5_000_000_000)
+        expect(keep.isAlive(), "ssh keep stays up past the old timeout")
+        keep.stop()
+        expect(!keep.isAlive(), "ssh keep stops")
+        let root = parityRoot.appendingPathComponent("ssh-agent", isDirectory: true)
+        let bin = try parityInstallStub(at: root)
+        let client = ACPClient(locator: parityLocator(bin), workingDirectory: root)
+        defer { client.stop() }
+        try await client.connectIfNeeded()
+        expect(client.launchedExecutable == bin.path, "local agent starts first")
+        client.remoteHost = "127.0.0.1"
+        do {
+            try await client.connectIfNeeded()
+        } catch {
+            _ = error
+        }
+        expect(client.launchedExecutable == "/usr/bin/ssh", "remote session starts ssh")
+        expect(client.launchedArguments.contains("127.0.0.1"), "ssh target is the host")
+        expect(client.reportedSessionCWD(localPath: "/Users/me/proj") == ".", "remote session cwd is not a local path")
+        client.remoteHost = ""
+        expect(client.reportedSessionCWD(localPath: "/Users/me/proj") == "/Users/me/proj", "local cwd stays local")
+    }
     print("pass ssh")
 
     let pendingPR = #"{"number":7,"comments":[{"id":"c1"}],"reviews":[],"statusCheckRollup":[{"state":"PENDING"}]}"#
@@ -337,6 +480,17 @@ func runFeatureParity() {
     expect(passed.contains { $0.reason == "ci-green" }, "ci becomes green")
     expect(PRWatch.followUps(previousJSON: [pendingPR], currentJSON: ["nope"]).isEmpty, "unreadable gh output")
     expect(PRWatch.classify(before: [PRSnapshot(number: 7, commentIDs: ["c1"], reviewIDs: [], ci: .pending)], after: [PRSnapshot(number: 7, commentIDs: ["c1", "c2"], reviewIDs: [], ci: .failing)], ghReadable: false).isEmpty, "gh flag blocks follow-ups")
+    parityWait {
+        let watcher = ACPClient(
+            locator: GrokBinaryLocator(extraSearchPaths: [], pathEnvironment: "", fileExists: { _ in false }),
+            workingDirectory: parityRoot
+        )
+        watcher.registerLocalSession(id: "pr1", cwd: parityRoot, turnRunning: true)
+        await watcher.enqueueFollowUps(opened, sessionID: "pr1")
+        expect(watcher.queuedTexts(sessionID: "pr1").count == opened.count, "every pull request follow-up is queued")
+        expect(opened.count >= 3, "comment review and ci are separate")
+        expect(watcher.launchedExecutable.isEmpty, "queued follow-ups do not start a new agent")
+    }
     print("pass pr-watch")
 
     attempt("relay") {
@@ -364,6 +518,41 @@ func runFeatureParity() {
         expect(RelayProbe.classify(httpStatus: 401, urlErrorCode: nil) == .auth, "probe auth")
         expect(RelayProbe.classify(httpStatus: nil, urlErrorCode: NSURLErrorTimedOut) == .timeout, "probe timeout")
         expect(RelayProbe.classify(httpStatus: nil, urlErrorCode: NSURLErrorCannotFindHost) == .dns, "probe dns")
+        let home = parityRoot.appendingPathComponent("agent-home", isDirectory: true)
+        let hooks = home.appendingPathComponent("hooks", isDirectory: true)
+        try fm.createDirectory(at: hooks, withIntermediateDirectories: true)
+        try #"{"hooks":[{"event":"SessionStart","command":"echo desk-hook"}]}"#.write(
+            to: hooks.appendingPathComponent("ping.json"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let specs = ExtensionGate.specNames(hooksDirectory: hooks, event: "SessionStart", command: "echo desk-hook")
+        expect(specs == ["global/ping:session_start[0].hooks[0]"], "hook spec \(specs)")
+        var toggles = ExtensionToggles.set([], kind: "hook", name: specs[0], enabled: false)
+        toggles = ExtensionToggles.set(toggles, kind: "mcp", name: "local", enabled: false)
+        toggles = ExtensionToggles.set(toggles, kind: "plugin", name: "demo", enabled: false)
+        toggles = ExtensionToggles.set(toggles, kind: "agent", name: "reviewer", enabled: false)
+        try ExtensionGate.apply(home: home, toggles: toggles)
+        let disabledHooks = try String(contentsOf: home.appendingPathComponent("disabled-hooks"), encoding: .utf8)
+        expect(disabledHooks.contains("global/ping:session_start[0].hooks[0]"), "disabled hook line")
+        let config = try String(contentsOf: home.appendingPathComponent("config.toml"), encoding: .utf8)
+        expect(config.contains("local") && config.contains("demo") && config.contains("reviewer"), "extension config \(config)")
+        let store = home.appendingPathComponent("toggles.json")
+        ExtensionGate.save(toggles, url: store)
+        expect(!ExtensionToggles.isEnabled(ExtensionGate.load(url: store), kind: "mcp", name: "local"), "toggles persist")
+    }
+    parityWait {
+        let home = parityRoot.appendingPathComponent("agent-home", isDirectory: true)
+        let bin = try parityInstallStub(at: home)
+        let client = ACPClient(locator: parityLocator(bin), workingDirectory: home)
+        client.grokHome = home.path
+        defer { client.stop() }
+        try await client.connectIfNeeded()
+        await parityUntil(8) {
+            (try? String(contentsOf: home.appendingPathComponent("env.log"), encoding: .utf8)) == home.path
+        }
+        let seen = (try? String(contentsOf: home.appendingPathComponent("env.log"), encoding: .utf8)) ?? ""
+        expect(seen == home.path, "independent home is GROK_HOME \(seen)")
     }
     print("pass relay")
 
@@ -426,5 +615,118 @@ func runFeatureParity() {
     expect(LocaleCatalog.resolve(preference: "system", preferredLanguages: ["tr-TR"]) == "tr", "turkish locale")
     expect(LocaleCatalog.resolve(preference: nil, preferredLanguages: ["zh-TW"]) == "zh-Hant", "traditional chinese locale")
     expect(LocaleCatalog.languageIDs.count == 16, "language table")
+    expect(ShellLocale.chrome(.navSettings, preference: "ja", preferredLanguages: ["en"]) == "設定", "japanese settings nav")
+    expect(ShellLocale.chrome(.navChat, preference: "ja", preferredLanguages: ["en"]) == "Chat", "product chat stays")
+    expect(ShellLocale.chrome(.navBuild, preference: "ja", preferredLanguages: ["en"]) == "Build", "product build stays")
+    expect(ShellLocale.chrome(.settingsAccount, preference: "ja", preferredLanguages: []) == "アカウント", "japanese account")
+    expect(ShellLocale.chrome(.settingsTitle, preference: "ja", preferredLanguages: []) == "設定", "japanese settings title")
+    expect(ShellLocale.chrome(.errorCLI, preference: "ja", preferredLanguages: []) == "grok が見つかりません。", "japanese missing cli")
+    expect(ShellLocale.chrome(.firstRunTitle, preference: "ja", preferredLanguages: []) == "初期設定", "japanese first run")
+    expect(ShellLocale.chrome(.firstRunBody, preference: "ja", preferredLanguages: []) == "grok をインストールするか、実行ファイルを指定します。", "japanese first run body")
     print("pass locale")
 }
+
+private final class ParitySignal: @unchecked Sendable {
+    var id = ""
+    var text = ""
+}
+
+private func parityLog(_ root: URL) -> String {
+    (try? String(contentsOf: root.appendingPathComponent("rpc.log"), encoding: .utf8)) ?? ""
+}
+
+private func parityWait(_ seconds: TimeInterval = 20, _ body: @escaping @MainActor () async throws -> Void) {
+    let sem = DispatchSemaphore(value: 0)
+    let box = ParitySignal()
+    Task { @MainActor in
+        do {
+            try await body()
+        } catch {
+            box.text = "\(error)"
+        }
+        sem.signal()
+    }
+    let deadline = Date().addingTimeInterval(seconds)
+    while sem.wait(timeout: .now() + 0.05) == .timedOut {
+        if Date() > deadline {
+            fail("parity wait timed out")
+        }
+        RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
+    }
+    if !box.text.isEmpty {
+        fail(box.text)
+    }
+}
+
+private func parityUntil(_ seconds: TimeInterval, _ check: @MainActor () -> Bool) async {
+    let end = Date().addingTimeInterval(seconds)
+    while Date() < end {
+        if check() { return }
+        try? await Task.sleep(nanoseconds: 50_000_000)
+    }
+}
+
+private func parityInstallStub(at root: URL) throws -> URL {
+    let fm = FileManager.default
+    let binDir = root.appendingPathComponent("bin", isDirectory: true)
+    try fm.createDirectory(at: binDir, withIntermediateDirectories: true)
+    let url = binDir.appendingPathComponent("grok")
+    try parityStubSource.write(to: url, atomically: true, encoding: .utf8)
+    try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+    return url
+}
+
+private func parityLocator(_ bin: URL) -> GrokBinaryLocator {
+    let path = bin.standardizedFileURL.path
+    return GrokBinaryLocator(
+        extraSearchPaths: [],
+        pathEnvironment: bin.deletingLastPathComponent().path,
+        fileExists: { $0.standardizedFileURL.path == path }
+    )
+}
+
+private let parityStubSource = """
+#!/usr/bin/env python3
+import json, os, sys
+if "--version" in sys.argv:
+    print("0.test")
+    raise SystemExit(0)
+base = os.path.dirname(os.path.abspath(sys.argv[0]))
+root = os.path.dirname(base)
+with open(os.path.join(root, "env.log"), "w") as handle:
+    handle.write(os.environ.get("GROK_HOME", ""))
+def log(line):
+    with open(os.path.join(root, "rpc.log"), "a") as handle:
+        handle.write(line + "\\n")
+permission = os.path.exists(os.path.join(root, "permission.on"))
+while True:
+    raw = sys.stdin.readline()
+    if raw == "":
+        break
+    line = raw.strip()
+    if not line:
+        continue
+    log(line)
+    try:
+        msg = json.loads(line)
+    except Exception:
+        continue
+    mid = msg.get("id")
+    method = msg.get("method")
+    if method == "initialize":
+        if permission:
+            req = {"jsonrpc":"2.0","id":9001,"method":"session/request_permission","params":{"sessionId":"s","title":"write file","options":[{"optionId":"allow","name":"Allow","kind":"allow_once"},{"optionId":"reject","name":"Reject","kind":"reject"}]}}
+            sys.stdout.write(json.dumps(req) + "\\n")
+            sys.stdout.flush()
+        sys.stdout.write(json.dumps({"jsonrpc":"2.0","id":mid,"result":{"protocolVersion":1}}) + "\\n")
+        sys.stdout.flush()
+    elif method in ("session/new", "session/load"):
+        sys.stdout.write(json.dumps({"jsonrpc":"2.0","id":mid,"result":{"sessionId":"sess-1"}}) + "\\n")
+        sys.stdout.flush()
+    elif method == "session/prompt":
+        sys.stdout.write(json.dumps({"jsonrpc":"2.0","id":mid,"result":{"stopReason":"end_turn"}}) + "\\n")
+        sys.stdout.flush()
+    elif mid is not None and method:
+        sys.stdout.write(json.dumps({"jsonrpc":"2.0","id":mid,"result":{}}) + "\\n")
+        sys.stdout.flush()
+"""

@@ -41,7 +41,11 @@ final class DeskController: ObservableObject {
     @Published var sshNote = ""
     @Published var doctorNote = ""
     @Published var lastFork = ""
+    @Published var inboundDraft = ""
     let sessionAPI = SessionAPIServer()
+    let sshWatch = SSHKeep()
+    let sshForward = SSHKeep()
+    let mirrorTunnel = MirrorTunnel()
     private var mirrorToken = ""
     private var companionPanel: NSPanel?
 
@@ -60,9 +64,14 @@ final class DeskController: ObservableObject {
         return raw.compactMapValues(PermissionTier.init(rawValue:))
     }
 
-    func setProjectTier(_ path: String, tier: PermissionTier) {
+    func setProjectTier(_ path: String, tier: PermissionTier?) {
         var next = projectTiers
-        next[ProjectTrust.normalize(path)] = tier
+        let key = PermissionPolicy.normalize(path)
+        if let tier {
+            next[key] = tier
+        } else {
+            next.removeValue(forKey: key)
+        }
         let encoded = Dictionary(uniqueKeysWithValues: next.map { ($0.key, $0.value.rawValue) })
         if let data = try? JSONEncoder().encode(encoded) {
             projectTiersJSON = String(data: data, encoding: .utf8) ?? "{}"

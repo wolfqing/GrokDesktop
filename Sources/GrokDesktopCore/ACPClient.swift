@@ -30,6 +30,11 @@ public final class ACPClient: ObservableObject {
     @Published public var referenceSessionIDs: [String] = []
     /// Empty means the local grok binary. A set value runs `grok agent stdio` on that SSH host.
     @Published public var remoteHost = ""
+    /// Set only after an independent relay home is saved. Empty leaves the CLI on its own home.
+    public var grokHome = ""
+    public var permissionPolicy = PermissionPolicy()
+    public private(set) var launchedExecutable = ""
+    public private(set) var launchedArguments: [String] = []
     @Published public var modelTier: ModelTier = .auto
     @Published public var buildModel: String = ModelCatalog.fallbackID
     @Published public var effort: EffortLevel = .medium
@@ -121,6 +126,7 @@ public final class ACPClient: ObservableObject {
     private var reconnectTask: Task<Void, Never>?
     private var reconnectAttempt = 0
     private var workspaceByID: [String: SessionWorkspace] = [:]
+    private var touched: [String: Date] = [:]
     private var retainedSessionIDs: [String] = []
     private var loadGeneration = 0
     private let terminalsHost = TerminalHost()
@@ -175,8 +181,19 @@ public final class ACPClient: ObservableObject {
     }
 
     public func connectIfNeeded() async throws {
+        if SSHWorkspace.sessionHost(remoteHost) != nil {
+            let onSSH = process?.isRunning == true && process?.executableURL?.lastPathComponent == "ssh"
+            if onSSH, state == .initialized || state == .ready { return }
+            try await start()
+            return
+        }
         if (state == .initialized || state == .ready), process?.isRunning == true { return }
         try await start()
+    }
+
+    /// Session cwd reported to the agent. A remote host never receives the local folder path.
+    public func reportedSessionCWD(localPath: String) -> String {
+        SSHWorkspace.sessionHost(remoteHost) != nil ? "." : localPath
     }
 
     public func start() async throws {
@@ -211,7 +228,12 @@ public final class ACPClient: ObservableObject {
         }
         environment["PATH"] = (extras + [environment["PATH"] ?? ""]).joined(separator: ":")
         environment = ProxyInject.environment(base: environment, proxy: proxyURL)
+        if !grokHome.isEmpty {
+            environment["GROK_HOME"] = grokHome
+        }
         process.environment = environment
+        launchedExecutable = process.executableURL?.path ?? ""
+        launchedArguments = process.arguments ?? []
 
         let stdin = Pipe()
         let stdout = Pipe()
@@ -289,7 +311,7 @@ public final class ACPClient: ObservableObject {
         let result = try await request(
             method: "session/new",
             params: [
-                "cwd": target.path,
+                "cwd": reportedSessionCWD(localPath: target.path),
                 "mcpServers": [],
                 "_meta": meta
             ]
@@ -623,6 +645,29 @@ public final class ACPClient: ObservableObject {
             noteClaimed(workspace.id)
             return
         }
+        try await drainFollowUps(sessionID: id)
+    }
+
+    /// Sends the next queued follow-up once the turn is idle. A busy session stays queued.
+    public func drainFollowUps(sessionID target: String? = nil) async throws {
+        let id = target ?? sessionID
+        guard let id, let workspace = workspaceByID[id] else { return }
+        if workspace.isTurnRunning { return }
+        if workspace.stopRequested {
+            workspace.promptQueue.removeAll()
+            workspace.armedQueueID = nil
+            workspace.holdQueue = false
+            syncFromCurrent()
+            noteClaimed(workspace.id)
+            return
+        }
+        if workspace.holdQueue {
+            workspace.holdQueue = false
+            workspace.armedQueueID = nil
+            syncFromCurrent()
+            noteClaimed(workspace.id)
+            return
+        }
         guard let next = workspace.promptQueue.first else {
             workspace.armedQueueID = nil
             syncFromCurrent()
@@ -635,6 +680,81 @@ public final class ACPClient: ObservableObject {
         workspace.armedQueueID = nil
         syncFromCurrent()
         try await send(text: nextText, sessionID: id, kind: nextKind)
+    }
+
+    public func enqueueFollowUps(_ items: [PRFollowUp], sessionID target: String?) async {
+        for item in items {
+            try? await send(text: item.text, sessionID: target, kind: .followUp)
+        }
+    }
+
+    /// Continues one existing session. An unknown id is ignored and no session is created.
+    public func deliverMirrorContinues(server: SessionAPIServer, sessionID: String) async {
+        guard workspaceByID[sessionID] != nil else { return }
+        for text in server.takeQueued(id: sessionID) {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            try? await send(text: trimmed, sessionID: sessionID, kind: .followUp)
+        }
+    }
+
+    public func registerLocalSession(id: String, cwd: URL, turnRunning: Bool) {
+        let workspace = ensureWorkspace(id: id, cwd: cwd, directory: nil)
+        workspace.loadedOnAgent = true
+        workspace.isTurnRunning = turnRunning
+        workspace.stopRequested = false
+        sessionID = id
+        lastSessionID = id
+        workingDirectory = cwd
+        rememberLoaded(id)
+        touched[id] = Date()
+        state = .ready
+        refreshLive()
+        syncFromCurrent()
+    }
+
+    public func hasWorkspace(_ id: String) -> Bool {
+        workspaceByID[id] != nil
+    }
+
+    public var workspaceIDs: [String] {
+        workspaceByID.keys.sorted()
+    }
+
+    public func queuedTexts(sessionID id: String) -> [String] {
+        workspaceByID[id]?.promptQueue.map(\.text) ?? []
+    }
+
+    public func setTurnRunning(_ id: String, running: Bool) {
+        workspaceByID[id]?.isTurnRunning = running
+        if sessionID == id {
+            isTurnRunning = running
+        }
+        refreshLive()
+    }
+
+    public func idleAge(id: String, now: Date = Date()) -> Int {
+        guard let workspace = workspaceByID[id] else { return 0 }
+        if workspace.isTurnRunning || workspace.permission != nil || workspace.userQuestion != nil {
+            return 0
+        }
+        guard let start = touched[id] else { return 0 }
+        return max(0, Int(now.timeIntervalSince(start)))
+    }
+
+    @discardableResult
+    public func reapSessions(idleSeconds: [String: Int], focusedID: String?) -> [String] {
+        let dropped = SessionBoard.recycle(
+            idleSeconds: idleSeconds,
+            cap: SessionBoard.processCap,
+            idleLimit: SessionBoard.idleRecycleSeconds
+        )
+        let victims = dropped.filter { $0 != focusedID }
+        for id in victims {
+            dropWorkspace(id)
+            touched[id] = nil
+        }
+        return victims
     }
 
     public func sendNow(text: String, sessionID target: String? = nil, kind: QueuedPrompt.Kind = .followUp) async throws {
@@ -826,6 +946,31 @@ public final class ACPClient: ObservableObject {
             }
         }
         syncFromCurrent()
+    }
+
+    public func answerWithPolicy(_ tier: PermissionTier, sessionID target: String? = nil) {
+        switch tier {
+        case .deny:
+            setMode(.plan)
+            rejectPermission(sessionID: target)
+        case .yolo:
+            setMode(.alwaysApprove)
+            allowPending(remember: false, sessionID: target)
+        case .allowSession:
+            allowPending(remember: true, sessionID: target)
+        case .allowOnce:
+            allowPending(remember: false, sessionID: target)
+        case .ask:
+            break
+        }
+    }
+
+    private func allowPending(remember: Bool, sessionID target: String?) {
+        let workspace = (target ?? sessionID).flatMap { workspaceByID[$0] } ?? currentWorkspace
+        guard let workspace, let permission = workspace.permission,
+              let allow = permission.options.first(where: { !$0.kind.contains("reject") && !$0.id.contains("cancel") })
+        else { return }
+        answerPermission(optionID: allow.id, rememberSession: remember, sessionID: workspace.id)
     }
 
     public func rejectPermission(sessionID target: String? = nil) {
@@ -1240,6 +1385,33 @@ public final class ACPClient: ObservableObject {
                     )
                     return false
                 }
+                let tier = permissionPolicy.decision(nil, project: workspace.cwd.path)
+                switch tier {
+                case .deny:
+                    mode = .plan
+                    workspace.mode = .plan
+                    if let cancel = request.options.first(where: { $0.kind.contains("reject") || $0.id.contains("cancel") }) {
+                        respond(id: id, result: ["outcome": ["outcome": "selected", "optionId": cancel.id]])
+                    } else {
+                        respond(id: id, result: ["outcome": ["outcome": "cancelled"]])
+                    }
+                    return false
+                case .yolo:
+                    mode = .alwaysApprove
+                    workspace.mode = .alwaysApprove
+                    if let allow = request.options.first(where: { !$0.kind.contains("reject") }) {
+                        respond(id: id, result: ["outcome": ["outcome": "selected", "optionId": allow.id]])
+                    }
+                    return false
+                case .allowSession:
+                    if let allow = request.options.first(where: { !$0.kind.contains("reject") }) {
+                        workspace.sessionAllowTitles.insert(request.title)
+                        respond(id: id, result: ["outcome": ["outcome": "selected", "optionId": allow.id]])
+                        return false
+                    }
+                case .ask, .allowOnce:
+                    break
+                }
                 workspace.permission = request
             }
             return true
@@ -1307,6 +1479,10 @@ public final class ACPClient: ObservableObject {
             } else if let completed = updates.last(where: { $0.kind == .turnCompleted }) {
                 workspace.finishTurn(at: completed.timestamp ?? Date())
                 noteIdle(workspace)
+                let finished = workspace.id
+                Task { @MainActor in
+                    try? await self.drainFollowUps(sessionID: finished)
+                }
             }
             if updates.contains(where: { $0.kind == .plan }), let directory = workspace.directory {
                 let workspaceID = workspace.id
@@ -1414,6 +1590,7 @@ public final class ACPClient: ObservableObject {
 
     private func noteIdle(_ workspace: SessionWorkspace) {
         guard !workspace.stopRequested, !workspace.isLive else { return }
+        touched[workspace.id] = Date()
         workspace.refreshArtifacts()
         onWorkspaceIdle?(workspace)
     }

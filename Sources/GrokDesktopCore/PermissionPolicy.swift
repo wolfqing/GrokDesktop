@@ -40,6 +40,12 @@ public struct PermissionPolicy: Equatable, Sendable {
         projectTiers[Self.normalize(path)] ?? tier
     }
 
+    public func clearingProject(_ path: String) -> PermissionPolicy {
+        var copy = self
+        copy.projectTiers.removeValue(forKey: Self.normalize(path))
+        return copy
+    }
+
     public func setting(_ choice: PermissionChoice, project path: String?) -> PermissionPolicy {
         var copy = self
         let next = Self.tier(for: choice)
