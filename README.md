@@ -1,5 +1,7 @@
 # Grok Desktop
 
+<img src="Resources/AppIcon-1024.png" alt="Grok" width="96">
+
 [![Release](https://img.shields.io/github/v/release/wolfqing/GrokDesktop)](https://github.com/wolfqing/GrokDesktop/releases/latest)
 [![macOS 14+](https://img.shields.io/badge/macOS-14%2B-000000)](https://github.com/wolfqing/GrokDesktop)
 [![Swift](https://img.shields.io/badge/Swift-6-F05138)](https://www.swift.org)
@@ -22,7 +24,7 @@ Community project. Not an official xAI / SpaceXAI product.
 
 **Download:** [Grok-Desktop-0.1.31.zip](https://github.com/wolfqing/GrokDesktop/releases/download/v0.1.31/Grok-Desktop-0.1.31.zip) · [All releases](https://github.com/wolfqing/GrokDesktop/releases) · [Changelog](CHANGELOG.md)
 
-**0.1.31:** trusted project folders, a phone mirror that continues a session you already have, message bridges, and a remote host over SSH.
+**0.1.31:** trusted project folders, a phone mirror that continues a session you already have, message bridges, a remote host over SSH, and the Grok mark as the Dock and Finder icon.
 
 1. macOS 14+
 2. Unzip and move `Grok Desktop.app` to Applications
