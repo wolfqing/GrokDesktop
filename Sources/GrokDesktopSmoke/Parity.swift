@@ -451,21 +451,41 @@ func runFeatureParity() {
         expect(!keep.isAlive(), "ssh keep stops")
         let root = parityRoot.appendingPathComponent("ssh-agent", isDirectory: true)
         let bin = try parityInstallStub(at: root)
+        let remoteRoot = parityRoot.appendingPathComponent("ssh-remote", isDirectory: true)
+        let remoteBin = try parityInstallStub(at: remoteRoot)
         let client = ACPClient(locator: parityLocator(bin), workingDirectory: root)
         defer { client.stop() }
-        try await client.connectIfNeeded()
+        try await client.newSession(cwd: root)
         expect(client.launchedExecutable == bin.path, "local agent starts first")
-        client.remoteHost = "127.0.0.1"
+        let localNew = parityLog(root).split(whereSeparator: \.isNewline).first { $0.contains("\"method\":\"session/new\"") } ?? ""
+        expect(localNew.contains(root.path), "local session/new keeps the local cwd")
+        client.sshExecutable = remoteBin
+        try await client.newRemoteSession(host: "devbox", localAnchor: root)
+        expect(client.launchedExecutable == remoteBin.path, "remote newSession leaves the local agent")
+        expect(client.launchedArguments == SSHWorkspace.agentArguments("devbox"), "remote newSession runs grok agent stdio")
+        let remoteNew = parityLog(remoteRoot).split(whereSeparator: \.isNewline).first { $0.contains("\"method\":\"session/new\"") } ?? ""
+        expect(remoteNew.contains("\"cwd\":\".\""), "remote session/new cwd is dot")
+        expect(!remoteNew.contains(root.path), "remote session/new omits the local folder")
+        expect(client.reportedSessionCWD(localPath: root.path) == ".", "remote report stays dot")
+        let realRoot = parityRoot.appendingPathComponent("ssh-real", isDirectory: true)
+        let realBin = try parityInstallStub(at: realRoot)
+        let real = ACPClient(locator: parityLocator(realBin), workingDirectory: realRoot)
+        real.sshArgumentPrefix = ["-o", "ProxyCommand=/usr/bin/false"]
+        defer { real.stop() }
         do {
-            try await client.connectIfNeeded()
+            try await real.newRemoteSession(host: "127.0.0.1", localAnchor: realRoot)
+            fail("closed ssh must not open a local session")
         } catch {
             _ = error
         }
-        expect(client.launchedExecutable == "/usr/bin/ssh", "remote session starts ssh")
-        expect(client.launchedArguments.contains("127.0.0.1"), "ssh target is the host")
-        expect(client.reportedSessionCWD(localPath: "/Users/me/proj") == ".", "remote session cwd is not a local path")
+        expect(real.launchedExecutable == "/usr/bin/ssh", "newRemoteSession launches ssh")
+        expect(real.launchedExecutable != realBin.path, "newRemoteSession does not launch local grok")
+        expect(real.launchedArguments.contains("grok agent --no-leader stdio"), "ssh runs grok agent stdio")
+        expect(real.launchedArguments.contains("127.0.0.1"), "ssh host is its own argument")
+        expect(real.sessionID == nil, "failed ssh does not create a session")
+        expect(!parityLog(realRoot).contains("session/new"), "failed ssh does not talk to the local stub")
         client.remoteHost = ""
-        expect(client.reportedSessionCWD(localPath: "/Users/me/proj") == "/Users/me/proj", "local cwd stays local")
+        expect(client.reportedSessionCWD(localPath: root.path) == root.path, "local cwd stays local")
     }
     print("pass ssh")
 

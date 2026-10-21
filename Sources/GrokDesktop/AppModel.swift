@@ -1779,11 +1779,11 @@ final class AppModel: ObservableObject {
             flash(copy.t("That host is not an SSH alias.", "这不是一个 SSH 主机别名。"))
             return
         }
-        client.remoteHost = host
         destination = .build
+        let anchor = client.workingDirectory
         Task {
             do {
-                try await client.newSession(cwd: client.workingDirectory)
+                try await client.newRemoteSession(host: host, localAnchor: anchor)
                 firstRunReason = nil
                 refreshWorkspace()
             } catch {

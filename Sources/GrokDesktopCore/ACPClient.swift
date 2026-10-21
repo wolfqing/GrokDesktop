@@ -30,6 +30,10 @@ public final class ACPClient: ObservableObject {
     @Published public var referenceSessionIDs: [String] = []
     /// Empty means the local grok binary. A set value runs `grok agent stdio` on that SSH host.
     @Published public var remoteHost = ""
+    /// Remote sessions exec this program. The app leaves it at `/usr/bin/ssh`.
+    public var sshExecutable = URL(fileURLWithPath: "/usr/bin/ssh")
+    /// OpenSSH options placed before the agent command. Empty in the app.
+    public var sshArgumentPrefix: [String] = []
     /// Set only after an independent relay home is saved. Empty leaves the CLI on its own home.
     public var grokHome = ""
     public var permissionPolicy = PermissionPolicy()
@@ -196,14 +200,23 @@ public final class ACPClient: ObservableObject {
         SSHWorkspace.sessionHost(remoteHost) != nil ? "." : localPath
     }
 
+    /// Starts `grok agent stdio` on `host` over SSH. `localAnchor` is only the local UI folder.
+    public func newRemoteSession(host: String, localAnchor: URL) async throws {
+        guard SSHWorkspace.sessionHost(host) != nil else {
+            throw ACPError.rpc("That host is not an SSH alias.")
+        }
+        remoteHost = host
+        try await newSession(cwd: localAnchor)
+    }
+
     public func start() async throws {
         stop(reconnect: false)
         shouldReconnect = true
         let process = Process()
         if let host = SSHWorkspace.sessionHost(remoteHost) {
             state = .connecting
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
-            process.arguments = SSHWorkspace.agentArguments(host)
+            process.executableURL = sshExecutable
+            process.arguments = sshArgumentPrefix + SSHWorkspace.agentArguments(host)
             process.currentDirectoryURL = nil
         } else {
             guard let grok = locator.locate() else {
@@ -527,7 +540,7 @@ public final class ACPClient: ObservableObject {
             method: "session/load",
             params: [
                 "sessionId": workspace.id,
-                "cwd": workspace.cwd.path,
+                "cwd": reportedSessionCWD(localPath: workspace.cwd.path),
                 "mcpServers": []
             ]
         )
@@ -1179,10 +1192,11 @@ public final class ACPClient: ObservableObject {
     public func refreshGit() async {
         gitStatusText = ""
         gitDiffText = ""
-        if let status = try? await request(method: "x.ai/git/status", params: ["cwd": workingDirectory.path]) {
+        let agentCWD = reportedSessionCWD(localPath: workingDirectory.path)
+        if let status = try? await request(method: "x.ai/git/status", params: ["cwd": agentCWD]) {
             gitStatusText = Self.pretty(status.result)
         }
-        if let diffs = try? await request(method: "x.ai/git/diffs", params: ["cwd": workingDirectory.path]) {
+        if let diffs = try? await request(method: "x.ai/git/diffs", params: ["cwd": agentCWD]) {
             let extracted = DiffScan.extractPatch(from: diffs.result)
             gitDiffText = extracted.isEmpty ? Self.pretty(diffs.result) : extracted
         }
@@ -1199,7 +1213,7 @@ public final class ACPClient: ObservableObject {
         guard let result = try? await request(
             method: "x.ai/fs/list",
             params: [
-                "path": workingDirectory.path,
+                "path": reportedSessionCWD(localPath: workingDirectory.path),
                 "query": query
             ]
         ) else { return [] }
