@@ -18,6 +18,7 @@ Sessions, trusted folders, a phone mirror, message bridges, and a remote host.
 - The first launch looks for `grok` and accepts a path you pick. A missing CLI, a sign-in problem, a network problem, and an agent crash stay separate.
 - An HTTP or SOCKS proxy is passed through. The sandbox can be off or restricted.
 - With no language chosen, the shell follows the system language. You can pick English, Simplified or Traditional Chinese, Japanese, Korean, German, French, Russian, Spanish, Brazilian Portuguese, Italian, Indonesian, Tamil, Ukrainian, Filipino, or Turkish. Chat and Build stay those words.
+- The Dock and Finder icon is the Grok mark from grok.com.
 
 ## 0.1.30 - 2026-10-16
 

@@ -16,6 +16,7 @@ res="$app/Contents/Resources"
 rm -rf "$app"
 mkdir -p "$macos" "$res"
 cp "$bin" "$macos/GrokDesktop"
+cp "$root/Resources/AppIcon.icns" "$res/AppIcon.icns"
 
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -34,6 +35,8 @@ cat > "$app/Contents/Info.plist" <<PLIST
   <string>Grok Desktop</string>
   <key>CFBundleDisplayName</key>
   <string>Grok Desktop</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
