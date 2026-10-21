@@ -36,6 +36,10 @@ public final class ACPClient: ObservableObject {
     public var sshArgumentPrefix: [String] = []
     /// Set only after an independent relay home is saved. Empty leaves the CLI on its own home.
     public var grokHome = ""
+    /// Saved sessions the mirror and `/r` can resume when they are not already open.
+    public var sessionIndex = SessionIndex()
+    /// GROK_HOME of the running agent. Empty when the process was started without one.
+    private var launchedHome = ""
     public var permissionPolicy = PermissionPolicy()
     public private(set) var launchedExecutable = ""
     public private(set) var launchedArguments: [String] = []
@@ -185,14 +189,44 @@ public final class ACPClient: ObservableObject {
     }
 
     public func connectIfNeeded() async throws {
+        let homeMatches = launchedHome == grokHome
         if SSHWorkspace.sessionHost(remoteHost) != nil {
             let onSSH = process?.isRunning == true && process?.executableURL?.lastPathComponent == "ssh"
-            if onSSH, state == .initialized || state == .ready { return }
+            if onSSH, homeMatches, state == .initialized || state == .ready { return }
             try await start()
             return
         }
-        if (state == .initialized || state == .ready), process?.isRunning == true { return }
+        if homeMatches, (state == .initialized || state == .ready), process?.isRunning == true { return }
         try await start()
+    }
+
+    /// Applies an agent home immediately. A running CLI is restarted so it inherits GROK_HOME.
+    public func applyAgentHome(_ home: String) async throws {
+        grokHome = home
+        guard process?.isRunning == true, launchedHome != home else { return }
+        let resumeID = sessionID
+        let resumeCWD = workingDirectory
+        let resumeDirectory = sessionDirectory
+        try await start()
+        guard let resumeID else { return }
+        try await loadSession(id: resumeID, cwd: resumeCWD, directory: resumeDirectory)
+    }
+
+    /// Opens a saved session that is not on the agent. An unknown id does not create one.
+    @discardableResult
+    public func loadIndexedSession(_ id: String) async throws -> Bool {
+        if let workspace = workspaceByID[id] {
+            if workspace.loadedOnAgent { return true }
+            try await loadSession(id: id, cwd: workspace.cwd, directory: workspace.directory)
+            return workspaceByID[id] != nil
+        }
+        guard let record = sessionIndex.record(id: id), !record.cwd.isEmpty else { return false }
+        try await loadSession(
+            id: id,
+            cwd: URL(fileURLWithPath: record.cwd),
+            directory: record.directory
+        )
+        return workspaceByID[id] != nil
     }
 
     /// Session cwd reported to the agent. A remote host never receives the local folder path.
@@ -244,6 +278,7 @@ public final class ACPClient: ObservableObject {
         if !grokHome.isEmpty {
             environment["GROK_HOME"] = grokHome
         }
+        launchedHome = grokHome
         process.environment = environment
         launchedExecutable = process.executableURL?.path ?? ""
         launchedArguments = process.arguments ?? []
@@ -701,9 +736,10 @@ public final class ACPClient: ObservableObject {
         }
     }
 
-    /// Continues one existing session. An unknown id is ignored and no session is created.
+    /// Continues one existing session. A saved session is loaded first. An unknown id is ignored.
     public func deliverMirrorContinues(server: SessionAPIServer, sessionID: String) async {
-        guard workspaceByID[sessionID] != nil else { return }
+        let known = (try? await loadIndexedSession(sessionID)) ?? false
+        guard known, workspaceByID[sessionID] != nil else { return }
         for text in server.takeQueued(id: sessionID) {
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { continue }
@@ -1256,6 +1292,9 @@ public final class ACPClient: ObservableObject {
             continuation.resume(throwing: ACPError.processExited(1))
         }
         pending.removeAll()
+        for workspace in workspaceByID.values {
+            workspace.loadedOnAgent = false
+        }
         if !reconnect {
             state = .idle
             isReconnecting = false

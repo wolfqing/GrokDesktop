@@ -328,6 +328,38 @@ func runFeatureParity() {
         expect(await IMDelivery.deliver(route: turnRoute, client: client), "plain text continues")
         await parityUntil(8) { parityLog(root).contains("ping") }
         expect(parityLog(root).contains("ping"), "fixture text reached the agent")
+        let resumeRoot = parityRoot.appendingPathComponent("im-resume", isDirectory: true)
+        let resumeBin = try parityInstallStub(at: resumeRoot)
+        let resumeClient = ACPClient(locator: parityLocator(resumeBin), workingDirectory: resumeRoot)
+        defer { resumeClient.stop() }
+        let indexRoot = parityRoot.appendingPathComponent("im-index", isDirectory: true)
+        let savedDir = indexRoot.appendingPathComponent("proj", isDirectory: true).appendingPathComponent("saved-im", isDirectory: true)
+        try FileManager.default.createDirectory(at: savedDir, withIntermediateDirectories: true)
+        try #"{"generated_title":"Saved","info":{"id":"saved-im","cwd":"\#(resumeRoot.path)"}}"#.write(
+            to: savedDir.appendingPathComponent("summary.json"),
+            atomically: true,
+            encoding: .utf8
+        )
+        resumeClient.sessionIndex = SessionIndex(sessionsRoot: indexRoot)
+        expect(!resumeClient.hasWorkspace("saved-im"), "saved session is not open yet")
+        let savedRoute = IMRouter.route(
+            inbound: IMInbound(channel: .slack, sender: "fixture", text: "/r saved-im resume-saved"),
+            trustedProjects: [resumeRoot.path],
+            sessions: ["saved-im"],
+            boundProject: resumeRoot.path
+        )
+        expect(savedRoute == .resume(sessionID: "saved-im", prompt: "resume-saved"), "indexed /r route")
+        expect(await IMDelivery.deliver(route: savedRoute, client: resumeClient), "/r loads a saved session")
+        await parityUntil(8) {
+            parityLog(resumeRoot).contains("resume-saved") && parityContainsMethod(parityLog(resumeRoot), "session/load")
+        }
+        let resumeLog = parityLog(resumeRoot)
+        expect(parityContainsMethod(resumeLog, "session/load"), "/r calls loadSession")
+        expect(resumeLog.contains("resume-saved"), "/r prompt reached the agent")
+        expect(!parityContainsMethod(resumeLog, "session/new"), "/r does not start a new session")
+        expect(resumeClient.hasWorkspace("saved-im"), "saved session is open")
+        let missingRoute = IMRoute.resume(sessionID: "not-indexed", prompt: "nope")
+        expect(await IMDelivery.deliver(route: missingRoute, client: resumeClient) == false, "unknown /r does not send")
     }
     print("pass im")
 
@@ -397,6 +429,7 @@ func runFeatureParity() {
             let mirrorBin = try parityInstallStub(at: mirrorRoot)
             let mirror = ACPClient(locator: parityLocator(mirrorBin), workingDirectory: mirrorRoot)
             defer { mirror.stop() }
+            mirror.sessionIndex = SessionIndex(sessionsRoot: parityRoot.appendingPathComponent("mirror-empty", isDirectory: true))
             mirror.registerLocalSession(id: "busy1", cwd: mirrorRoot, turnRunning: true)
             await mirror.deliverMirrorContinues(server: api, sessionID: "missing")
             expect(mirror.workspaceIDs == ["busy1"], "unknown continue does not create a session")
@@ -406,10 +439,43 @@ func runFeatureParity() {
             expect(queuedTexts.contains("callback-text"), "later continue stays queued")
             expect(mirror.launchedExecutable.isEmpty, "busy continue does not start a second agent")
             expect(!parityLog(mirrorRoot).contains("follow up"), "busy queue is not sent yet")
-            mirror.setTurnRunning("busy1", false)
+            mirror.setTurnRunning("busy1", running: false)
             try await mirror.drainFollowUps(sessionID: "busy1")
             await parityUntil(8) { parityLog(mirrorRoot).contains("follow up") }
             expect(parityLog(mirrorRoot).contains("follow up"), "drained continue reaches send")
+            let savedRoot = parityRoot.appendingPathComponent("mirror-index", isDirectory: true)
+            let savedDir = savedRoot.appendingPathComponent("proj", isDirectory: true).appendingPathComponent("saved1", isDirectory: true)
+            try FileManager.default.createDirectory(at: savedDir, withIntermediateDirectories: true)
+            try #"{"generated_title":"Saved","info":{"id":"saved1","cwd":"\#(mirrorRoot.path)"}}"#.write(
+                to: savedDir.appendingPathComponent("summary.json"),
+                atomically: true,
+                encoding: .utf8
+            )
+            mirror.sessionIndex = SessionIndex(sessionsRoot: savedRoot)
+            expect(!mirror.hasWorkspace("saved1"), "listed session is not open")
+            api.update(sessions: [SessionAPIServer.ListedSession(id: "saved1", busy: false)])
+            api.onQueued = { _, _ in
+                Task { @MainActor in
+                    await mirror.deliverMirrorContinues(server: api, sessionID: "saved1")
+                }
+            }
+            let loaded = parityHTTP(
+                method: "POST",
+                url: URL(string: "http://127.0.0.1:\(port)/v1/sessions/saved1/continue")!,
+                bearer: bearer,
+                body: #"{"text":"load-from-mirror"}"#
+            )
+            expect(loaded.0 == 200 && loaded.1.contains("accepted"), "unloaded continue is accepted")
+            await parityUntil(8) {
+                parityLog(mirrorRoot).contains("load-from-mirror") && parityContainsMethod(parityLog(mirrorRoot), "session/load")
+            }
+            let savedLoad = parityLog(mirrorRoot).split(whereSeparator: \.isNewline).first {
+                parityContainsMethod(String($0), "session/load") && $0.contains("saved1")
+            } ?? ""
+            expect(!savedLoad.isEmpty, "unloaded continue calls loadSession")
+            expect(parityLog(mirrorRoot).contains("load-from-mirror"), "unloaded continue reaches send")
+            expect(mirror.hasWorkspace("saved1"), "unloaded continue opens the saved session")
+            expect(!parityContainsMethod(parityLog(mirrorRoot), "session/new"), "unloaded continue does not create a session")
             let tunnel = MirrorTunnel()
             try tunnel.launch(port: 9)
             expect(tunnel.launchedArguments == MirrorBind.tunnelCommand(port: 9), "quick tunnel command")
@@ -457,15 +523,15 @@ func runFeatureParity() {
         defer { client.stop() }
         try await client.newSession(cwd: root)
         expect(client.launchedExecutable == bin.path, "local agent starts first")
-        let localNew = parityLog(root).split(whereSeparator: \.isNewline).first { $0.contains("\"method\":\"session/new\"") } ?? ""
-        expect(localNew.contains(root.path), "local session/new keeps the local cwd")
+        let localNew = parityLog(root).split(whereSeparator: \.isNewline).first { parityContainsMethod(String($0), "session/new") } ?? ""
+        expect(parityContainsPath(String(localNew), root.path), "local session/new keeps the local cwd")
         client.sshExecutable = remoteBin
         try await client.newRemoteSession(host: "devbox", localAnchor: root)
         expect(client.launchedExecutable == remoteBin.path, "remote newSession leaves the local agent")
         expect(client.launchedArguments == SSHWorkspace.agentArguments("devbox"), "remote newSession runs grok agent stdio")
-        let remoteNew = parityLog(remoteRoot).split(whereSeparator: \.isNewline).first { $0.contains("\"method\":\"session/new\"") } ?? ""
+        let remoteNew = parityLog(remoteRoot).split(whereSeparator: \.isNewline).first { parityContainsMethod(String($0), "session/new") } ?? ""
         expect(remoteNew.contains("\"cwd\":\".\""), "remote session/new cwd is dot")
-        expect(!remoteNew.contains(root.path), "remote session/new omits the local folder")
+        expect(!parityContainsPath(String(remoteNew), root.path), "remote session/new omits the local folder")
         expect(client.reportedSessionCWD(localPath: root.path) == ".", "remote report stays dot")
         let realRoot = parityRoot.appendingPathComponent("ssh-real", isDirectory: true)
         let realBin = try parityInstallStub(at: realRoot)
@@ -483,7 +549,7 @@ func runFeatureParity() {
         expect(real.launchedArguments.contains("grok agent --no-leader stdio"), "ssh runs grok agent stdio")
         expect(real.launchedArguments.contains("127.0.0.1"), "ssh host is its own argument")
         expect(real.sessionID == nil, "failed ssh does not create a session")
-        expect(!parityLog(realRoot).contains("session/new"), "failed ssh does not talk to the local stub")
+        expect(!parityContainsMethod(parityLog(realRoot), "session/new"), "failed ssh does not talk to the local stub")
         client.remoteHost = ""
         expect(client.reportedSessionCWD(localPath: root.path) == root.path, "local cwd stays local")
     }
@@ -573,6 +639,16 @@ func runFeatureParity() {
         }
         let seen = (try? String(contentsOf: home.appendingPathComponent("env.log"), encoding: .utf8)) ?? ""
         expect(seen == home.path, "independent home is GROK_HOME \(seen)")
+        try await client.newSession(cwd: home)
+        let switched = parityRoot.appendingPathComponent("agent-home-switched", isDirectory: true)
+        try FileManager.default.createDirectory(at: switched, withIntermediateDirectories: true)
+        try await client.applyAgentHome(switched.path)
+        await parityUntil(8) {
+            (try? String(contentsOf: home.appendingPathComponent("env.log"), encoding: .utf8)) == switched.path
+        }
+        let restarted = (try? String(contentsOf: home.appendingPathComponent("env.log"), encoding: .utf8)) ?? ""
+        expect(restarted == switched.path, "live agent restarts onto the saved home \(restarted)")
+        expect(parityContainsMethod(parityLog(home), "session/load"), "live session reloads on the new home")
     }
     print("pass relay")
 
@@ -655,6 +731,17 @@ private func parityLog(_ root: URL) -> String {
     (try? String(contentsOf: root.appendingPathComponent("rpc.log"), encoding: .utf8)) ?? ""
 }
 
+/// JSONSerialization escapes `/`, so a method can appear as `session\/load`.
+private func parityContainsMethod(_ log: String, _ method: String) -> Bool {
+    let escaped = method.replacingOccurrences(of: "/", with: "\\/")
+    return log.contains("\"method\":\"\(method)\"") || log.contains("\"method\":\"\(escaped)\"")
+}
+
+private func parityContainsPath(_ log: String, _ path: String) -> Bool {
+    let escaped = path.replacingOccurrences(of: "/", with: "\\/")
+    return log.contains(path) || log.contains(escaped)
+}
+
 private func parityWait(_ seconds: TimeInterval = 20, _ body: @escaping @MainActor () async throws -> Void) {
     let sem = DispatchSemaphore(value: 0)
     let box = ParitySignal()
@@ -681,7 +768,7 @@ private func parityWait(_ seconds: TimeInterval = 20, _ body: @escaping @MainAct
 private func parityUntil(_ seconds: TimeInterval, _ check: @MainActor () -> Bool) async {
     let end = Date().addingTimeInterval(seconds)
     while Date() < end {
-        if check() { return }
+        if await check() { return }
         try? await Task.sleep(nanoseconds: 50_000_000)
     }
 }

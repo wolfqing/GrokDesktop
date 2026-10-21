@@ -1455,6 +1455,7 @@ final class AppModel: ObservableObject {
             sessionIndex = SessionIndex(sessionsRoot: next)
             refreshSessions()
         }
+        client.sessionIndex = sessionIndex
     }
 
     func setSessionDataMode(_ mode: SessionDataMode) {
@@ -3774,12 +3775,15 @@ final class AppModel: ObservableObject {
     }
 
     func syncAgentHome() {
+        let home: String
         if UserDefaults.standard.bool(forKey: "relayHomeApplied"),
            UserDefaults.standard.string(forKey: "relayHomeMode") == RelayHomeMode.independent.rawValue {
-            client.grokHome = independentRelayHome.path
+            home = independentRelayHome.path
         } else {
-            client.grokHome = ""
+            home = ""
         }
+        client.grokHome = home
+        Task { try? await client.applyAgentHome(home) }
     }
 
     private var independentRelayHome: URL {

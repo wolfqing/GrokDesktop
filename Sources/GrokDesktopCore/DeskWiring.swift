@@ -47,8 +47,8 @@ public enum IMDelivery {
                 return false
             }
         case .resume(let sessionID, let prompt):
-            guard client.hasWorkspace(sessionID) else { return false }
             do {
+                guard try await client.loadIndexedSession(sessionID) else { return false }
                 try await client.send(text: prompt, sessionID: sessionID)
                 return true
             } catch {
