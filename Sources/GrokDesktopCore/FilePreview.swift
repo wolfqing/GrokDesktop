@@ -4,6 +4,10 @@ public enum FilePreviewKind: String, Sendable, Equatable {
     case markdown
     case html
     case image
+    case video
+    case audio
+    case pdf
+    case office
     case text
     case binary
     case directory
@@ -91,6 +95,14 @@ public enum FilePreview {
             return .image
         case "svg":
             return .image
+        case "mp4", "mov", "m4v", "webm":
+            return .video
+        case "mp3", "wav", "m4a", "aac", "flac":
+            return .audio
+        case "pdf":
+            return .pdf
+        case "doc", "docx", "ppt", "pptx", "xls", "xlsx", "odt", "ods", "odp":
+            return .office
         case "swift", "txt", "text", "json", "jsonl", "toml", "yml", "yaml", "xml",
              "plist", "sh", "zsh", "bash", "py", "rb", "rs", "go", "ts", "tsx", "js",
              "jsx", "css", "scss", "c", "h", "hh", "hpp", "cpp", "cc", "m", "mm",

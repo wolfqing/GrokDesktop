@@ -26,6 +26,10 @@ public final class ACPClient: ObservableObject {
     @Published public private(set) var decodeFailures = 0
     @Published public private(set) var grokVersion: String?
     @Published public var workingDirectory: URL
+    @Published public var proxyURL: String = UserDefaults.standard.string(forKey: "proxyURL") ?? ""
+    @Published public var referenceSessionIDs: [String] = []
+    /// Empty means the local grok binary. A set value runs `grok agent stdio` on that SSH host.
+    @Published public var remoteHost = ""
     @Published public var modelTier: ModelTier = .auto
     @Published public var buildModel: String = ModelCatalog.fallbackID
     @Published public var effort: EffortLevel = .medium
@@ -151,6 +155,16 @@ public final class ACPClient: ObservableObject {
         terminals = terminalsHost.snapshots
     }
 
+    /// Opens a remote shell with the system `ssh`. The host is its own argument, and no remote path becomes the local cwd.
+    public func openRemoteTerminal(host: String) throws -> String {
+        guard let args = SSHWorkspace.terminalArguments(host: host) else {
+            throw ACPError.rpc("Remote host refused")
+        }
+        let id = try terminalsHost.create(command: "/usr/bin/ssh", args: args, cwd: nil)
+        terminals = terminalsHost.snapshots
+        return id
+    }
+
     public var grokURL: URL? { locator.locate() }
 
     public func apply(tier: ModelTier) {
@@ -168,26 +182,35 @@ public final class ACPClient: ObservableObject {
     public func start() async throws {
         stop(reconnect: false)
         shouldReconnect = true
-        guard let grok = locator.locate() else {
-            state = .failed(ACPError.grokNotFound.localizedDescription)
-            throw ACPError.grokNotFound
-        }
-
-        state = .connecting
-        grokVersion = Self.readVersion(locator: locator)
         let process = Process()
-        process.executableURL = grok
-        process.arguments = ["agent", "--no-leader", "stdio"]
-        process.currentDirectoryURL = workingDirectory
+        if let host = SSHWorkspace.sessionHost(remoteHost) {
+            state = .connecting
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
+            process.arguments = SSHWorkspace.agentArguments(host)
+            process.currentDirectoryURL = nil
+        } else {
+            guard let grok = locator.locate() else {
+                state = .failed(ACPError.grokNotFound.localizedDescription)
+                throw ACPError.grokNotFound
+            }
+            state = .connecting
+            grokVersion = Self.readVersion(locator: locator)
+            process.executableURL = grok
+            process.arguments = ["agent", "--no-leader", "stdio"]
+            process.currentDirectoryURL = workingDirectory
+        }
         var environment = ProcessInfo.processInfo.environment
-        let extras = [
-            grok.deletingLastPathComponent().path,
+        var extras = [
             FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin").path,
             FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".grok/bin").path,
             "/opt/homebrew/bin",
             "/usr/local/bin"
         ]
+        if process.executableURL?.lastPathComponent == "grok", let bin = process.executableURL?.deletingLastPathComponent().path {
+            extras.insert(bin, at: 0)
+        }
         environment["PATH"] = (extras + [environment["PATH"] ?? ""]).joined(separator: ":")
+        environment = ProxyInject.environment(base: environment, proxy: proxyURL)
         process.environment = environment
 
         let stdin = Pipe()
@@ -838,6 +861,10 @@ public final class ACPClient: ObservableObject {
         if let permission, isPlanPermission(permission) {
             rejectPermission()
         }
+    }
+
+    public func attachReference(_ id: String) {
+        referenceSessionIDs = SessionLinks.attach(references: referenceSessionIDs, sessionID: id)
     }
 
     public func forkSession() async throws {

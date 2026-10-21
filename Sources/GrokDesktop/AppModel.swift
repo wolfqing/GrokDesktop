@@ -207,6 +207,7 @@ final class AppModel: ObservableObject {
 
     @AppStorage("appearancePreference") var appearanceRaw = AppearancePreference.system.rawValue
     @AppStorage("languagePreference") var languageRaw = AppLanguage.system.rawValue
+    @AppStorage("grokBinaryPath") var manualGrokPath = ""
     @AppStorage("wrapCodeLines") var wrapCodeLines = false
     @AppStorage("autoScroll") var autoScroll = false
     @AppStorage("notifyThinking") var notifyThinking = true
@@ -246,7 +247,8 @@ final class AppModel: ObservableObject {
         L10n(language: language.resolved())
     }
 
-    let sessionIndex: SessionIndex
+    var sessionIndex: SessionIndex
+    var desk = DeskController()
     let locator: GrokBinaryLocator
     let configStore = ConfigStore()
     let automationStore = AutomationStore()
@@ -274,6 +276,9 @@ final class AppModel: ObservableObject {
         restoreWorkingDirectory()
         restoreProductSurface()
         refreshAll()
+        alignSessionRoot()
+        seedProjectTrust()
+        loadAccountSlots()
         refreshModelChoices()
         client.buildModel = grokConfig.defaultModel.isEmpty ? ModelCatalog.fallbackID : grokConfig.defaultModel
         client.effort = grokConfig.defaultEffortLevel
@@ -305,6 +310,10 @@ final class AppModel: ObservableObject {
 
     func previewFile(_ url: URL) {
         let standardized = url.standardizedFileURL
+        if !mediaAllowed(standardized) {
+            flash(copy.t("That file is outside the trusted folders.", "这个文件不在已信任的目录里。"))
+            return
+        }
         var isDir: ObjCBool = false
         if FileManager.default.fileExists(atPath: standardized.path, isDirectory: &isDir), isDir.boolValue {
             ChatLinkActions.open(standardized)
@@ -1351,10 +1360,12 @@ final class AppModel: ObservableObject {
         startNewSession(cwd: client.workingDirectory)
     }
 
-    func startNewSession(cwd: URL) {
+    func startNewSession(cwd: URL, remoteHost: String = "") {
+        client.remoteHost = SSHWorkspace.sessionHost(remoteHost) ?? ""
         destination = .build
         expandHistoryFolder(path: cwd.path)
         rememberWorkingDirectory(cwd)
+        applyWriteGate(cwd)
         Task {
             do {
                 try await client.newSession(cwd: cwd)
@@ -1410,6 +1421,471 @@ final class AppModel: ObservableObject {
         newProjectName = ""
         newProjectFolder = nil
         startNewSession(cwd: folder)
+    }
+
+    func alignSessionRoot() {
+        let mode = SessionDataMode(rawValue: desk.sessionDataMode) ?? .shared
+        let next = SessionDataLayout.root(mode: mode, independent: independentSessionsRoot, shared: sharedSessionsRoot)
+        if sessionIndex.sessionsRoot.standardizedFileURL.path != next.standardizedFileURL.path {
+            sessionIndex = SessionIndex(sessionsRoot: next)
+            refreshSessions()
+        }
+    }
+
+    func setSessionDataMode(_ mode: SessionDataMode) {
+        desk.sessionDataMode = mode.rawValue
+        alignSessionRoot()
+    }
+
+    var independentSessionsRoot: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("GrokDesktop/sessions", isDirectory: true)
+    }
+
+    var sharedSessionsRoot: URL {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".grok/sessions", isDirectory: true)
+    }
+
+    func seedProjectTrust() {
+        guard !desk.trustSeeded else { return }
+        var paths = Set(namedProjects.map { ProjectTrust.normalize($0.path) })
+        paths.insert(ProjectTrust.normalize(client.workingDirectory.path))
+        desk.setTrusted(paths)
+        desk.trustSeeded = true
+    }
+
+    func trustProject(_ project: NamedProject) {
+        var paths = desk.trustedPaths
+        paths.insert(ProjectTrust.normalize(project.path))
+        desk.setTrusted(paths)
+        desk.trustSeeded = true
+    }
+
+    func trustCurrentFolder() {
+        var paths = desk.trustedPaths
+        paths.insert(ProjectTrust.normalize(client.workingDirectory.path))
+        desk.setTrusted(paths)
+        desk.trustSeeded = true
+    }
+
+    func removeProject(_ project: NamedProject) {
+        namedProjects = ProjectTrust.remove(projects: namedProjects, id: project.id)
+        projectStore.save(namedProjects)
+        var paths = desk.trustedPaths
+        paths.remove(ProjectTrust.normalize(project.path))
+        desk.setTrusted(paths)
+    }
+
+    func applyWriteGate(_ cwd: URL) {
+        let trusted = ProjectTrust.allowsWrite(path: cwd.path, trusted: desk.trustedPaths, enforce: desk.trustSeeded)
+        if !SandboxMode.allowsWrite(trusted: trusted, profile: grokConfig.sandboxProfile) {
+            client.setMode(.plan)
+        }
+    }
+
+    func mediaAllowed(_ url: URL) -> Bool {
+        var roots = Array(desk.trustedPaths)
+        if !desk.trustSeeded {
+            roots.append(client.workingDirectory.path)
+        }
+        let appData = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("GrokDesktop").path
+        return MediaPathScope.allows(
+            path: url.path,
+            trustedRoots: roots,
+            appData: appData,
+            temp: FileManager.default.temporaryDirectory.path,
+            grants: []
+        )
+    }
+
+    func attachReference() {
+        let id = desk.referenceDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return }
+        client.attachReference(id)
+        desk.referenceDraft = ""
+    }
+
+    func archiveSession(_ record: SessionRecord) {
+        let root = SessionArchive.root(sessionsRoot: sessionIndex.sessionsRoot)
+        do {
+            _ = try SessionArchive.move(sessionDirectory: record.directory, archiveRoot: root)
+            client.dropWorkspace(record.id)
+            clearUnseen(record.id)
+            refreshSessions()
+        } catch {
+            flash(error.localizedDescription)
+        }
+    }
+
+    func importCLISessions() {
+        let source = sharedSessionsRoot
+        let destination = sessionIndex.sessionsRoot
+        let ids = CLISessionImport.candidates(source: source, destination: destination)
+        guard !ids.isEmpty else {
+            flash(copy.t("No CLI sessions to import.", "没有可导入的命令行会话。"))
+            return
+        }
+        for id in ids.prefix(20) {
+            try? CLISessionImport.copy(id: id, source: source, destination: destination)
+        }
+        refreshSessions()
+    }
+
+    func switchWorktree(_ tree: WorktreeRecord) {
+        guard let path = WorktreeSwitch.cwd(current: client.workingDirectory.path, worktrees: worktrees, selected: tree.path) else { return }
+        let url = URL(fileURLWithPath: path)
+        client.workingDirectory = url
+        rememberWorkingDirectory(url)
+        applyWriteGate(url)
+        showWorktrees = false
+    }
+
+    func reviewDiff(action: DiffReview.Action, paths: [String]) {
+        let root = client.workingDirectory
+        let files = paths.map { path in
+            let url = root.appendingPathComponent(path)
+            let working = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+            let baseline = TimedProcess.git(cwd: root, ["show", "HEAD:\(path)"]) ?? ""
+            return ReviewedFile(path: path, baseline: baseline, working: working)
+        }
+        do {
+            _ = try DiffReview.apply(action: action, files: files, paths: paths, root: root)
+            Task { await client.refreshGit() }
+        } catch {
+            flash(error.localizedDescription)
+        }
+    }
+
+    func saveAccountKey(_ secret: String) {
+        let trimmed = secret.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let account = desk.activeAccount.isEmpty ? "default" : desk.activeAccount
+        _ = AccountKeychain.save(account: account, secret: trimmed)
+        flash(AccountKeychain.logLine(account: account, secret: trimmed))
+    }
+
+    func saveAccountSlot() {
+        let label = desk.slotLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !label.isEmpty else { return }
+        let id = UUID().uuidString
+        let auth = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".grok/auth.json")
+        let vault = accountVault.appendingPathComponent("\(id).json")
+        try? FileManager.default.createDirectory(at: accountVault, withIntermediateDirectories: true)
+        if FileManager.default.fileExists(atPath: auth.path) {
+            try? FileManager.default.copyItem(at: auth, to: vault)
+        }
+        desk.accountSlots.append(AccountSlot(id: id, label: label))
+        desk.activeAccount = AccountSwitch.select(slots: desk.accountSlots, id: id, active: desk.activeAccount)
+        desk.slotLabel = ""
+        persistSlots()
+    }
+
+    func activateAccount(_ slot: AccountSlot) {
+        let next = AccountSwitch.select(slots: desk.accountSlots, id: slot.id, active: desk.activeAccount)
+        guard next == slot.id else { return }
+        let auth = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".grok/auth.json")
+        let vault = accountVault.appendingPathComponent("\(slot.id).json")
+        if let current = desk.accountSlots.first(where: { $0.id == desk.activeAccount }),
+           FileManager.default.fileExists(atPath: auth.path) {
+            let backup = accountVault.appendingPathComponent("\(current.id).json")
+            try? FileManager.default.removeItem(at: backup)
+            try? FileManager.default.copyItem(at: auth, to: backup)
+        }
+        if FileManager.default.fileExists(atPath: vault.path) {
+            try? FileManager.default.removeItem(at: auth)
+            try? FileManager.default.copyItem(at: vault, to: auth)
+        }
+        desk.activeAccount = next
+        persistSlots()
+        client.refreshAuth()
+    }
+
+    private var accountVault: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("GrokDesktop/accounts", isDirectory: true)
+    }
+
+    private func persistSlots() {
+        let url = accountVault.appendingPathComponent("slots.json")
+        try? FileManager.default.createDirectory(at: accountVault, withIntermediateDirectories: true)
+        if let data = try? JSONEncoder().encode(desk.accountSlots) {
+            try? data.write(to: url, options: .atomic)
+        }
+        UserDefaults.standard.set(desk.activeAccount, forKey: "activeAccountSlot")
+    }
+
+    func loadAccountSlots() {
+        let url = accountVault.appendingPathComponent("slots.json")
+        if let data = try? Data(contentsOf: url),
+           let slots = try? JSONDecoder().decode([AccountSlot].self, from: data) {
+            desk.accountSlots = slots
+        }
+        desk.activeAccount = UserDefaults.standard.string(forKey: "activeAccountSlot") ?? ""
+    }
+
+    func saveRelay() {
+        let preset = desk.relayPreset
+        let base = desk.relayBase.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? RelayPresets.baseURL(preset)
+            : desk.relayBase.trimmingCharacters(in: .whitespacesAndNewlines)
+        let profile = RelayProfile(preset: preset, baseURL: base, defaultModel: desk.relayModel, keyAccount: "relay-\(preset)")
+        if !desk.relayKey.isEmpty {
+            _ = AccountKeychain.save(account: profile.keyAccount, secret: desk.relayKey)
+            desk.relayKey = ""
+        }
+        let mode = RelayHomeMode(rawValue: desk.relayMode) ?? .independent
+        let independent = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("GrokDesktop/relay-home", isDirectory: true)
+        let shared = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".grok", isDirectory: true)
+        do {
+            _ = try RelayHome.apply(mode: mode, profile: profile, independentRoot: independent, sharedRoot: shared)
+            desk.relayNote = copy.t("Relay saved. The key stays in the keychain.", "中转已保存。密钥留在钥匙串。")
+        } catch {
+            desk.relayNote = error.localizedDescription
+        }
+    }
+
+    func testRelay() {
+        let base = desk.relayBase.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? RelayPresets.baseURL(desk.relayPreset)
+            : desk.relayBase.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: base), !base.isEmpty else {
+            desk.relayNote = RelayProbeResult.other.rawValue
+            return
+        }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 8
+        let key = AccountKeychain.load(account: "relay-\(desk.relayPreset)") ?? ""
+        if !key.isEmpty { request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
+        Task {
+            do {
+                let (_, response) = try await URLSession.shared.data(for: request)
+                let status = (response as? HTTPURLResponse)?.statusCode
+                let kind = RelayProbe.classify(httpStatus: status, urlErrorCode: nil)
+                await MainActor.run { desk.relayNote = kind.rawValue }
+            } catch let error as URLError {
+                let kind = RelayProbe.classify(httpStatus: nil, urlErrorCode: error.code.rawValue)
+                await MainActor.run { desk.relayNote = kind.rawValue }
+            } catch {
+                await MainActor.run { desk.relayNote = RelayProbeResult.other.rawValue }
+            }
+        }
+    }
+
+    func saveBridge() {
+        let config = IMBridgeConfig(channel: desk.imChannel, fields: desk.imFields)
+        guard config.isComplete else {
+            flash(copy.t("This bridge is missing a field.", "这个桥接还有空项。"))
+            return
+        }
+        desk.bridges.removeAll { $0.channel == config.channel }
+        desk.bridges.append(config)
+        let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("GrokDesktop/bridges.json")
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if let data = try? JSONEncoder().encode(desk.bridges) {
+            try? data.write(to: url, options: .atomic)
+        }
+    }
+
+    func toggleMirror() {
+        if desk.mirrorOn {
+            desk.sessionAPI.stop()
+            desk.mirrorOn = false
+            return
+        }
+        let exposure = MirrorExposure(rawValue: desk.mirrorExposure) ?? .loopback
+        let token = desk.ensureMirrorToken()
+        do {
+            let port = try desk.sessionAPI.start(token: token, exposure: exposure)
+            desk.mirrorPort = port
+            desk.mirrorOn = true
+            publishMirrorSessions()
+        } catch {
+            flash(error.localizedDescription)
+        }
+    }
+
+    func publishMirrorSessions() {
+        let rows = sessions.map { record in
+            SessionAPIServer.ListedSession(id: record.id, busy: client.liveWorkspaces.contains { $0.id == record.id && $0.isTurnRunning })
+        }
+        desk.sessionAPI.update(sessions: rows)
+    }
+
+    func copyMirrorToken() {
+        let token = desk.ensureMirrorToken()
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(token, forType: .string)
+        flash(copy.t("Token copied. It stays hidden here.", "令牌已复制。这里仍然不显示。"))
+    }
+
+    func refreshSSHHosts() {
+        desk.sshHosts = SSHWorkspace.loadHosts()
+    }
+
+    func testSSHHost() {
+        runSSHArgv(SSHWorkspace.testArgv(host: desk.sshAlias), timeout: 8)
+    }
+
+    func watchSSHHost() {
+        runSSHArgv(SSHWorkspace.watchArgv(host: desk.sshAlias), timeout: 4)
+    }
+
+    func openRemoteSession() {
+        guard SSHWorkspace.sessionHost(desk.sshAlias) != nil, SSHWorkspace.localCwd(remotePath: desk.sshAlias) == nil else {
+            flash(copy.t("That host is not an SSH alias.", "这不是一个 SSH 主机别名。"))
+            return
+        }
+        startNewSession(cwd: client.workingDirectory, remoteHost: desk.sshAlias)
+    }
+
+    func readRemoteText() {
+        runSSHArgv(SSHWorkspace.remoteReadArgv(host: desk.sshAlias, relativePath: desk.sshRelative), timeout: 12)
+    }
+
+    func writeRemoteText() {
+        guard let argv = SSHWorkspace.remoteWriteArgv(host: desk.sshAlias, relativePath: desk.sshRelative) else {
+            flash(copy.t("That remote path is refused.", "这个远程路径不能用。"))
+            return
+        }
+        let text = desk.sshBody
+        Task.detached {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
+            process.arguments = Array(argv.dropFirst())
+            let stdin = Pipe()
+            process.standardInput = stdin
+            process.standardOutput = Pipe()
+            process.standardError = Pipe()
+            do {
+                try process.run()
+                if let data = text.data(using: .utf8) {
+                    stdin.fileHandleForWriting.write(data)
+                }
+                try? stdin.fileHandleForWriting.close()
+                process.waitUntilExit()
+            } catch {
+                await MainActor.run { self.desk.sshNote = error.localizedDescription }
+                return
+            }
+            let ok = process.terminationStatus == 0
+            await MainActor.run { self.desk.sshNote = ok ? "wrote" : "write failed" }
+        }
+    }
+
+    func openRemoteTerminal() {
+        do {
+            _ = try client.openRemoteTerminal(host: desk.sshAlias)
+            desk.sshNote = copy.t("Remote terminal opened.", "远程终端已打开。")
+        } catch {
+            present(error)
+        }
+    }
+
+    func listRemoteSkills() {
+        runSSHArgv(SSHWorkspace.skillsArgv(host: desk.sshAlias), timeout: 12)
+    }
+
+    func forwardRemoteLoopback() {
+        runSSHArgv(SSHWorkspace.forwardArgv(host: desk.sshAlias, localPort: 8787, remotePort: 8787), timeout: 4)
+    }
+
+    private func runSSHArgv(_ argv: [String]?, timeout: TimeInterval) {
+        guard let argv, argv.count >= 2, argv[0] == "ssh" else {
+            flash(copy.t("That remote command was refused.", "这条远程命令不能用。"))
+            return
+        }
+        let arguments = Array(argv.dropFirst())
+        let cwd = client.workingDirectory
+        Task {
+            let result = TimedProcess.capture(
+                executable: URL(fileURLWithPath: "/usr/bin/ssh"),
+                arguments: arguments,
+                cwd: cwd,
+                timeout: timeout
+            )
+            let note = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            await MainActor.run {
+                desk.sshNote = note.isEmpty ? (result.ok ? "ok" : "failed") : String(note.prefix(500))
+            }
+        }
+    }
+
+    func checkPullRequests() {
+        let numbers = desk.prNumbers.split(separator: ",").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+        guard !numbers.isEmpty else { return }
+        Task {
+            var current: [String] = []
+            var readable = true
+            for number in numbers {
+                let result = TimedProcess.capture(
+                    executable: URL(fileURLWithPath: "/usr/bin/env"),
+                    arguments: ["gh", "pr", "view", "\(number)", "--json", "number,comments,reviews,statusCheckRollup"],
+                    cwd: client.workingDirectory,
+                    timeout: 12
+                )
+                if !result.ok || PRWatch.parse(json: result.text) == nil {
+                    readable = false
+                    break
+                }
+                current.append(result.text)
+            }
+            let follow = readable ? PRWatch.followUps(previousJSON: desk.previousPRJSON, currentJSON: current) : []
+            await MainActor.run {
+                if !readable {
+                    desk.prNote = copy.t("Could not read pull requests.", "读不到这些 Pull Request。")
+                    return
+                }
+                desk.previousPRJSON = current
+                desk.prNote = follow.map(\.text).joined(separator: "\n")
+                if let text = follow.first?.text, let sessionID = client.sessionID, !sessionID.isEmpty {
+                    Task { try? await client.send(text: text, sessionID: sessionID, kind: .followUp) }
+                }
+            }
+        }
+    }
+
+    func applyProxy() {
+        UserDefaults.standard.set(desk.proxyURL, forKey: "proxyURL")
+        client.proxyURL = desk.proxyURL
+    }
+
+    func copyDoctorReport() {
+        let kind = Doctor.classify(
+            cliFound: locator.locate() != nil,
+            signedIn: client.authPresence.isReady,
+            probe: nil,
+            agentCrashed: client.lastError?.localizedCaseInsensitiveContains("crash") == true
+        )
+        let report = Doctor.report(kind: kind, detail: client.lastError ?? "")
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(report, forType: .string)
+        desk.doctorNote = kind.rawValue
+    }
+
+    func openDoctorLogs() {
+        let url = Doctor.logDirectory()
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(url)
+    }
+
+    func saveManualBinary() {
+        UserDefaults.standard.set(manualGrokPath, forKey: GrokBinaryLocator.manualPathKey)
+        retryLocate()
+    }
+
+    func addNaturalAutomation() {
+        let record = AutomationDraft.parse(desk.nlAutomation)
+        guard !record.prompt.isEmpty else { return }
+        addAutomation(record)
+        desk.automationLog = AutomationRuns.append(log: desk.automationLog, title: record.title, status: "saved")
+        desk.nlAutomation = ""
+    }
+
+    func openCompanion() {
+        desk.toggleCompanion(model: self)
     }
 
     func open(_ record: SessionRecord) {
@@ -1489,6 +1965,13 @@ final class AppModel: ObservableObject {
     }
 
     func forkCurrent() {
+        if let sessionID = client.sessionID {
+            let turnID = client.items.reversed().compactMap { item -> String? in
+                if case .assistant(let id, _, _) = item { return id }
+                return nil
+            }.first ?? "latest"
+            desk.lastFork = SessionLinks.fork(sessionID: sessionID, turnID: turnID)
+        }
         Task {
             do {
                 try await client.forkSession()
@@ -1606,7 +2089,12 @@ final class AppModel: ObservableObject {
     }
 
     func sendDraft() {
-        let text = applyGoalIfNeeded(draft)
+        var text = applyGoalIfNeeded(draft)
+        if !client.referenceSessionIDs.isEmpty {
+            text += "\n\n[ref " + client.referenceSessionIDs.joined(separator: " ") + "]"
+        }
+        UsageLedger.record(provider: desk.relayPreset.isEmpty ? "grok" : desk.relayPreset)
+        applyWriteGate(client.workingDirectory)
         historyCursor = nil
         recordPrompt(text)
         draft = ""

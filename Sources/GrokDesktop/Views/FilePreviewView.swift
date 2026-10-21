@@ -1,5 +1,6 @@
 import AppKit
 import GrokDesktopCore
+import QuickLookUI
 import SwiftUI
 import WebKit
 
@@ -9,6 +10,9 @@ struct FilePreviewPane: View {
     @Environment(\.palette) private var palette
     @Environment(\.l10n) private var l10n
     @State private var document: FilePreviewDocument?
+    @State private var editing = false
+    @State private var draft = ""
+    @State private var stamp = TextEditStamp(text: "", modified: .distantPast)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -28,8 +32,22 @@ struct FilePreviewPane: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .task(id: url) {
-            let loaded = await Task.detached { FilePreview.load(url) }.value
-            document = loaded
+            editing = false
+            await reloadFromDisk(force: true)
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(800))
+                await reloadFromDisk(force: false)
+            }
+        }
+    }
+
+    private func reloadFromDisk(force: Bool) async {
+        let loaded = await Task.detached { FilePreview.load(url) }.value
+        let next = TextEditSync.reload(editor: force ? TextEditStamp(text: "", modified: .distantPast) : stamp, url: url)
+        document = loaded
+        if force || next.modified != stamp.modified || next.text != stamp.text {
+            stamp = next
+            if !editing { draft = next.text }
         }
     }
 
@@ -43,6 +61,22 @@ struct FilePreviewPane: View {
                 .lineLimit(1)
                 .help(preview.url.path)
             Spacer(minLength: 4)
+            if preview.kind == .text || preview.kind == .markdown {
+                Button(editing ? l10n.t("Save", "保存") : l10n.t("Edit", "编辑")) {
+                    if editing {
+                        if let saved = try? TextEditSync.save(draft, url: preview.url) {
+                            stamp = saved
+                            document = FilePreview.load(preview.url)
+                        }
+                        editing = false
+                    } else {
+                        draft = stamp.text.isEmpty ? preview.text : stamp.text
+                        editing = true
+                    }
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .semibold))
+            }
             Button {
                 ChatLinkActions.reveal(preview.url)
             } label: {
@@ -114,13 +148,23 @@ struct FilePreviewPane: View {
                 placeholder(l10n.t("Couldn’t read this image.", "读不了这张图。"))
             }
         case .text:
-            ScrollView {
-                Text(preview.text)
-                    .font(.system(size: 11, design: .monospaced))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
+            if editing {
+                TextEditor(text: $draft)
+                    .font(.system(size: 12, design: .monospaced))
+                    .scrollContentBackground(.hidden)
+                    .padding(8)
+            } else {
+                ScrollView {
+                    Text(preview.text)
+                        .font(.system(size: 11, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                }
             }
+        case .video, .audio, .pdf, .office:
+            QuickLookFilePreview(url: preview.url)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .binary:
             placeholder(l10n.t("No in-app preview. Open it instead.", "不能在这里预览，请用外部应用打开。"))
         case .directory, .missing:
@@ -141,10 +185,35 @@ struct FilePreviewPane: View {
         case .markdown: return "doc.richtext"
         case .html: return "safari"
         case .image: return "photo"
+        case .video: return "film"
+        case .audio: return "waveform"
+        case .pdf: return "doc.richtext"
+        case .office: return "doc.text"
         case .text: return "doc.text"
         case .binary: return "doc"
         case .directory: return "folder"
         case .missing: return "questionmark.folder"
+        }
+    }
+}
+
+private struct QuickLookFilePreview: NSViewRepresentable {
+    let url: URL
+
+    func makeNSView(context: Context) -> NSView {
+        guard let view = QLPreviewView(frame: .zero, style: .normal) else {
+            return NSTextField(labelWithString: url.lastPathComponent)
+        }
+        view.autostarts = true
+        view.previewItem = url as NSURL
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        guard let preview = view as? QLPreviewView else { return }
+        if (preview.previewItem as? URL)?.path != url.path {
+            preview.previewItem = url as NSURL
+            preview.refreshPreviewItem()
         }
     }
 }

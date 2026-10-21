@@ -194,6 +194,10 @@ struct SidebarView: View {
                                 .help(waiting > 0
                                     ? l10n.t("\(waiting) to handle in this project", "这个项目有 \(waiting) 件要处理")
                                     : project.path)
+                                .contextMenu {
+                                    Button(l10n.t("Trust", "信任")) { model.trustProject(project) }
+                                    Button(l10n.t("Remove from list", "从列表移除")) { model.removeProject(project) }
+                                }
                             }
                         }
                     }
@@ -288,6 +292,16 @@ struct SidebarView: View {
                     .buttonStyle(.plain)
                     .help(l10n.account)
 
+                    Button {
+                        model.openCompanion()
+                    } label: {
+                        Image(systemName: "rectangle.inset.filled")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(palette.secondary)
+                            .frame(width: 28, height: 28)
+                    }
+                    .buttonStyle(.plain)
+                    .help(l10n.t("Desk", "桌面条"))
                     Button {
                         openSettings()
                     } label: {
@@ -464,6 +478,7 @@ struct SidebarView: View {
                             model.renameDraft = session.title
                         }
                         Button(l10n.t("Export", "导出")) { model.export(session) }
+                        Button(l10n.t("Archive", "归档")) { model.archiveSession(session) }
                         Button(l10n.t("Delete", "删除"), role: .destructive) { model.delete(session) }
                     }
                 }

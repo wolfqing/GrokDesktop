@@ -534,6 +534,8 @@ struct WorktreeSheet: View {
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                 }
                                 .buttonStyle(.plain)
+                                Button(l10n.t("Use folder", "用这个目录")) { model.switchWorktree(tree) }
+                                    .buttonStyle(GrokSecondaryButtonStyle())
                                 Button(role: .destructive) {
                                     model.removeWorktree(tree)
                                 } label: {

@@ -180,6 +180,7 @@ struct RootView: View {
         }
         .environment(\.palette, palette)
         .environment(\.l10n, model.copy)
+        .environmentObject(model.desk)
         .foregroundStyle(palette.text)
         .background(palette.canvas)
         .animation(.easeInOut(duration: 0.16), value: model.toast)

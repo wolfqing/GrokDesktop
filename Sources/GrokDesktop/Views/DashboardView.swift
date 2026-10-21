@@ -15,6 +15,7 @@ struct DashboardView: View {
             )
 
             dispatchBar
+            laneLine
 
             if rows.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
@@ -53,6 +54,19 @@ struct DashboardView: View {
             if lhs.rank != rhs.rank { return lhs.rank < rhs.rank }
             return lhs.stamp > rhs.stamp
         }
+    }
+
+    private var laneLine: some View {
+        let needs = model.client.liveWorkspaces.filter {
+            SessionBoard.lane(needsInput: $0.permission != nil || $0.userQuestion != nil, working: $0.isTurnRunning) == .needsInput
+        }.count
+        let working = model.client.liveWorkspaces.filter {
+            SessionBoard.lane(needsInput: $0.permission != nil || $0.userQuestion != nil, working: $0.isTurnRunning) == .working
+        }.count
+        let done = model.unseenTurns.count
+        return Text(l10n.t("Needs you \(needs) · Working \(working) · Done \(done)", "需要你 \(needs) · 进行中 \(working) · 完成 \(done)"))
+            .font(.system(size: 12))
+            .foregroundStyle(palette.secondary)
     }
 
     private var dispatchBar: some View {

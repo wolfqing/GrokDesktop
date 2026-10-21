@@ -171,12 +171,20 @@ struct SettingsView: View {
                 }
             }
             if model.showLanguagePicker {
-                VStack(spacing: 6) {
-                    languageOption(.system, l10n.systemLanguage)
-                    languageOption(.english, l10n.english)
-                    languageOption(.chinese, l10n.chinese)
+                ScrollView {
+                    VStack(spacing: 6) {
+                        localeOption("system", l10n.systemLanguage)
+                        ForEach(LocaleCatalog.languageIDs, id: \.self) { id in
+                            localeOption(id, LocaleCatalog.endonym(id))
+                        }
+                    }
                 }
+                .frame(maxHeight: 220)
+                Text(LocaleCatalog.string(.settingsTitle, preference: model.desk.localeID, preferredLanguages: Locale.preferredLanguages))
+                    .font(.system(size: 12))
+                    .foregroundStyle(palette.secondary)
             }
+            AccountDeskSection()
             VStack(alignment: .leading, spacing: 8) {
                 statusLine(
                     model.client.authPresence == .signedIn
@@ -220,27 +228,30 @@ struct SettingsView: View {
     }
 
     private var languageLabel: String {
-        switch model.language {
-        case .system: return l10n.systemLanguage
-        case .english: return l10n.english
-        case .chinese: return l10n.chinese
-        }
+        if model.desk.localeID == "system" { return l10n.systemLanguage }
+        return LocaleCatalog.endonym(model.desk.localeID)
     }
 
-    private func languageOption(_ value: AppLanguage, _ title: String) -> some View {
+    private func localeOption(_ id: String, _ title: String) -> some View {
         Button {
-            model.language = value
+            model.desk.localeID = id
+            switch id {
+            case "en": model.language = .english
+            case "zh-Hans": model.language = .chinese
+            case "system": model.language = .system
+            default: break
+            }
             model.showLanguagePicker = false
         } label: {
             HStack {
                 Text(title)
                 Spacer()
-                if model.language == value {
+                if model.desk.localeID == id {
                     Image(systemName: "checkmark")
                 }
             }
             .padding(10)
-            .background(model.language == value ? palette.selected : palette.chip, in: RoundedRectangle(cornerRadius: 8))
+            .background(model.desk.localeID == id ? palette.selected : palette.chip, in: RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
     }
@@ -572,6 +583,8 @@ struct SettingsView: View {
             .padding(16)
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(palette.hairline))
 
+            UsageDeskSection()
+
             if model.accountUsage.hasPayAsYouGo {
                 HStack {
                     Text(l10n.t("Pay as you go", "按量付费"))
@@ -660,6 +673,7 @@ struct SettingsView: View {
                 model.grokConfig = model.configStore.load()
             }
             .buttonStyle(GrokSecondaryButtonStyle())
+            SessionDeskSection()
         }
         .padding(.top, 8)
     }
@@ -742,6 +756,7 @@ struct SettingsView: View {
                 model.configStore.openInEditor()
             }
             .buttonStyle(GrokSecondaryButtonStyle())
+            ExtensionDeskSection()
         }
         .padding(.top, 8)
         .onAppear {
@@ -912,6 +927,8 @@ struct SettingsView: View {
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             }
+
+            AdvancedDeskSection()
 
             VStack(alignment: .leading, spacing: 8) {
                 Text(l10n.t("Tools", "工具"))

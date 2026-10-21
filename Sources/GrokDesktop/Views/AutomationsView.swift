@@ -26,6 +26,20 @@ struct AutomationsView: View {
                     .buttonStyle(GrokPrimaryButtonStyle())
                 }
 
+                HStack {
+                    TextField(l10n.t("Every day, summarize reviews", "每天总结评审"), text: $model.desk.nlAutomation)
+                        .textFieldStyle(.roundedBorder)
+                    Button(l10n.t("Schedule", "定时")) { model.addNaturalAutomation() }
+                        .buttonStyle(GrokPrimaryButtonStyle())
+                }
+                if !model.desk.automationLog.isEmpty {
+                    ForEach(model.desk.automationLog.suffix(4)) { run in
+                        Text("\(run.title) · \(run.status)")
+                            .font(.system(size: 12))
+                            .foregroundStyle(palette.secondary)
+                    }
+                }
+
                 Picker("", selection: $model.automationsTab) {
                     Text(l10n.t("Runs", "运行")).tag(0)
                     Text(l10n.t("Saved", "已保存")).tag(1)

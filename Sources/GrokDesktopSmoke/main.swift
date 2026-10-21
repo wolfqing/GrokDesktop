@@ -1849,6 +1849,8 @@ expect(!FileManager.default.fileExists(atPath: updateRoot.path), "clear removes 
 expect(RunningApp.blocker(appURL: URL(fileURLWithPath: "/tmp/GrokDesktop")) == .notInstalledApp, "a bare binary is not updated in place")
 expect(RunningApp.blocker(appURL: URL(fileURLWithPath: "/private/var/folders/x/AppTranslocation/d/Grok Desktop.app")) == .translocated, "a translocated app must be moved first")
 
+runFeatureParity()
+
 print("GrokDesktopSmoke ok")
 
 

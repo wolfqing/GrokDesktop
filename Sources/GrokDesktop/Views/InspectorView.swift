@@ -890,6 +890,11 @@ struct InspectorView: View {
                     .lineLimit(8)
             }
             if !scannedDiffs.isEmpty {
+                HStack(spacing: 8) {
+                    diffAction(l10n.t("Accept all", "全部接受"), .accept, scannedDiffs.map(\.path))
+                    diffAction(l10n.t("Reject all", "全部拒绝"), .reject, scannedDiffs.map(\.path))
+                    diffAction(l10n.t("Revert all", "全部还原"), .revert, scannedDiffs.map(\.path))
+                }
                 ForEach(scannedDiffs) { file in
                     DiffFileBlock(file: file)
                 }
@@ -943,6 +948,12 @@ struct InspectorView: View {
                 }
             }
         }
+    }
+
+    private func diffAction(_ title: String, _ action: DiffReview.Action, _ paths: [String]) -> some View {
+        Button(title) { model.reviewDiff(action: action, paths: paths) }
+            .buttonStyle(GrokSecondaryButtonStyle())
+            .font(.system(size: 11))
     }
 
     private var scannedDiffs: [DiffFile] {
@@ -1043,6 +1054,7 @@ private struct DiffFileBlock: View {
     let file: DiffFile
     @EnvironmentObject private var model: AppModel
     @Environment(\.palette) private var palette
+    @Environment(\.l10n) private var l10n
     @State private var expanded = true
 
     var body: some View {
@@ -1066,6 +1078,9 @@ private struct DiffFileBlock: View {
                 .help(file.path)
                 .contextMenu { ChatLinkContextButtons(url: url) }
                 Spacer()
+                diffMini(l10n.t("Accept", "接受"), .accept)
+                diffMini(l10n.t("Reject", "拒绝"), .reject)
+                diffMini(l10n.t("Revert", "还原"), .revert)
                 Text("+\(file.added)")
                     .foregroundStyle(.green)
                 Text("-\(file.removed)")
@@ -1100,6 +1115,13 @@ private struct DiffFileBlock: View {
                 )
             }
         }
+    }
+
+    private func diffMini(_ title: String, _ action: DiffReview.Action) -> some View {
+        Button(title) { model.reviewDiff(action: action, paths: [file.path]) }
+            .buttonStyle(.plain)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(palette.secondary)
     }
 
     private func color(for kind: DiffLine.Kind) -> Color {

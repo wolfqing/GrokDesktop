@@ -1,3 +1,4 @@
+import GrokDesktopCore
 import SwiftUI
 
 struct FirstRunView: View {
@@ -17,6 +18,17 @@ struct FirstRunView: View {
                 .frame(maxWidth: 460)
 
             if reason == .missingCLI {
+                Text(LocaleCatalog.string(.firstRunBody, preference: model.desk.localeID, preferredLanguages: Locale.preferredLanguages))
+                    .font(.system(size: 13))
+                    .foregroundStyle(palette.secondary)
+                    .multilineTextAlignment(.center)
+                TextField(l10n.t("Path to grok", "grok 的路径"), text: $model.manualGrokPath)
+                    .textFieldStyle(.plain)
+                    .padding(10)
+                    .frame(maxWidth: 420)
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.hairline))
+                Button(l10n.t("Use this binary", "使用这个程序")) { model.saveManualBinary() }
+                    .buttonStyle(GrokSecondaryButtonStyle())
                 Text("curl -fsSL https://x.ai/cli/install.sh | bash")
                     .font(.system(size: 13, design: .monospaced))
                     .padding(12)

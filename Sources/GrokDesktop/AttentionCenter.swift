@@ -11,8 +11,14 @@ final class AttentionCenter: NSObject, UNUserNotificationCenterDelegate {
     private var authorized = false
     private var requested = false
 
+    /// `swift run` is a bare executable. UserNotifications aborts unless this process is an .app bundle.
+    private var canNotify: Bool {
+        Bundle.main.bundleURL.pathExtension == "app"
+    }
+
     override private init() {
         super.init()
+        guard canNotify else { return }
         UNUserNotificationCenter.current().delegate = self
     }
 
@@ -48,6 +54,7 @@ final class AttentionCenter: NSObject, UNUserNotificationCenterDelegate {
         }
         for key in posted where !keys.contains(key) {
             posted.remove(key)
+            guard canNotify else { continue }
             UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [key])
         }
     }
@@ -73,7 +80,7 @@ final class AttentionCenter: NSObject, UNUserNotificationCenterDelegate {
     }
 
     private func requestAccessIfNeeded() {
-        guard !requested else { return }
+        guard canNotify, !requested else { return }
         requested = true
         Task {
             do {
@@ -92,12 +99,15 @@ final class AttentionCenter: NSObject, UNUserNotificationCenterDelegate {
         content.sound = .default
         content.userInfo = ["sessionID": need.sessionID]
         let request = UNNotificationRequest(identifier: need.key, content: content, trigger: nil)
+        guard canNotify else { return }
         UNUserNotificationCenter.current().add(request)
     }
 
     private func clearPosted() {
         guard !posted.isEmpty else { return }
-        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: Array(posted))
+        if canNotify {
+            UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: Array(posted))
+        }
         posted.removeAll()
     }
 }
