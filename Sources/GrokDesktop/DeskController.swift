@@ -5,6 +5,7 @@ import SwiftUI
 @MainActor
 final class DeskController: ObservableObject {
     @AppStorage("deskLocale") var localeID = "system"
+    @AppStorage("bridgeLive") var bridgeLive = false
     @AppStorage("sessionDataMode") var sessionDataMode = SessionDataMode.shared.rawValue
     @AppStorage("permissionTier") var permissionTier = PermissionTier.ask.rawValue
     @AppStorage("projectTiersJSON") var projectTiersJSON = "{}"
@@ -15,6 +16,7 @@ final class DeskController: ObservableObject {
     @Published var companionDraft = ""
     @Published var mirrorPort: UInt16 = 0
     @Published var mirrorOn = false
+    @Published var mirrorPublicURL = ""
     @Published var relayPreset = RelayPreset.generic.rawValue
     @Published var relayBase = ""
     @Published var relayModel = "grok-4.7"
@@ -42,6 +44,7 @@ final class DeskController: ObservableObject {
     @Published var doctorNote = ""
     @Published var lastFork = ""
     @Published var inboundDraft = ""
+    @Published var bridgeNotes: [String: String] = [:]
     let sessionAPI = SessionAPIServer()
     let sshWatch = SSHKeep()
     let sshForward = SSHKeep()
@@ -118,7 +121,7 @@ final class DeskController: ObservableObject {
             .environment(\.l10n, model.copy)
         let host = NSHostingView(rootView: root)
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 300, height: 188),
+            contentRect: NSRect(x: 0, y: 0, width: 300, height: 268),
             styleMask: [.titled, .closable, .nonactivatingPanel, .utilityWindow],
             backing: .buffered,
             defer: false

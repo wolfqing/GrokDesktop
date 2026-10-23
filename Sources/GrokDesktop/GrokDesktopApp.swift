@@ -1,6 +1,11 @@
 import AppKit
 import SwiftUI
 
+@MainActor
+private enum LaunchWindows {
+    static var presented = false
+}
+
 @main
 struct GrokDesktopApp: App {
     @StateObject private var model = AppModel()
@@ -19,10 +24,13 @@ struct GrokDesktopApp: App {
                 .onAppear {
                     NSApp.setActivationPolicy(.regular)
                     NSApp.activate(ignoringOtherApps: true)
-                    for window in NSApp.windows {
+                    // Repeating this recenters every window, including panels, and
+                    // AppKit then resets drag margins on every layout pass.
+                    guard !LaunchWindows.presented else { return }
+                    LaunchWindows.presented = true
+                    for window in NSApp.windows where window.canBecomeMain {
                         window.center()
                         window.makeKeyAndOrderFront(nil)
-                        window.orderFrontRegardless()
                     }
                     if DemoStudio.isEnabled, let url = DemoStudio.screenshotURL {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {

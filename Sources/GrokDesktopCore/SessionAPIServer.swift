@@ -23,6 +23,56 @@ public enum MirrorBind {
     public static func tunnelCommand(port: UInt16) -> [String] {
         ["cloudflared", "tunnel", "--url", "http://127.0.0.1:\(port)"]
     }
+
+    /// Address a phone on this Mac, or on the same network, can open. The token stays out of the string.
+    public static func displayURL(exposure: MirrorExposure, port: UInt16, lanHost: String) -> String {
+        guard port > 0 else { return "" }
+        switch exposure {
+        case .loopback:
+            return "http://127.0.0.1:\(port)"
+        case .lan:
+            guard !lanHost.isEmpty else { return "" }
+            return "http://\(lanHost):\(port)"
+        case .tunnel:
+            return ""
+        }
+    }
+
+    /// First usable IPv4. Skips loopback and link-local.
+    public static func lanHost(addresses: [String]) -> String {
+        for address in addresses {
+            if address == "127.0.0.1" || address.hasPrefix("169.254.") || address.contains(":") { continue }
+            return address
+        }
+        return ""
+    }
+
+    public static func tunnelURL(in text: String) -> String? {
+        guard let range = text.range(
+            of: #"https://[A-Za-z0-9-]+\.trycloudflare\.com"#,
+            options: .regularExpression
+        ) else { return nil }
+        return String(text[range])
+    }
+
+    /// IPv4 addresses currently assigned on this Mac.
+    public static func interfaceAddresses() -> [String] {
+        var results: [String] = []
+        var pointer: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&pointer) == 0, let first = pointer else { return [] }
+        defer { freeifaddrs(first) }
+        var cursor: UnsafeMutablePointer<ifaddrs>? = first
+        while let current = cursor {
+            defer { cursor = current.pointee.ifa_next }
+            guard let addr = current.pointee.ifa_addr, addr.pointee.sa_family == UInt8(AF_INET) else { continue }
+            var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+            if getnameinfo(addr, socklen_t(addr.pointee.sa_len), &host, socklen_t(host.count), nil, 0, NI_NUMERICHOST) == 0 {
+                let bytes = host.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
+                results.append(String(decoding: bytes, as: UTF8.self))
+            }
+        }
+        return results
+    }
 }
 
 public enum SessionAPIError: Error, Equatable {

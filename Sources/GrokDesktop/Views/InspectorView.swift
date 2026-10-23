@@ -7,6 +7,7 @@ struct InspectorView: View {
     @Environment(\.l10n) private var l10n
     @State private var planNote = ""
     @FocusState private var asideFocused: Bool
+    @State private var diffCache = DiffParseCache()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -144,7 +145,7 @@ struct InspectorView: View {
             items: model.client.items,
             todos: model.client.todos,
             hunks: model.client.hunks,
-            chinese: model.language.resolved() == .chinese,
+            chinese: model.showsChinese,
             running: model.client.isTurnRunning,
             stopping: model.client.isStopping
         )
@@ -895,8 +896,8 @@ struct InspectorView: View {
                     diffAction(l10n.t("Reject all", "全部拒绝"), .reject, scannedDiffs.map(\.path))
                     diffAction(l10n.t("Revert all", "全部还原"), .revert, scannedDiffs.map(\.path))
                 }
-                ForEach(scannedDiffs) { file in
-                    DiffFileBlock(file: file)
+                ForEach(Array(scannedDiffs.enumerated()), id: \.element.id) { index, file in
+                    DiffFileBlock(file: file, startsOpen: index == scannedDiffs.count - 1)
                 }
             } else if !model.client.gitDiffText.isEmpty {
                 Text(model.client.gitDiffText)
@@ -957,7 +958,7 @@ struct InspectorView: View {
     }
 
     private var scannedDiffs: [DiffFile] {
-        DiffScan.parse(model.client.gitDiffText)
+        diffCache.files(for: model.client.gitDiffText)
     }
 
     private func sectionTitle(_ title: String) -> some View {
@@ -1055,7 +1056,12 @@ private struct DiffFileBlock: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.palette) private var palette
     @Environment(\.l10n) private var l10n
-    @State private var expanded = true
+    @State private var expanded: Bool
+
+    init(file: DiffFile, startsOpen: Bool = false) {
+        self.file = file
+        _expanded = State(initialValue: startsOpen)
+    }
 
     var body: some View {
         let url = ChatLinkDetector.resolve(file.path, baseDirectory: model.client.workingDirectory)?.url
@@ -1139,6 +1145,20 @@ private struct DiffFileBlock: View {
         case .removed: return Color.red.opacity(0.12)
         default: return .clear
         }
+    }
+}
+
+/// Parsed once per distinct diff text. The inspector body reads this on every
+/// chat update; parsing the whole patch each time stalls the main thread.
+private final class DiffParseCache {
+    private var source = ""
+    private var parsed: [DiffFile] = []
+
+    func files(for text: String) -> [DiffFile] {
+        if text == source { return parsed }
+        source = text
+        parsed = DiffScan.parse(text)
+        return parsed
     }
 }
 

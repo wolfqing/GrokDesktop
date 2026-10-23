@@ -194,7 +194,7 @@ struct DashboardView: View {
                             : "checkmark.circle",
                         tint: workspace.permission != nil || workspace.userQuestion != nil ? .orange : palette.secondary,
                         title: statusText(workspace),
-                        trailing: workspace.mode.title(chinese: model.language.resolved() == .chinese)
+                        trailing: workspace.mode.title(chinese: model.showsChinese)
                     )
                     promptLine(headline(workspace))
                     repoLine(
@@ -250,7 +250,7 @@ struct DashboardView: View {
                     )
                     promptLine(turn.prompt.isEmpty ? turn.cwdName : turn.prompt)
                     repoLine(
-                        turn.cardLine(chinese: model.language.resolved() == .chinese),
+                        turn.cardLine(chinese: model.showsChinese),
                         path: turn.cwd
                     )
                 }
@@ -274,7 +274,7 @@ struct DashboardView: View {
         DispatchIsolation.line(
             folder: folder,
             place: isolated ? .isolatedCopy : .currentDirectory,
-            chinese: model.language.resolved() == .chinese
+            chinese: model.showsChinese
         )
     }
 

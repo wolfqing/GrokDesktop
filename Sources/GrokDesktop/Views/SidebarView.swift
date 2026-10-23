@@ -494,7 +494,7 @@ struct SidebarView: View {
         indented: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
-        let chinese = model.language.resolved() == .chinese
+        let chinese = model.showsChinese
         return Button(action: action) {
             HStack(alignment: .center, spacing: 8) {
                 if live {

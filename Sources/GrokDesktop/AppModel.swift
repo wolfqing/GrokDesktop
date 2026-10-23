@@ -85,6 +85,8 @@ final class AppModel: ObservableObject {
     @Published var showPalette = false
     @Published var showInspector = true
     @Published var inspectorWidth: CGFloat = GrokTheme.inspectorWidth
+    /// One-shot request for the inspector to show a mode. The view clears it.
+    @Published var inspectorFocusRequest: String?
     @Published var previewedFile: URL?
     @Published var inspectorDetailsVisible = true
     @Published var shellHeight: CGFloat = GrokTheme.shellHeight
@@ -244,11 +246,16 @@ final class AppModel: ObservableObject {
     }
 
     var copy: L10n {
-        L10n(language: language.resolved())
+        L10n(localeID: LocaleCatalog.resolve(preference: desk.localeID, preferredLanguages: Locale.preferredLanguages))
+    }
+
+    var showsChinese: Bool {
+        copy.language == .chinese
     }
 
     var sessionIndex: SessionIndex
     var desk = DeskController()
+    let bridgeLiveRunner = BridgeLive()
     let locator: GrokBinaryLocator
     let configStore = ConfigStore()
     let automationStore = AutomationStore()
@@ -336,11 +343,16 @@ final class AppModel: ObservableObject {
             self.previewedFile = standardized
             self.showInspector = true
             self.inspectorDetailsVisible = false
-            if self.inspectorWidth <= GrokTheme.inspectorWidth {
-                self.setInspectorWidth(GrokTheme.inspectorPreviewWidth)
-            }
             if self.destination != .build {
                 self.destination = .build
+            }
+            // Width is a second turn. Changing it in the same pass as the new
+            // preview hits AppKit's constraint update and aborts the process.
+            let widen = self.inspectorWidth <= GrokTheme.inspectorWidth
+            guard widen else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.inspectorWidth <= GrokTheme.inspectorWidth else { return }
+                self.setInspectorWidth(GrokTheme.inspectorPreviewWidth)
             }
         }
     }
@@ -506,9 +518,9 @@ final class AppModel: ObservableObject {
     }
 
     private func afterHitTest(_ work: @escaping @MainActor () -> Void) {
-        Task { @MainActor in
-            work()
-        }
+        // `Task { @MainActor }` can still run inside the click that started it.
+        // The next run-loop turn is after AppKit finishes that constraint pass.
+        DispatchQueue.main.async(execute: work)
     }
 
     private static let shellChosenKey = "inspectorShellChosen"
@@ -749,7 +761,7 @@ final class AppModel: ObservableObject {
     }
 
     var attentionNeeds: [AttentionNeed] {
-        let chinese = language.resolved() == .chinese
+        let chinese = showsChinese
         return client.liveWorkspaces.compactMap { workspace in
             if workspace.userQuestion != nil {
                 return AttentionNeed(
@@ -776,7 +788,7 @@ final class AppModel: ObservableObject {
         + unseenTurns.filter { turn in
             !client.liveWorkspaces.contains { $0.id == turn.id }
         }.map { turn in
-            let chinese = language.resolved() == .chinese
+            let chinese = showsChinese
             let result = UnseenTurn.changePhrase(count: turn.changedFiles, chinese: chinese)
             let lead = turn.prompt.isEmpty ? turn.cwdName : turn.prompt
             return AttentionNeed(
@@ -1091,7 +1103,7 @@ final class AppModel: ObservableObject {
 
     var contextWindowNoteText: String? {
         guard let note = contextWindowNote, note.sessionID == client.sessionID else { return nil }
-        return note.message(chinese: language.resolved() == .chinese)
+        return note.message(chinese: showsChinese)
     }
 
     func dismissContextWindowNote() {
@@ -1172,7 +1184,7 @@ final class AppModel: ObservableObject {
         let visible = sessions.filter { !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return visible }
-        let chinese = language.resolved() == .chinese
+        let chinese = showsChinese
         return visible.filter { SessionSearch.matches($0, query: query, chinese: chinese) }
     }
 
@@ -1253,7 +1265,7 @@ final class AppModel: ObservableObject {
     }
 
     var skillGroups: [(id: String, title: String, items: [SkillRecord])] {
-        let chinese = language.resolved() == .chinese
+        let chinese = showsChinese
         let order: [(String, String)] = [
             ("project", chinese ? "项目" : "Project"),
             ("user", chinese ? "个人" : "Personal"),
@@ -1680,25 +1692,41 @@ final class AppModel: ObservableObject {
             ? RelayPresets.baseURL(desk.relayPreset)
             : desk.relayBase.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: base), !base.isEmpty else {
-            desk.relayNote = RelayProbeResult.other.rawValue
+            desk.relayNote = relaySentence(.other)
             return
         }
         var request = URLRequest(url: url)
         request.timeoutInterval = 8
-        let key = AccountKeychain.load(account: "relay-\(desk.relayPreset)") ?? ""
+        let typed = desk.relayKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = typed.isEmpty ? (AccountKeychain.load(account: "relay-\(desk.relayPreset)") ?? "") : typed
         if !key.isEmpty { request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
         Task {
             do {
                 let (_, response) = try await URLSession.shared.data(for: request)
                 let status = (response as? HTTPURLResponse)?.statusCode
                 let kind = RelayProbe.classify(httpStatus: status, urlErrorCode: nil)
-                await MainActor.run { desk.relayNote = kind.rawValue }
+                await MainActor.run { desk.relayNote = self.relaySentence(kind) }
             } catch let error as URLError {
                 let kind = RelayProbe.classify(httpStatus: nil, urlErrorCode: error.code.rawValue)
-                await MainActor.run { desk.relayNote = kind.rawValue }
+                await MainActor.run { desk.relayNote = self.relaySentence(kind) }
             } catch {
-                await MainActor.run { desk.relayNote = RelayProbeResult.other.rawValue }
+                await MainActor.run { desk.relayNote = self.relaySentence(.other) }
             }
+        }
+    }
+
+    private func relaySentence(_ kind: RelayProbeResult) -> String {
+        switch kind {
+        case .ok:
+            return copy.t("The relay answered.", "中转有响应。")
+        case .auth:
+            return copy.t("The relay rejected the key.", "中转拒绝了这个密钥。")
+        case .timeout:
+            return copy.t("The relay timed out.", "中转超时。")
+        case .dns:
+            return copy.t("The relay host did not resolve.", "中转地址解析失败。")
+        case .other:
+            return copy.t("The relay did not answer. Check the base URL.", "中转没有正常响应。检查一下地址。")
         }
     }
 
@@ -1710,12 +1738,52 @@ final class AppModel: ObservableObject {
         }
         desk.bridges.removeAll { $0.channel == config.channel }
         desk.bridges.append(config)
-        let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("GrokDesktop/bridges.json")
+        let url = bridgeStoreURL
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         if let data = try? JSONEncoder().encode(desk.bridges) {
             try? data.write(to: url, options: .atomic)
         }
+        flash(copy.t("Bridge saved. Paste inbound text below to deliver it.", "桥接已保存。把进来的文字贴到下面送进会话。"))
+        if desk.bridgeLive {
+            bridgeLiveRunner.start(model: self)
+        }
+    }
+
+    func loadBridges() {
+        let url = bridgeStoreURL
+        guard let data = try? Data(contentsOf: url),
+              let saved = try? JSONDecoder().decode([IMBridgeConfig].self, from: data)
+        else { return }
+        desk.bridges = saved.filter(\.isComplete)
+        if let current = desk.bridges.first(where: { $0.channel == desk.imChannel }) {
+            desk.imFields = current.fields
+        }
+    }
+
+    func toggleBridgeLive() {
+        if desk.bridgeLive {
+            bridgeLiveRunner.stop()
+            desk.bridgeLive = false
+            desk.bridgeNotes = ["live": copy.t("Live is off.", "实时已关闭。")]
+            return
+        }
+        guard desk.bridges.contains(where: \.isComplete) else {
+            flash(copy.t("Save a bridge before starting live.", "先保存桥接，再开实时。"))
+            return
+        }
+        desk.bridgeLive = true
+        bridgeLiveRunner.start(model: self)
+    }
+
+    func resumeBridgeLive() {
+        loadBridges()
+        guard desk.bridgeLive else { return }
+        bridgeLiveRunner.start(model: self)
+    }
+
+    private var bridgeStoreURL: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("GrokDesktop/bridges.json")
     }
 
     func toggleMirror() {
@@ -1723,6 +1791,7 @@ final class AppModel: ObservableObject {
             desk.sessionAPI.stop()
             desk.mirrorTunnel.stop()
             desk.mirrorOn = false
+            desk.mirrorPublicURL = ""
             return
         }
         let exposure = MirrorExposure(rawValue: desk.mirrorExposure) ?? .loopback
@@ -1731,13 +1800,28 @@ final class AppModel: ObservableObject {
             let port = try desk.sessionAPI.start(token: token, exposure: exposure)
             desk.mirrorPort = port
             desk.mirrorOn = true
+            desk.mirrorPublicURL = ""
             publishMirrorSessions()
             if exposure == .tunnel {
+                desk.mirrorTunnel.onPublicURL = { [weak self] url in
+                    Task { @MainActor in
+                        self?.desk.mirrorPublicURL = url
+                    }
+                }
                 try desk.mirrorTunnel.launch(port: port)
             }
         } catch {
             flash(shell(.errorGeneric))
         }
+    }
+
+    var mirrorAddressLine: String {
+        let exposure = MirrorExposure(rawValue: desk.mirrorExposure) ?? .loopback
+        if exposure == .tunnel {
+            return desk.mirrorPublicURL
+        }
+        let host = MirrorBind.lanHost(addresses: MirrorBind.interfaceAddresses())
+        return MirrorBind.displayURL(exposure: exposure, port: desk.mirrorPort, lanHost: host)
     }
 
     func publishMirrorSessions() {
@@ -1823,7 +1907,11 @@ final class AppModel: ObservableObject {
                 return
             }
             let ok = process.terminationStatus == 0
-            await MainActor.run { self.desk.sshNote = ok ? "wrote" : "write failed" }
+            await MainActor.run {
+                self.desk.sshNote = ok
+                    ? self.copy.t("Wrote the remote file.", "远程文件已写入。")
+                    : self.copy.t("The remote write failed.", "远程写入失败。")
+            }
         }
     }
 
@@ -1869,14 +1957,23 @@ final class AppModel: ObservableObject {
             )
             let note = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
             await MainActor.run {
-                desk.sshNote = note.isEmpty ? (result.ok ? "ok" : "failed") : String(note.prefix(500))
+                if note.isEmpty {
+                    desk.sshNote = result.ok
+                        ? copy.t("Connected.", "已连通。")
+                        : copy.t("Could not connect.", "连不上。")
+                } else {
+                    desk.sshNote = String(note.prefix(500))
+                }
             }
         }
     }
 
     func checkPullRequests() {
         let numbers = desk.prNumbers.split(separator: ",").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
-        guard !numbers.isEmpty else { return }
+        guard !numbers.isEmpty else {
+            desk.prNote = copy.t("Enter pull request numbers, separated by commas.", "填写 PR 编号，用逗号分开。")
+            return
+        }
         Task {
             var current: [String] = []
             var readable = true
@@ -1900,30 +1997,66 @@ final class AppModel: ObservableObject {
                     return
                 }
                 desk.previousPRJSON = current
-                desk.prNote = follow.map(\.text).joined(separator: "\n")
-                if let sessionID = client.sessionID, !sessionID.isEmpty, !follow.isEmpty {
+                if follow.isEmpty {
+                    desk.prNote = copy.t("No new comments, reviews, or checks.", "没有新的评论、评审或检查结果。")
+                    return
+                }
+                let body = follow.map(\.text).joined(separator: "\n")
+                if let sessionID = client.sessionID, !sessionID.isEmpty {
+                    desk.prNote = copy.t("Queued into this session.", "已排进当前会话。") + "\n" + body
                     Task { await client.enqueueFollowUps(follow, sessionID: sessionID) }
+                } else {
+                    desk.prNote = copy.t("Found changes, and no session is open to receive them.", "有变化，但没有打开的会话可以接收。") + "\n" + body
                 }
             }
         }
     }
 
     func applyProxy() {
-        UserDefaults.standard.set(desk.proxyURL, forKey: "proxyURL")
-        client.proxyURL = desk.proxyURL
+        let trimmed = desk.proxyURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        desk.proxyURL = trimmed
+        UserDefaults.standard.set(trimmed, forKey: "proxyURL")
+        client.proxyURL = trimmed
+        flash(trimmed.isEmpty
+            ? copy.t("Proxy cleared. It applies the next time the agent starts.", "代理已清除。下次启动 agent 时生效。")
+            : copy.t("Proxy saved. It applies the next time the agent starts.", "代理已保存。下次启动 agent 时生效。"))
     }
 
     func copyDoctorReport() {
+        let detail = client.lastError ?? ""
         let kind = Doctor.classify(
             cliFound: locator.locate() != nil,
             signedIn: client.authPresence.isReady,
-            probe: nil,
-            agentCrashed: client.lastError?.localizedCaseInsensitiveContains("crash") == true
+            probe: doctorProbe(detail),
+            agentCrashed: detail.localizedCaseInsensitiveContains("crash")
         )
-        let report = Doctor.report(kind: kind, detail: client.lastError ?? "")
+        let report = Doctor.report(kind: kind, detail: detail)
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(report, forType: .string)
-        desk.doctorNote = kind.rawValue
+        desk.doctorNote = doctorSentence(kind)
+    }
+
+    private func doctorProbe(_ detail: String) -> RelayProbeResult? {
+        let text = detail.lowercased()
+        if text.contains("timed out") || text.contains("timeout") { return .timeout }
+        if text.contains("dns") || text.contains("resolve") { return .dns }
+        if text.contains("network") || text.contains("offline") || text.contains("connection") { return .other }
+        return nil
+    }
+
+    private func doctorSentence(_ kind: DoctorKind) -> String {
+        switch kind {
+        case .cliMissing:
+            return copy.t("grok was not found.", "没有找到 grok。")
+        case .auth:
+            return copy.t("grok is installed, and this Mac is not signed in.", "已找到 grok，但这台 Mac 还没登录。")
+        case .network:
+            return copy.t("The last error looks like a network problem.", "最近一次错误像是网络问题。")
+        case .agentCrash:
+            return copy.t("The agent crashed.", "agent 异常退出了。")
+        case .ok:
+            return copy.t("grok is installed and signed in. A redacted report is on the clipboard.", "grok 已安装并且已登录。打码后的报告已复制。")
+        }
     }
 
     func openDoctorLogs() {
@@ -2147,6 +2280,14 @@ final class AppModel: ObservableObject {
         showAttachMenu = false
         mentionQuery = nil
         showPalette = false
+    }
+
+    /// Sends one string and leaves the composer draft alone.
+    func sendText(_ text: String) {
+        let kept = draft
+        draft = text
+        sendDraft()
+        draft = kept
     }
 
     func sendDraft() {
@@ -2832,10 +2973,10 @@ final class AppModel: ObservableObject {
             applyEffortCommand(rest)
         case "/always-approve":
             client.setMode(client.mode == .alwaysApprove ? .normal : .alwaysApprove)
-            flash(client.mode.title(chinese: language.resolved() == .chinese))
+            flash(client.mode.title(chinese: showsChinese))
         case "/auto":
             client.setMode(client.mode == .auto ? .normal : .auto)
-            flash(client.mode.title(chinese: language.resolved() == .chinese))
+            flash(client.mode.title(chinese: showsChinese))
         case "/multiline", "/ml":
             requireCmdEnter.toggle()
             flash(requireCmdEnter ? copy.requireCmdEnter : copy.t("Enter sends", "Enter 发送"))
@@ -3278,7 +3419,7 @@ final class AppModel: ObservableObject {
             return
         }
         client.effort = mapped
-        flash(mapped.title(chinese: language.resolved() == .chinese))
+        flash(mapped.title(chinese: showsChinese))
     }
 
     private func applyThemeCommand(_ rest: String) {
@@ -3734,12 +3875,20 @@ final class AppModel: ObservableObject {
         Task { await receiveBridge(text: text) }
     }
 
-    func receiveBridge(text: String) async {
-        let config = desk.bridges.first { $0.channel == desk.imChannel }
-            ?? IMBridgeConfig(channel: desk.imChannel, fields: desk.imFields)
-        let payload = ["channel": desk.imChannel.rawValue, "sender": "desk", "text": text]
+    func receiveBridge(text: String, channel: IMChannel? = nil, sender: String = "desk", quiet: Bool = false) async {
+        let channel = channel ?? desk.imChannel
+        let config: IMBridgeConfig
+        if let saved = desk.bridges.first(where: { $0.channel == channel }) {
+            config = saved
+        } else if channel == desk.imChannel {
+            config = IMBridgeConfig(channel: channel, fields: desk.imFields)
+        } else {
+            bridgeFailure(channel, quiet: quiet, en: "This bridge is not saved.", zh: "这个桥接还没保存。")
+            return
+        }
+        let payload = ["channel": channel.rawValue, "sender": sender, "text": text]
         guard let inbound = IMRouter.accept(payload: payload, config: config) else {
-            flash(shell(.errorGeneric))
+            bridgeFailure(channel, quiet: quiet, en: "This bridge is missing a field.", zh: "这个桥接还有空项。")
             return
         }
         let known = Set(sessions.map(\.id) + client.workspaceIDs)
@@ -3751,9 +3900,17 @@ final class AppModel: ObservableObject {
         )
         let delivered = await IMDelivery.deliver(route: route, client: client)
         if !delivered {
-            flash(shell(.errorGeneric))
+            bridgeFailure(channel, quiet: quiet, en: "This message was not sent. Trust the project, or use /p and /r with a known session.", zh: "这条没有送进去。先信任项目，或用 /p，以及已有会话的 /r。")
         }
         refreshWorkspace()
+    }
+
+    private func bridgeFailure(_ channel: IMChannel, quiet: Bool, en: String, zh: String) {
+        if quiet {
+            desk.bridgeNotes[channel.rawValue] = copy.t(en, zh)
+        } else {
+            flash(copy.t(en, zh))
+        }
     }
 
     func setExtension(kind: String, name: String, enabled: Bool) {

@@ -113,7 +113,7 @@ struct ImagineView: View {
                     ImagineAspectMenu(
                         choices: aspectChoices,
                         selected: aspect,
-                        chinese: model.language.resolved() == .chinese
+                        chinese: model.showsChinese
                     ) { value in
                         aspect = value
                         withAnimation(.easeOut(duration: 0.12)) {
@@ -358,7 +358,7 @@ struct ImagineView: View {
                 .onTapGesture { ChatLinkActions.open(asset.url) }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(RelativeTime.format(asset.modified, chinese: model.language.resolved() == .chinese))
+                Text(RelativeTime.format(asset.modified, chinese: model.showsChinese))
                     .font(.system(size: 12))
                     .foregroundStyle(palette.secondary)
                 Text(asset.url.path)

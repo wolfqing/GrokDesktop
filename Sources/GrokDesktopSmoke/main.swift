@@ -1849,6 +1849,72 @@ expect(!FileManager.default.fileExists(atPath: updateRoot.path), "clear removes 
 expect(RunningApp.blocker(appURL: URL(fileURLWithPath: "/tmp/GrokDesktop")) == .notInstalledApp, "a bare binary is not updated in place")
 expect(RunningApp.blocker(appURL: URL(fileURLWithPath: "/private/var/folders/x/AppTranslocation/d/Grok Desktop.app")) == .translocated, "a translocated app must be moved first")
 
+let reviewHome = InspectorAttention.choose(
+    pinned: nil,
+    available: [.changes, .tasks],
+    planNeedsApproval: false,
+    hasChanges: true,
+    hasCommands: false,
+    hasWork: true
+)
+expect(reviewHome == .changes, "file changes take the sidebar when nothing is pinned")
+let planFirst = InspectorAttention.choose(
+    pinned: nil,
+    available: [.changes, .tasks, .commands],
+    planNeedsApproval: true,
+    hasChanges: true,
+    hasCommands: true,
+    hasWork: true
+)
+expect(planFirst == .tasks, "a plan that needs approval stays in front of the diff")
+let pinnedDiff = InspectorAttention.choose(
+    pinned: .changes,
+    available: [.changes, .tasks],
+    planNeedsApproval: true,
+    hasChanges: false,
+    hasCommands: false,
+    hasWork: true
+)
+expect(pinnedDiff == .changes, "a chosen sidebar tab stays put")
+let droppedPin = InspectorAttention.choose(
+    pinned: .preview,
+    available: [.changes, .tasks],
+    planNeedsApproval: false,
+    hasChanges: true,
+    hasCommands: false,
+    hasWork: false
+)
+expect(droppedPin == .changes, "a closed preview gives the sidebar back to the diff")
+let commandFirst = InspectorAttention.choose(
+    pinned: nil,
+    available: [.changes, .tasks, .commands],
+    planNeedsApproval: false,
+    hasChanges: false,
+    hasCommands: true,
+    hasWork: true
+)
+expect(commandFirst == .commands, "a command takes the sidebar before any files change")
+let idleTasks = InspectorAttention.choose(
+    pinned: nil,
+    available: [.changes, .tasks],
+    planNeedsApproval: false,
+    hasChanges: false,
+    hasCommands: false,
+    hasWork: true
+)
+expect(idleTasks == .tasks, "a task list shows when nothing has changed yet")
+expect(
+    InspectorAttention.choose(
+        pinned: nil,
+        available: [],
+        planNeedsApproval: false,
+        hasChanges: true,
+        hasCommands: true,
+        hasWork: true
+    ) == nil,
+    "hidden sidebar tools are not opened"
+)
+
 runFeatureParity()
 
 print("GrokDesktopSmoke ok")

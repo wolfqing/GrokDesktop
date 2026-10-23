@@ -13,7 +13,7 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 
-version="${VERSION:-0.1.31}"
+version="${VERSION:-0.1.32}"
 publish=0
 for arg in "$@"; do
   case "$arg" in

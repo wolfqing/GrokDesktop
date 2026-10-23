@@ -4,7 +4,7 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 
-version="${VERSION:-0.1.31}"
+version="${VERSION:-0.1.32}"
 
 swift build -c release --product GrokDesktop
 
@@ -53,6 +53,10 @@ cat > "$app/Contents/Info.plist" <<PLIST
   <string>NSApplication</string>
   <key>NSUserNotificationsUsageDescription</key>
   <string>Grok Desktop notifies you when a session needs approval or an answer.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Grok Desktop uses the microphone so Desk can dictate a message.</string>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>Grok Desktop uses speech recognition to turn what you say into a Desk message.</string>
 </dict>
 </plist>
 PLIST

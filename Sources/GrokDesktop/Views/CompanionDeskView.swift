@@ -5,8 +5,10 @@ struct CompanionDeskView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var desk: DeskController
     @Environment(\.palette) private var palette
-    @Environment(\.l10n) private var l10n
+    @StateObject private var speech = DictateCapture()
     @State private var dictate = ""
+
+    private var copy: L10n { model.copy }
 
     private var phase: CompanionPhase {
         CompanionDesk.phase(
@@ -30,14 +32,24 @@ struct CompanionDeskView: View {
                 }
                 Spacer()
             }
-            TextField(l10n.t("Dictate", "口述"), text: $dictate)
+            TextField(copy.t("Dictate", "口述"), text: $dictate)
                 .textFieldStyle(.roundedBorder)
             HStack {
-                Button(l10n.t("Add", "加入")) { dictateNow() }
-                Button(l10n.t("Send", "发送")) { sendNow() }
-                Button(l10n.t("Stop", "停止")) { stopNow() }
+                Button(copy.t("Add", "加入")) { dictateNow() }
+                Button(speech.listening ? copy.t("Stop speaking", "说完") : copy.t("Speak", "口述")) { speakNow() }
+                Button(copy.t("Send", "发送")) { sendNow() }
+                Button(copy.t("Stop", "停止")) { stopNow() }
             }
             .font(.system(size: 12, weight: .medium))
+            if !speech.status.isEmpty {
+                Text(speech.status)
+                    .font(.system(size: 11))
+                    .foregroundStyle(palette.secondary)
+            }
+            if phase == .needsInput {
+                Button(copy.t("Open the session", "打开这个会话")) { revealSession() }
+                    .font(.system(size: 12, weight: .medium))
+            }
             if !desk.companionDraft.isEmpty {
                 Text(desk.companionDraft)
                     .font(.system(size: 11))
@@ -48,6 +60,7 @@ struct CompanionDeskView: View {
         .padding(12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(palette.elevated)
+        .onDisappear { speech.stop() }
     }
 
     private var activityMark: some View {
@@ -63,11 +76,25 @@ struct CompanionDeskView: View {
 
     private var phaseLabel: String {
         switch phase {
-        case .idle: return l10n.t("Idle", "空闲")
-        case .working: return l10n.t("Working", "进行中")
-        case .needsInput: return l10n.t("Needs you", "需要你")
-        case .done: return l10n.t("Finished", "已完成")
+        case .idle: return copy.t("Idle", "空闲")
+        case .working: return copy.t("Working", "进行中")
+        case .needsInput: return copy.t("Needs you", "需要你")
+        case .done: return copy.t("Finished", "已完成")
         }
+    }
+
+    private func speakNow() {
+        speech.toggle(
+            localeID: desk.localeID,
+            deniedSpeech: copy.t("Speech recognition is off.", "语音识别没有打开。"),
+            deniedMic: copy.t("The microphone is off.", "麦克风没有打开。"),
+            unavailable: copy.t("Speech recognition is not available.", "这台 Mac 不能做语音识别。"),
+            onPartial: { dictate = $0 },
+            onFinal: { text in
+                dictate = text
+                dictateNow()
+            }
+        )
     }
 
     private func dictateNow() {
@@ -79,10 +106,15 @@ struct CompanionDeskView: View {
 
     private func sendNow() {
         if case .send(let text) = CompanionDesk.apply(.send, draft: desk.companionDraft, turnRunning: model.client.isTurnRunning) {
-            model.draft = text
             desk.companionDraft = ""
-            model.sendDraft()
+            model.sendText(text)
+            revealSession()
         }
+    }
+
+    private func revealSession() {
+        model.destination = .build
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     private func stopNow() {

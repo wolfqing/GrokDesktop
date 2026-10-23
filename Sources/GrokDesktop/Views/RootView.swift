@@ -166,6 +166,7 @@ struct RootView: View {
         }
         .onAppear {
             model.prepareAttention()
+            model.resumeBridgeLive()
             if model.needsFolderPick {
                 model.needsFolderPick = false
                 model.chooseWorkingDirectory()
@@ -250,7 +251,7 @@ struct RootView: View {
                             } label: {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(session.title).font(.system(size: 14))
-                                    Text(RelativeTime.meta(session, chinese: model.language.resolved() == .chinese))
+                                    Text(RelativeTime.meta(session, chinese: model.showsChinese))
                                         .font(.system(size: 11))
                                         .foregroundStyle(palette.secondary)
                                 }

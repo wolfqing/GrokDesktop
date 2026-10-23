@@ -570,8 +570,6 @@ struct ChatView: View {
                 .help(model.contextWindowNoteText ?? l10n.sessionContext)
             }
 
-            InspectorPanelsMenu()
-
             Button {
                 model.showInspector.toggle()
             } label: {
@@ -604,7 +602,7 @@ struct ChatView: View {
     }
 
     private var emptyState: some View {
-        let chinese = model.language.resolved() == .chinese
+        let chinese = model.showsChinese
         let folderSessions = model.filteredSessions.filter { $0.cwd == model.client.workingDirectory.path }
         return VStack(spacing: 16) {
             Color.clear
@@ -1230,7 +1228,7 @@ struct ChatView: View {
 
     @ViewBuilder
     private func toolCluster(_ items: [ConversationItem]) -> some View {
-        let chinese = model.language.resolved() == .chinese
+        let chinese = model.showsChinese
         let status = items.allSatisfy(toolSucceeded) ? "completed" : (items.contains(where: { item in
             if case .tool(_, _, let value, _) = item { return value == "failed" }
             return false
@@ -1264,7 +1262,7 @@ struct ChatView: View {
         detail: String,
         grouped: Bool = false
     ) -> some View {
-        let chinese = model.language.resolved() == .chinese
+        let chinese = model.showsChinese
         let active = ToolVoice.isActive(status) && model.client.isTurnRunning
         let parsed = ToolVoice.line(title, chinese: chinese, cwd: model.client.workingDirectory, running: active)
         let shownStatus = model.client.isStopping && ToolVoice.isActive(status) ? "cancelled" : status
@@ -1312,7 +1310,7 @@ struct ChatView: View {
             }
             Spacer(minLength: 0)
             if status == "failed" || status == "cancelled" {
-                Text(ToolVoice.statusLabel(status, chinese: model.language.resolved() == .chinese))
+                Text(ToolVoice.statusLabel(status, chinese: model.showsChinese))
                     .foregroundStyle(palette.secondary)
             }
         }

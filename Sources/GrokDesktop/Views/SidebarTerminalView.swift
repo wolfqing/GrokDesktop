@@ -1,20 +1,25 @@
 import SwiftUI
 
 struct SidebarTerminalPane: View {
+    var fills = false
     @EnvironmentObject private var model: AppModel
     @Environment(\.palette) private var palette
     @Environment(\.l10n) private var l10n
 
     var body: some View {
         VStack(spacing: 0) {
-            resizeHandle
+            if !fills {
+                resizeHandle
+            }
             header
             SidebarTerminalHost(shell: model.sidebarShell)
-                .frame(height: model.shellHeight)
+                .frame(maxWidth: .infinity, maxHeight: fills ? .infinity : nil)
+                .frame(height: fills ? nil : model.shellHeight)
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .padding(.horizontal, 10)
                 .padding(.bottom, 10)
         }
+        .frame(maxWidth: .infinity, maxHeight: fills ? .infinity : nil, alignment: .top)
         .background(palette.sidebar)
         .onAppear {
             model.sidebarShell.sync(

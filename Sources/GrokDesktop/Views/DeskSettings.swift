@@ -243,13 +243,13 @@ struct AdvancedDeskSection: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(l10n.t("Custom relay", "自定义中转"))
                 .font(.system(size: 13, weight: .semibold))
-            Picker("", selection: $desk.relayPreset) {
+            Picker("", selection: relayPresetBinding) {
                 ForEach(RelayPreset.allCases, id: \.rawValue) { preset in
                     Text(preset.rawValue).tag(preset.rawValue)
                 }
             }
             .pickerStyle(.menu)
-            TextField("Base URL", text: $desk.relayBase)
+            TextField(relayURLPlaceholder, text: $desk.relayBase)
                 .textFieldStyle(.roundedBorder)
             TextField(l10n.t("Default model", "默认模型"), text: $desk.relayModel)
                 .textFieldStyle(.roundedBorder)
@@ -297,6 +297,21 @@ struct AdvancedDeskSection: View {
                 .textFieldStyle(.roundedBorder)
             Button(l10n.t("Deliver inbound", "送进会话")) { model.deliverInboundDraft() }
                 .buttonStyle(GrokSecondaryButtonStyle())
+            Button(desk.bridgeLive ? l10n.t("Stop live", "停止实时") : l10n.t("Start live", "开始实时")) {
+                model.toggleBridgeLive()
+            }
+            .buttonStyle(GrokSecondaryButtonStyle())
+            Text(l10n.t("Live uses each saved bridge. Personal WeChat stays paste-only. Feishu checks the credential, then you still paste.", "实时接收用已保存的桥接。个人微信只能粘贴。飞书只核对凭证，消息仍要粘贴。"))
+                .font(.system(size: 12))
+                .foregroundStyle(palette.secondary)
+            ForEach(desk.bridgeNotes.keys.sorted(), id: \.self) { key in
+                if let note = desk.bridgeNotes[key], !note.isEmpty {
+                    Text(note)
+                        .font(.system(size: 12))
+                        .foregroundStyle(palette.secondary)
+                        .textSelection(.enabled)
+                }
+            }
             ForEach(desk.bridges, id: \.channel) { bridge in
                 Text("\(bridge.channel.rawValue) · \(bridge.isComplete ? l10n.t("ready", "已填好") : l10n.t("incomplete", "未填完"))")
                     .font(.system(size: 12))
@@ -318,11 +333,22 @@ struct AdvancedDeskSection: View {
             HStack {
                 Button(desk.mirrorOn ? l10n.t("Stop", "停止") : l10n.t("Start", "启动")) { model.toggleMirror() }
                     .buttonStyle(GrokSecondaryButtonStyle())
-                if desk.mirrorOn {
-                    Text(":\(desk.mirrorPort)")
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(palette.secondary)
-                }
+            }
+            if desk.mirrorOn, desk.mirrorExposure == MirrorExposure.tunnel.rawValue, desk.mirrorPublicURL.isEmpty {
+                Text(l10n.t("Waiting for the tunnel address.", "正在等隧道地址。"))
+                    .font(.system(size: 12))
+                    .foregroundStyle(palette.secondary)
+            }
+            if desk.mirrorOn, !model.mirrorAddressLine.isEmpty {
+                Text(model.mirrorAddressLine)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(palette.secondary)
+                    .textSelection(.enabled)
+            }
+            if desk.mirrorOn, desk.mirrorExposure == MirrorExposure.lan.rawValue, model.mirrorAddressLine.isEmpty {
+                Text(l10n.t("No LAN address on this Mac.", "这台 Mac 没有局域网地址。"))
+                    .font(.system(size: 12))
+                    .foregroundStyle(palette.secondary)
             }
             if !desk.maskedMirrorToken.isEmpty {
                 Text(l10n.t("Token saved \(desk.maskedMirrorToken)", "令牌已保存 \(desk.maskedMirrorToken)"))
@@ -341,12 +367,18 @@ struct AdvancedDeskSection: View {
             Button(l10n.t("Read SSH config", "读取 SSH 配置")) { model.refreshSSHHosts() }
                 .buttonStyle(GrokSecondaryButtonStyle())
             ForEach(desk.sshHosts.prefix(8)) { host in
-                Button(host.hostName.isEmpty ? host.alias : "\(host.alias) · \(host.hostName)") {
+                Button {
                     desk.sshAlias = host.alias
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: desk.sshAlias == host.alias ? "checkmark" : "circle")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text(host.hostName.isEmpty ? host.alias : "\(host.alias) · \(host.hostName)")
+                    }
                 }
                 .buttonStyle(.plain)
                 .font(.system(size: 12, design: .monospaced))
-                .foregroundStyle(palette.secondary)
+                .foregroundStyle(desk.sshAlias == host.alias ? palette.text : palette.secondary)
             }
             TextField(l10n.t("SSH alias", "SSH 别名"), text: $desk.sshAlias)
                 .textFieldStyle(.roundedBorder)
@@ -410,6 +442,25 @@ struct AdvancedDeskSection: View {
                     .foregroundStyle(palette.secondary)
             }
         }
+    }
+
+    private var relayURLPlaceholder: String {
+        let known = RelayPresets.baseURL(desk.relayPreset)
+        return known.isEmpty ? "https://" : known
+    }
+
+    private var relayPresetBinding: Binding<String> {
+        Binding(
+            get: { desk.relayPreset },
+            set: { next in
+                let known = Set(RelayPreset.allCases.map { RelayPresets.baseURL($0.rawValue) })
+                let current = desk.relayBase.trimmingCharacters(in: .whitespacesAndNewlines)
+                if current.isEmpty || known.contains(current) {
+                    desk.relayBase = RelayPresets.baseURL(next)
+                }
+                desk.relayPreset = next
+            }
+        )
     }
 
     private func fieldBinding(_ field: String) -> Binding<String> {

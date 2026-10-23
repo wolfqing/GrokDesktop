@@ -115,8 +115,11 @@ public final class SSHKeep: @unchecked Sendable {
 public final class MirrorTunnel: @unchecked Sendable {
     private let lock = NSLock()
     private var process: Process?
+    private var output = ""
     public private(set) var launchedPID: Int32 = 0
     public private(set) var launchedArguments: [String] = []
+    /// Called when cloudflared prints a quick-tunnel URL. May arrive off the main actor.
+    public var onPublicURL: ((String) -> Void)?
 
     public init() {}
 
@@ -129,23 +132,54 @@ public final class MirrorTunnel: @unchecked Sendable {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
-        process.standardOutput = Pipe()
-        process.standardError = Pipe()
+        let outputPipe = Pipe()
+        let errorPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = errorPipe
         try process.run()
         lock.lock()
         self.process = process
+        output = ""
         launchedPID = process.processIdentifier
         launchedArguments = arguments
         lock.unlock()
+        watch(outputPipe)
+        watch(errorPipe)
     }
 
     public func stop() {
         lock.lock()
         let process = self.process
         self.process = nil
+        output = ""
         lock.unlock()
-        if let process, process.isRunning {
+        guard let process else { return }
+        (process.standardOutput as? Pipe)?.fileHandleForReading.readabilityHandler = nil
+        (process.standardError as? Pipe)?.fileHandleForReading.readabilityHandler = nil
+        if process.isRunning {
             process.terminate()
+        }
+    }
+
+    private func watch(_ pipe: Pipe) {
+        pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
+            self?.absorb(text)
+        }
+    }
+
+    private func absorb(_ chunk: String) {
+        lock.lock()
+        output.append(chunk)
+        if output.count > 12_000 {
+            output = String(output.suffix(6_000))
+        }
+        let url = MirrorBind.tunnelURL(in: output)
+        let notify = onPublicURL
+        lock.unlock()
+        if let url {
+            notify?(url)
         }
     }
 }

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.32 - 2026-10-23
+
+You can speak a draft, and a saved bridge can take new messages while the app is open.
+
+- The composer and the small Desk window have a microphone. What you say fills the draft, with a live level. Stopping leaves the sentence in the box. The microphone and speech recognition are requested when you start.
+- Start live on the bridges you already saved. Telegram, Discord, Matrix, Slack, QQ, DingTalk, Weibo, and Messages deliver new inbound text into a trusted project. Personal WeChat stays paste-only. Feishu checks the credential, then you still paste. LINE and WeCom can take a signed or local callback on this Mac. Messages already waiting when live starts stay out.
+- The phone page shows an address on this Mac, or one other devices on the same network can open. A Cloudflare quick-tunnel address is taken from the tunnel log.
+- English and Simplified Chinese stay as written. Traditional Chinese is converted. The other languages in the list use the phrase table and fall back to English.
+- The main window is centered once at launch. Opening a file preview changes the sidebar width on the next turn, so that click no longer aborts the app. A diff is parsed once per patch, and only the newest file starts expanded.
+
 ## 0.1.31 - 2026-10-21
 
 Sessions, trusted folders, a phone mirror, message bridges, and a remote host.

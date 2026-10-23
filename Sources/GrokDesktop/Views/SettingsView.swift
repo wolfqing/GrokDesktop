@@ -242,7 +242,7 @@ struct SettingsView: View {
             case "en": model.language = .english
             case "zh-Hans", "zh-Hant": model.language = .chinese
             case "system": model.language = .system
-            default: break
+            default: model.objectWillChange.send()
             }
             model.showLanguagePicker = false
         } label: {

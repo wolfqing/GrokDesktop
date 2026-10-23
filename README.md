@@ -22,7 +22,14 @@ Community project. Not an official xAI / SpaceXAI product.
 
 ## Install
 
-**Download:** [Grok-Desktop-0.1.31.zip](https://github.com/wolfqing/GrokDesktop/releases/download/v0.1.31/Grok-Desktop-0.1.31.zip) · [All releases](https://github.com/wolfqing/GrokDesktop/releases) · [Changelog](CHANGELOG.md)
+**Download:** [Grok-Desktop-0.1.32.zip](https://github.com/wolfqing/GrokDesktop/releases/download/v0.1.32/Grok-Desktop-0.1.32.zip) · [All releases](https://github.com/wolfqing/GrokDesktop/releases) · [Changelog](CHANGELOG.md)
+
+**From 0.1.31.** Speak a draft, and a saved bridge can take new messages while the app is open.
+
+- The composer and the small Desk window have a microphone. What you say fills the draft. Stopping leaves the sentence in the box.
+- Start live on the bridges you already saved. Telegram, Discord, Matrix, Slack, QQ, DingTalk, Weibo, and Messages deliver new inbound text into a trusted project. Personal WeChat stays paste-only. Feishu checks the credential, then you still paste. LINE and WeCom can take a local callback. Older messages stay out.
+- The phone page shows an address on this Mac, or one on the same network. A Cloudflare quick-tunnel address is read from the tunnel log.
+- The main window is centered once. Opening a file preview no longer changes the sidebar width in the same click.
 
 **From 0.1.30.** Sessions, trusted folders, a phone mirror, message bridges, and a remote host. The Dock and Finder icon is the Grok mark.
 

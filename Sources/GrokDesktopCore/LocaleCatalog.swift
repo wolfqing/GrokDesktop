@@ -52,6 +52,18 @@ public enum LocaleCatalog {
         return match(preferredLanguages) ?? "en"
     }
 
+    /// Maps a desk locale onto a speech-recognizer identifier.
+    public static func speechIdentifier(preference: String?, preferredLanguages: [String]) -> String {
+        switch resolve(preference: preference, preferredLanguages: preferredLanguages) {
+        case "zh-Hans": return "zh-CN"
+        case "zh-Hant": return "zh-TW"
+        case "pt-BR": return "pt-BR"
+        case "fil": return "fil-PH"
+        case "en": return "en-US"
+        case let id: return id
+        }
+    }
+
     public static func string(_ key: LocaleKey, languageID: String) -> String {
         let id = languageIDs.contains(languageID) ? languageID : "en"
         return table[id]?[key] ?? table["en"]?[key] ?? ""

@@ -320,7 +320,7 @@ public final class ACPClient: ObservableObject {
                 "protocolVersion": 1,
                 "clientInfo": [
                     "name": "GrokDesktop",
-                    "version": "0.1.31"
+                    "version": "0.1.32"
                 ],
                 "clientCapabilities": [
                     "fs": [
