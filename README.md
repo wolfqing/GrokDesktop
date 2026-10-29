@@ -22,7 +22,9 @@ Community project. Not an official xAI / SpaceXAI product.
 
 ## Install
 
-**Download:** [Grok-Desktop-0.1.32.zip](https://github.com/wolfqing/GrokDesktop/releases/download/v0.1.32/Grok-Desktop-0.1.32.zip) · [All releases](https://github.com/wolfqing/GrokDesktop/releases) · [Changelog](CHANGELOG.md)
+**Download:** [Grok-Desktop-0.1.33.zip](https://github.com/wolfqing/GrokDesktop/releases/download/v0.1.33/Grok-Desktop-0.1.33.zip) · [All releases](https://github.com/wolfqing/GrokDesktop/releases) · [Changelog](CHANGELOG.md)
+
+**From 0.1.32.** When a turn finishes, the conversation stays on the reply. Folding the tool rows no longer leaves a blank page.
 
 **From 0.1.31.** Speak a draft, and a saved bridge can take new messages while the app is open.
 

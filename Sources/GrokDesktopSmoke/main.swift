@@ -916,6 +916,53 @@ expect(
     !ChatScrollMath.isNearBottom(offset: 1100, visible: 800, content: 2000),
     "far from bottom is not near"
 )
+expect(
+    ChatScrollMath.clampedOriginY(originY: 2400, content: 2000, visible: 800) == 1200,
+    "origin past the folded transcript clamps to the bottom"
+)
+expect(
+    ChatScrollMath.clampedOriginY(originY: -40, content: 2000, visible: 800) == 0,
+    "origin above the transcript clamps to the top"
+)
+expect(
+    ChatScrollMath.clampedOriginY(originY: 400, content: 2000, visible: 800) == 400,
+    "origin inside the transcript stays"
+)
+expect(
+    ChatScrollMath.clampedOriginY(originY: 40, content: 500, visible: 800) == 0,
+    "a short transcript has no travel"
+)
+expect(
+    ChatScrollMath.kickOriginY(originY: 1200, content: 2000, visible: 800) == 1199,
+    "kick steps one point off the bottom"
+)
+expect(
+    ChatScrollMath.shouldRevealBottom(
+        previousContent: 5000,
+        content: 1800,
+        previousOffset: 4200,
+        previousVisible: 800
+    ),
+    "a fold while following the bottom reveals the latest rows"
+)
+expect(
+    !ChatScrollMath.shouldRevealBottom(
+        previousContent: 5000,
+        content: 1800,
+        previousOffset: 200,
+        previousVisible: 800
+    ),
+    "a fold while reading earlier rows does not jump"
+)
+expect(
+    !ChatScrollMath.shouldRevealBottom(
+        previousContent: 2000,
+        content: 1960,
+        previousOffset: 1200,
+        previousVisible: 800
+    ),
+    "a one-line shrink does not reveal"
+)
 
 let timeoutDir = FileManager.default.temporaryDirectory.appendingPathComponent("gd-timeout-\(UUID().uuidString)", isDirectory: true)
 try! FileManager.default.createDirectory(at: timeoutDir, withIntermediateDirectories: true)

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.33 - 2026-10-29
+
+The conversation stays on screen when a turn finishes.
+
+- Tool rows and thinking fold up at the end of a turn. The view no longer sits in the blank gap that fold leaves behind, so the reply is there without scrolling for it.
+
 ## 0.1.32 - 2026-10-23
 
 You can speak a draft, and a saved bridge can take new messages while the app is open.

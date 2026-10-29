@@ -61,6 +61,9 @@ struct ChatScrollBottomMonitor: NSViewRepresentable {
         var onUserScroll: (ChatScrollMetrics) -> Void = { _ in }
         var driver: ChatScrollDriver?
         private var attachAttempts = 0
+        private var lastDocumentHeight: CGFloat = 0
+        private var lastOffset: CGFloat = 0
+        private var lastVisible: CGFloat = 0
 
         func attach(from view: NSView) {
             if clip != nil {
@@ -117,9 +120,28 @@ struct ChatScrollBottomMonitor: NSViewRepresentable {
             if let scroll {
                 driver?.attach(scroll)
             }
+            let preview = Self.metrics(from: clip, slack: slack)
+            let shrunk = ChatScrollMath.shouldRevealBottom(
+                previousContent: lastDocumentHeight,
+                content: preview.content,
+                previousOffset: lastOffset,
+                previousVisible: lastVisible
+            )
+            lastDocumentHeight = preview.content
+            lastOffset = preview.offset
+            lastVisible = preview.visible
+            if shrunk && !userScroll {
+                driver?.revealBottom()
+            } else {
+                driver?.clampIfOutside()
+            }
             let metrics = Self.metrics(from: clip, slack: slack)
+            lastDocumentHeight = metrics.content
+            lastOffset = metrics.offset
+            lastVisible = metrics.visible
+            let programmatic = driver?.consumeProgrammatic(originY: clip.bounds.origin.y) ?? false
             driver?.update(metrics: metrics, isDark: isDark)
-            if userScroll {
+            if userScroll, !programmatic {
                 onUserScroll(metrics)
             }
             if ChatScrollMath.jumpChromeChanged(
@@ -222,6 +244,8 @@ struct ChatView: View {
     @State private var stickToLatest = true
     @State private var pinningToLatest = false
     @State private var pinToken = 0
+    @State private var settleToken = 0
+    @State private var suppressReleaseUntil = Date.distantPast
     @State private var bottomHits = 0
     @State private var pinStarted = Date.distantPast
     @State private var copiedPromptID: String?
@@ -332,6 +356,9 @@ struct ChatView: View {
                         }
                         .scrollIndicators(.never)
                         .modifier(ChatDefaultBottomAnchor())
+                        .transaction { transaction in
+                            transaction.animation = nil
+                        }
                         .modifier(ChatScrollGeometryReader { applyScrollMetrics($0) })
                         .background(
                             ChatScrollBottomMonitor(
@@ -362,23 +389,26 @@ struct ChatView: View {
                             }
                         }
                         .overlay(alignment: .bottom) {
-                            if showJumpToLatest {
-                                Button {
-                                    jumpToLatest(proxy)
-                                } label: {
-                                    Image(systemName: "arrow.down")
-                                        .font(.system(size: 13, weight: .semibold))
-                                        .foregroundStyle(palette.text)
-                                        .frame(width: 34, height: 34)
-                                        .background(palette.elevated, in: Circle())
-                                        .overlay(Circle().stroke(palette.hairline, lineWidth: 1))
+                            Group {
+                                if showJumpToLatest {
+                                    Button {
+                                        jumpToLatest(proxy)
+                                    } label: {
+                                        Image(systemName: "arrow.down")
+                                            .font(.system(size: 13, weight: .semibold))
+                                            .foregroundStyle(palette.text)
+                                            .frame(width: 34, height: 34)
+                                            .background(palette.elevated, in: Circle())
+                                            .overlay(Circle().stroke(palette.hairline, lineWidth: 1))
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help(l10n.jumpToLatest)
+                                    .padding(.bottom, 10)
+                                    .accessibilityLabel(l10n.jumpToLatest)
+                                    .transition(.opacity.combined(with: .scale(scale: 0.92)))
                                 }
-                                .buttonStyle(.plain)
-                                .help(l10n.jumpToLatest)
-                                .padding(.bottom, 10)
-                                .accessibilityLabel(l10n.jumpToLatest)
-                                .transition(.opacity.combined(with: .scale(scale: 0.92)))
                             }
+                            .animation(.easeOut(duration: 0.16), value: showJumpToLatest)
                         }
                     }
                     .id(model.client.sessionID ?? "none")
@@ -399,6 +429,10 @@ struct ChatView: View {
                                 snapToLatest(proxy)
                             }
                         }
+                    }
+                    .onChange(of: model.client.isTurnRunning) { wasRunning, running in
+                        guard wasRunning, !running, stickToLatest, !scrollbarDragging else { return }
+                        settleLatest(proxy)
                     }
                     .onChange(of: model.jumpTarget) { _, target in
                         if let target {
@@ -447,7 +481,6 @@ struct ChatView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(palette.canvas)
-        .animation(.easeOut(duration: 0.16), value: showJumpToLatest)
         .onReceive(NotificationCenter.default.publisher(for: .grokCopyOnSelect)) { note in
             if let text = note.object as? String {
                 model.copySelection(text)
@@ -714,7 +747,10 @@ struct ChatView: View {
         guard !pinningToLatest, !scrollbarDragging else { return }
         scrollDriver.update(metrics: metrics, isDark: palette.isDark)
         if metrics.userReleased {
-            stickToLatest = false
+            if Date() >= suppressReleaseUntil {
+                stickToLatest = false
+                settleToken += 1
+            }
         } else if metrics.isNearBottom {
             stickToLatest = true
         }
@@ -869,6 +905,26 @@ struct ChatView: View {
         pinningToLatest = false
         stickToLatest = true
         ignoreScrollUntil = Date().addingTimeInterval(0.8)
+        snapToLatest(proxy)
+    }
+
+    /// The finished turn folds tools and thinking, and swaps the live reply for markdown.
+    /// The scroll offset can sit in that vacated gap, which stays blank until a wheel event.
+    private func settleLatest(_ proxy: ScrollViewProxy) {
+        settleToken += 1
+        let token = settleToken
+        suppressReleaseUntil = Date().addingTimeInterval(0.36)
+        reveal(proxy)
+        for delay in [0.08, 0.24] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                guard token == settleToken, stickToLatest, !scrollbarDragging else { return }
+                reveal(proxy)
+            }
+        }
+    }
+
+    private func reveal(_ proxy: ScrollViewProxy) {
+        scrollDriver.revealBottom()
         snapToLatest(proxy)
     }
 
