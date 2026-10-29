@@ -22,7 +22,9 @@ Community project. Not an official xAI / SpaceXAI product.
 
 ## Install
 
-**Download:** [Grok-Desktop-0.1.33.zip](https://github.com/wolfqing/GrokDesktop/releases/download/v0.1.33/Grok-Desktop-0.1.33.zip) · [All releases](https://github.com/wolfqing/GrokDesktop/releases) · [Changelog](CHANGELOG.md)
+**Download:** [Grok-Desktop-0.1.34.zip](https://github.com/wolfqing/GrokDesktop/releases/download/v0.1.34/Grok-Desktop-0.1.34.zip) · [All releases](https://github.com/wolfqing/GrokDesktop/releases) · [Changelog](CHANGELOG.md)
+
+**From 0.1.33.** The right side opens one tool at a time: Changes, Preview, Terminal, or Aside. ⌘I still hides the column. A prompt follows the latest line when you were already there. Repeated hook runs stay on one row.
 
 **From 0.1.32.** When a turn finishes, the conversation stays on the reply. Folding the tool rows no longer leaves a blank page.
 

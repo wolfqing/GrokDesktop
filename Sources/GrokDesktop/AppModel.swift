@@ -89,6 +89,8 @@ final class AppModel: ObservableObject {
     @Published var inspectorFocusRequest: String?
     @Published var previewedFile: URL?
     @Published var inspectorDetailsVisible = true
+    @Published var inspectorTool: InspectorTool?
+    @Published var inspectorToolFocused = false
     @Published var shellHeight: CGFloat = GrokTheme.shellHeight
     let sidebarShell = SidebarShell()
     @Published var hiddenInspectorPanes: Set<String> = []
@@ -279,6 +281,7 @@ final class AppModel: ObservableObject {
         self.client = ACPClient(locator: locator)
         restoreInspectorWidth()
         restoreInspectorPanes()
+        restoreInspectorTool()
         restoreShellPane()
         restoreWorkingDirectory()
         restoreProductSurface()
@@ -341,11 +344,7 @@ final class AppModel: ObservableObject {
         afterHitTest { [weak self] in
             guard let self else { return }
             self.previewedFile = standardized
-            self.showInspector = true
-            self.inspectorDetailsVisible = false
-            if self.destination != .build {
-                self.destination = .build
-            }
+            self.presentInspectorTool(.preview)
             // Width is a second turn. Changing it in the same pass as the new
             // preview hits AppKit's constraint update and aborts the process.
             let widen = self.inspectorWidth <= GrokTheme.inspectorWidth
@@ -359,8 +358,11 @@ final class AppModel: ObservableObject {
 
     func clearPreview() {
         afterHitTest { [weak self] in
-            self?.previewedFile = nil
-            self?.inspectorDetailsVisible = true
+            guard let self else { return }
+            self.previewedFile = nil
+            if self.inspectorTool == .preview {
+                self.closeInspectorPane()
+            }
         }
     }
 
@@ -375,53 +377,101 @@ final class AppModel: ObservableObject {
         setInspectorWidth(previewedFile == nil ? GrokTheme.inspectorWidth : GrokTheme.inspectorPreviewWidth)
     }
 
+    var inspectorColumnVisible: Bool {
+        showInspector && destination == .build
+    }
+
+    var inspectorChangesEmpty: Bool {
+        client.hunks.isEmpty
+            && client.gitDiffText.isEmpty
+            && !(workspace.isRepo && (workspace.insertions + workspace.deletions) > 0)
+    }
+
+    func inspectorToolPressed(_ tool: InspectorTool) -> Bool {
+        guard inspectorColumnVisible else { return false }
+        return InspectorToolToggle.pressed(
+            tool: tool,
+            state: inspectorToolState,
+            changesEmpty: inspectorChangesEmpty
+        )
+    }
+
+    func toggleInspectorTool(_ tool: InspectorTool) {
+        let result = InspectorToolToggle.toggle(
+            columnVisible: inspectorColumnVisible,
+            state: inspectorToolState,
+            tool: tool
+        )
+        if !inspectorColumnVisible {
+            showInspector = true
+            if destination != .build {
+                destination = .build
+            }
+        }
+        applyInspectorTool(result.state)
+    }
+
+    func presentInspectorTool(_ tool: InspectorTool) {
+        showInspector = true
+        if destination != .build {
+            destination = .build
+        }
+        applyInspectorTool(InspectorToolState(tool: tool, focused: true))
+    }
+
+    func closeInspectorPane() {
+        applyInspectorTool(InspectorToolToggle.next(inspectorToolState, .close))
+    }
+
+    func noteConversationFocus() {
+        guard inspectorToolFocused else { return }
+        inspectorToolFocused = false
+    }
+
+    func noteInspectorFocus() {
+        guard inspectorTool != nil, !inspectorToolFocused else { return }
+        inspectorToolFocused = true
+    }
+
+    private var inspectorToolState: InspectorToolState {
+        InspectorToolState(tool: inspectorTool, focused: inspectorToolFocused)
+    }
+
+    private func applyInspectorTool(_ state: InspectorToolState) {
+        inspectorTool = state.tool
+        inspectorToolFocused = state.focused
+        if state.tool == .terminal {
+            UserDefaults.standard.set(true, forKey: Self.shellChosenKey)
+        }
+        if state.tool == .aside {
+            focusAsideComposer = true
+        }
+        persistInspectorTool()
+    }
+
     func inspectorPaneVisible(_ pane: InspectorPane) -> Bool {
-        !hiddenInspectorPanes.contains(pane.rawValue)
+        inspectorColumnVisible && inspectorTool == pane.tool
     }
 
     func setInspectorPane(_ pane: InspectorPane, visible: Bool) {
-        if pane == .shell {
-            UserDefaults.standard.set(true, forKey: Self.shellChosenKey)
-        }
         if visible {
-            showInspector = true
-            hiddenInspectorPanes.remove(pane.rawValue)
-            inspectorDetailsVisible = true
-        } else {
-            hiddenInspectorPanes.insert(pane.rawValue)
+            presentInspectorTool(pane.tool)
+        } else if inspectorTool == pane.tool {
+            closeInspectorPane()
         }
-        persistInspectorPanes()
     }
 
     func hideInspectorPane(_ pane: InspectorPane) {
         afterHitTest { [weak self] in
-            guard let self else { return }
-            self.hiddenInspectorPanes.insert(pane.rawValue)
-            self.persistInspectorPanes()
+            guard let self, self.inspectorTool == pane.tool else { return }
+            self.closeInspectorPane()
         }
     }
 
     func showInspectorPane(_ pane: InspectorPane) {
         afterHitTest { [weak self] in
-            guard let self else { return }
-            self.showInspector = true
-            self.hiddenInspectorPanes.remove(pane.rawValue)
-            self.inspectorDetailsVisible = true
-            self.persistInspectorPanes()
+            self?.presentInspectorTool(pane.tool)
         }
-    }
-
-    func showAllInspectorPanes() {
-        afterHitTest { [weak self] in
-            guard let self else { return }
-            self.hiddenInspectorPanes.removeAll()
-            self.inspectorDetailsVisible = true
-            self.persistInspectorPanes()
-        }
-    }
-
-    var hiddenInspectorPaneList: [InspectorPane] {
-        InspectorPane.allCases.filter { hiddenInspectorPanes.contains($0.rawValue) }
     }
 
     private var contextMatchesSession: Bool {
@@ -493,6 +543,8 @@ final class AppModel: ObservableObject {
         lastBuildDestination = .build
         showInspector = true
         inspectorDetailsVisible = true
+        inspectorTool = .changes
+        inspectorToolFocused = true
         hiddenInspectorPanes = InspectorPane.closedUntilChosen
         previewedFile = nil
         client.applyDemo(
@@ -524,9 +576,21 @@ final class AppModel: ObservableObject {
     }
 
     private static let shellChosenKey = "inspectorShellChosen"
+    private static let inspectorToolKey = "inspectorTool"
 
-    private func persistInspectorPanes() {
-        UserDefaults.standard.set(Array(hiddenInspectorPanes), forKey: "hiddenInspectorPanes")
+    private func persistInspectorTool() {
+        if let inspectorTool {
+            UserDefaults.standard.set(inspectorTool.rawValue, forKey: Self.inspectorToolKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: Self.inspectorToolKey)
+        }
+    }
+
+    private func restoreInspectorTool() {
+        guard let raw = UserDefaults.standard.string(forKey: Self.inspectorToolKey),
+              let tool = InspectorTool(rawValue: raw) else { return }
+        inspectorTool = tool
+        inspectorToolFocused = false
     }
 
     private func restoreInspectorPanes() {
@@ -2332,11 +2396,9 @@ final class AppModel: ObservableObject {
     }
 
     func enqueueAside(_ text: String) {
-        destination = .build
         draft = ""
         showPalette = false
-        showInspector = true
-        inspectorDetailsVisible = true
+        presentInspectorTool(.aside)
         Task {
             do {
                 try await client.send(text: SessionFold.asidePrompt(text), kind: .aside)
@@ -2347,15 +2409,12 @@ final class AppModel: ObservableObject {
     }
 
     func openAsideComposer(prefill: String = "") {
-        destination = .build
-        showInspector = true
-        inspectorDetailsVisible = true
         showPalette = false
         mentionQuery = nil
         if !prefill.isEmpty {
             asideDraft = SessionFold.asideDisplay(prefill)
         }
-        focusAsideComposer = true
+        presentInspectorTool(.aside)
     }
 
     func sendAside() {
@@ -2582,8 +2641,7 @@ final class AppModel: ObservableObject {
 
     func openMemoryFile(_ file: MemoryFile) {
         previewedFile = file.url
-        showInspector = true
-        destination = .build
+        presentInspectorTool(.preview)
         showMemory = false
     }
 
@@ -2950,8 +3008,7 @@ final class AppModel: ObservableObject {
                 sendDraft()
             }
         case "/view-plan", "/show-plan", "/plan-view":
-            destination = .build
-            showInspector = true
+            presentInspectorTool(.tasks)
             client.setMode(.plan)
         case "/jump":
             if rest.isEmpty {

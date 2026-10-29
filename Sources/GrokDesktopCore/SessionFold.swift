@@ -183,9 +183,23 @@ public enum SessionFold {
             let id = HarnessEvents.scheduledTaskID(from: update)
             snapshot.scheduledTasks.removeAll { $0.id == id }
         case .hookExecution:
-            snapshot.hookEvents.insert(HarnessEvents.hookEvent(from: update), at: 0)
-            if snapshot.hookEvents.count > 40 {
-                snapshot.hookEvents = Array(snapshot.hookEvents.prefix(40))
+            for event in HarnessEvents.hookEvents(from: update) {
+                if let index = snapshot.hookEvents.firstIndex(where: {
+                    $0.event == event.event && $0.command == event.command
+                        && $0.blocked == event.blocked && $0.failed == event.failed
+                }) {
+                    var existing = snapshot.hookEvents.remove(at: index)
+                    existing.count += event.count
+                    existing.durationMs = event.durationMs
+                    if !event.output.isEmpty { existing.output = event.output }
+                    existing.timestamp = event.timestamp ?? existing.timestamp
+                    snapshot.hookEvents.insert(existing, at: 0)
+                } else {
+                    snapshot.hookEvents.insert(event, at: 0)
+                }
+            }
+            if snapshot.hookEvents.count > 8 {
+                snapshot.hookEvents = Array(snapshot.hookEvents.prefix(8))
             }
         case .compactionCheckpoint:
             let point = HarnessEvents.checkpoint(from: update)

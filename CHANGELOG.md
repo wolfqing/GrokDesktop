@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.34 - 2026-10-29
+
+The right side opens one tool at a time.
+
+- The session title is followed by Changes, Preview, Terminal, and Aside. One of them fills the column. Clicking the open tool again closes it. Clicking it while you are in the conversation brings it forward.
+- Changes stays unpressed when there is nothing to review. Context, tasks, agent commands, and hooks stay in the menu on that column.
+- Changes is ⌘⇧D, Preview is ⌘⇧P, Terminal is ⌘J, Aside is ⌘⇧B. ⌘\ closes the open tool. ⌘I still shows or hides the column.
+- A prompt follows the latest line when you were already there. Reading earlier messages stays where it is.
+- Repeated hook runs stay on one row, under a short name. A blocked or failed run stays in front.
+
 ## 0.1.33 - 2026-10-29
 
 The conversation stays on screen when a turn finishes.

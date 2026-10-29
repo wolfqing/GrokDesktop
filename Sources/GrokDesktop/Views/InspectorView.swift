@@ -12,59 +12,13 @@ struct InspectorView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-
             Divider().overlay(palette.hairline)
-
-            if let preview = model.previewedFile {
-                FilePreviewPane(url: preview)
-                    .padding(.horizontal, 14)
-                    .padding(.top, 12)
-                    .padding(.bottom, model.inspectorDetailsVisible ? 10 : 14)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            }
-
-            if showsDetails {
-                if model.previewedFile != nil {
-                    Divider().overlay(palette.hairline)
-                    detailsHeader
-                }
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
-                        if let story = liveStory {
-                            turnSection(story)
-                        }
-                        if showsContext, model.inspectorPaneVisible(.context) {
-                            contextSection
-                        }
-                        if showsWork, model.inspectorPaneVisible(.work) {
-                            workSection
-                        }
-                        if showsTerminals, model.inspectorPaneVisible(.terminals) {
-                            terminalsSection
-                        }
-                        if showsChanges, model.inspectorPaneVisible(.changes) {
-                            changesSection
-                        }
-                        if showsHooks, model.inspectorPaneVisible(.hooks) {
-                            hooksSection
-                        }
-                    }
-                    .padding(14)
-                }
-                .frame(maxHeight: model.previewedFile == nil ? .infinity : 280)
-            } else if model.previewedFile == nil {
-                Spacer(minLength: 0)
-            }
-
-            if model.inspectorPaneVisible(.aside) {
-                Divider().overlay(palette.hairline)
-                steerPanel
-            }
-            if model.inspectorPaneVisible(.shell) {
-                SidebarTerminalPane()
-            }
+            pane
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(palette.sidebar)
+        .contentShape(Rectangle())
+        .simultaneousGesture(TapGesture().onEnded { model.noteInspectorFocus() })
         .onAppear {
             model.refreshWorkspace()
             model.client.refreshPlanArtifacts()
@@ -85,59 +39,90 @@ struct InspectorView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            Text(l10n.inspector)
+            Text(toolTitle)
                 .font(.system(size: 13, weight: .semibold))
+                .lineLimit(1)
             Spacer(minLength: 4)
             InspectorPanelsMenu()
-            if model.previewedFile != nil {
+            if model.inspectorTool != nil {
                 Button {
-                    model.inspectorDetailsVisible.toggle()
+                    model.closeInspectorPane()
                 } label: {
-                    Text(model.inspectorDetailsVisible
-                         ? l10n.t("Hide details", "隐藏详情")
-                         : l10n.t("Details", "详情"))
-                        .font(.system(size: 11, weight: .medium))
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(palette.secondary)
+                        .frame(width: 16, height: 16)
                 }
                 .buttonStyle(.plain)
+                .help(l10n.t("Close pane", "关闭这个窗格"))
             }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
     }
 
-    private var detailsHeader: some View {
-        HStack {
-            Text(l10n.t("Context and tasks", "上下文和任务"))
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(palette.secondary)
-            Spacer()
-            Button {
-                model.inspectorDetailsVisible = false
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(palette.secondary)
+    private var toolTitle: String {
+        guard let tool = model.inspectorTool else { return l10n.inspector }
+        return tool.title(chinese: l10n.language == .chinese)
+    }
+
+    @ViewBuilder
+    private var pane: some View {
+        switch model.inspectorTool {
+        case .changes:
+            scrolling { changesSection }
+        case .preview:
+            if let preview = model.previewedFile {
+                FilePreviewPane(url: preview)
+                    .padding(.horizontal, 14)
+                    .padding(.top, 12)
+                    .padding(.bottom, 14)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else {
+                emptyHint(l10n.t("Open a file to preview it.", "打开一个文件再预览"))
             }
-            .buttonStyle(.plain)
-            .help(l10n.t("Hide details", "隐藏详情"))
+        case .terminal:
+            SidebarTerminalPane(fills: true)
+        case .aside:
+            VStack(spacing: 0) {
+                steerPanel
+                Spacer(minLength: 0)
+            }
+        case .context:
+            scrolling { contextSection }
+        case .tasks:
+            scrolling {
+                VStack(alignment: .leading, spacing: 18) {
+                    if let story = liveStory {
+                        turnSection(story)
+                    }
+                    workSection
+                }
+            }
+        case .commands:
+            scrolling { terminalsSection }
+        case .hooks:
+            scrolling { hooksSection }
+        case nil:
+            emptyHint(l10n.t("Choose Changes, Preview, Terminal, or Aside.", "选变更、预览、终端或顺便问"))
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 10)
-        .padding(.bottom, 2)
     }
 
-    private var showsDetails: Bool {
-        (model.previewedFile == nil || model.inspectorDetailsVisible) && hasVisiblePanes
+    private func scrolling<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        ScrollView {
+            content()
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private var hasVisiblePanes: Bool {
-        liveStory != nil
-            || (showsContext && model.inspectorPaneVisible(.context))
-            || (showsWork && model.inspectorPaneVisible(.work))
-            || (showsTerminals && model.inspectorPaneVisible(.terminals))
-            || (showsChanges && model.inspectorPaneVisible(.changes))
-            || (showsHooks && model.inspectorPaneVisible(.hooks))
+    private func emptyHint(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 12))
+            .foregroundStyle(palette.secondary)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .padding(14)
     }
 
     private var liveStory: TurnStory? {
@@ -149,16 +134,6 @@ struct InspectorView: View {
             running: model.client.isTurnRunning,
             stopping: model.client.isStopping
         )
-    }
-
-    private var showsTerminals: Bool {
-        !model.client.terminals.isEmpty
-    }
-
-    private var showsContext: Bool {
-        model.displayedContextUsed > 0
-            || !model.client.items.isEmpty
-            || showsConnection
     }
 
     private var asideTurns: [AsideTurn] {
@@ -292,7 +267,12 @@ struct InspectorView: View {
 
     private var terminalsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            paneHeader(.terminals, title: l10n.t("Agent commands", "代理命令")) { EmptyView() }
+            paneHeader(l10n.t("Agent commands", "代理命令")) { EmptyView() }
+            if model.client.terminals.isEmpty {
+                Text(l10n.t("No agent commands yet.", "还没有代理命令。"))
+                    .font(.system(size: 12))
+                    .foregroundStyle(palette.secondary)
+            }
             ForEach(model.client.terminals) { terminal in
                 terminalRow(terminal)
             }
@@ -342,7 +322,7 @@ struct InspectorView: View {
 
     private var contextSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            paneHeader(.context, title: l10n.t("Context", "上下文")) {
+            paneHeader(l10n.t("Context", "上下文")) {
                 Button {
                     model.refreshContextBreakdown()
                     model.showContextSheet = true
@@ -486,7 +466,6 @@ struct InspectorView: View {
                     .foregroundStyle(Color.orange)
                     .disabled(model.client.isStopping)
                 }
-                paneClose(.work)
             }
             if checklistProgress.total > 0 {
                 GeometryReader { geo in
@@ -759,15 +738,6 @@ struct InspectorView: View {
         model.client.subagents.filter { !$0.isRunning }
     }
 
-    private var showsWork: Bool {
-        !checklist.isEmpty
-            || keepsPlan
-            || !liveWorkItems.isEmpty
-            || model.client.mode == .plan
-            || !model.client.scheduledTasks.isEmpty
-            || !finishedSubagents.isEmpty
-    }
-
     private var keepsPlan: Bool {
         PlanSurface.keepsBody(entryCount: model.client.planEntries.count, markdown: model.client.planMarkdown)
     }
@@ -777,45 +747,52 @@ struct InspectorView: View {
         model.client.mode == .plan || (model.client.todos.isEmpty && !model.client.planEntries.isEmpty)
     }
 
-    private var showsHooks: Bool {
-        !model.client.hookEvents.isEmpty || !model.hookDefinitions.isEmpty
+    private var hookRows: [HookEvent] {
+        HarnessEvents.hookRows(model.client.hookEvents)
     }
 
     private var hooksSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            paneHeader(.hooks, title: l10n.t("Hooks", "钩子")) {
-                EmptyView()
+            paneHeader(l10n.t("Hooks", "钩子")) {
+                Text("\(model.client.hookEvents.reduce(0) { $0 + $1.count })")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(palette.secondary)
             }
-            if !model.client.hookEvents.isEmpty {
-                ForEach(model.client.hookEvents.prefix(12)) { event in
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack {
-                            Text(event.event)
-                                .font(.system(size: 12, weight: .medium))
-                            Spacer()
-                            Text(event.blocked ? l10n.t("blocked", "已拦截") : l10n.t("ran", "已运行"))
-                                .font(.system(size: 10))
-                                .foregroundStyle(event.blocked ? Color.orange : palette.secondary)
-                        }
-                        if !event.command.isEmpty {
-                            Text(event.command)
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(palette.secondary)
-                                .lineLimit(2)
-                                .textSelection(.enabled)
-                        }
+            ForEach(hookRows) { event in
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(event.event)
+                        .font(.system(size: 12, weight: .medium))
+                        .lineLimit(1)
+                    if !event.command.isEmpty {
+                        Text(event.command)
+                            .font(.system(size: 11))
+                            .foregroundStyle(palette.secondary)
+                            .lineLimit(1)
                     }
-                }
-            } else {
-                ForEach(model.hookDefinitions.prefix(12)) { hook in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(hook.title)
-                            .font(.system(size: 12, weight: .medium))
-                        Text([hook.sourceKind, hook.pluginName, hook.matcher].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
-                            .font(.system(size: 10))
+                    Spacer(minLength: 4)
+                    if event.count > 1 {
+                        Text("×\(event.count)")
+                            .font(.system(size: 11, design: .monospaced))
                             .foregroundStyle(palette.secondary)
                     }
+                    if event.blocked {
+                        Text(l10n.t("blocked", "已拦截"))
+                            .font(.system(size: 10))
+                            .foregroundStyle(Color.orange)
+                    } else if event.failed {
+                        Text(l10n.t("failed", "失败"))
+                            .font(.system(size: 10))
+                            .foregroundStyle(Color.orange)
+                    }
                 }
+            }
+            if model.client.hookEvents.count > hookRows.count {
+                Text(l10n.t(
+                    "\(model.client.hookEvents.count - hookRows.count) more",
+                    "还有 \(model.client.hookEvents.count - hookRows.count) 个"
+                ))
+                .font(.system(size: 11))
+                .foregroundStyle(palette.secondary)
             }
         }
     }
@@ -870,15 +847,9 @@ struct InspectorView: View {
         }
     }
 
-    private var showsChanges: Bool {
-        !model.client.hunks.isEmpty
-            || !model.client.gitDiffText.isEmpty
-            || (model.workspace.isRepo && (model.workspace.insertions + model.workspace.deletions) > 0)
-    }
-
     private var changesSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            paneHeader(.changes, title: l10n.changes) { EmptyView() }
+            paneHeader(l10n.changes) { EmptyView() }
             if model.workspace.isRepo {
                 Text("\(model.workspace.branch ?? "HEAD")  +\(model.workspace.insertions) / -\(model.workspace.deletions)")
                     .font(.system(size: 12, design: .monospaced))
@@ -888,7 +859,6 @@ struct InspectorView: View {
                 Text(model.client.gitStatusText)
                     .font(.system(size: 11, design: .monospaced))
                     .textSelection(.enabled)
-                    .lineLimit(8)
             }
             if !scannedDiffs.isEmpty {
                 HStack(spacing: 8) {
@@ -903,7 +873,6 @@ struct InspectorView: View {
                 Text(model.client.gitDiffText)
                     .font(.system(size: 11, design: .monospaced))
                     .textSelection(.enabled)
-                    .lineLimit(10)
                 ChangeNoteField(
                     sessionID: model.client.sessionID ?? "",
                     path: "",
@@ -967,26 +936,12 @@ struct InspectorView: View {
             .foregroundStyle(palette.secondary)
     }
 
-    private func paneHeader<Extra: View>(_ pane: InspectorPane, title: String, @ViewBuilder extra: () -> Extra) -> some View {
+    private func paneHeader<Extra: View>(_ title: String, @ViewBuilder extra: () -> Extra) -> some View {
         HStack(spacing: 6) {
             sectionTitle(title)
             Spacer(minLength: 4)
             extra()
-            paneClose(pane)
         }
-    }
-
-    private func paneClose(_ pane: InspectorPane) -> some View {
-        Button {
-            model.hideInspectorPane(pane)
-        } label: {
-            Image(systemName: "xmark")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(palette.secondary)
-                .frame(width: 16, height: 16)
-        }
-        .buttonStyle(.plain)
-        .help(l10n.t("Hide this section", "关闭这个区块"))
     }
 
     private func compactTokens(_ value: Int) -> String {
@@ -1001,13 +956,14 @@ struct InspectorView: View {
 }
 
 struct InspectorPanelsMenu: View {
+    private static let menuPanes: [InspectorPane] = [.context, .work, .terminals, .hooks]
     @EnvironmentObject private var model: AppModel
     @Environment(\.palette) private var palette
     @Environment(\.l10n) private var l10n
 
     var body: some View {
         Menu {
-            ForEach(InspectorPane.allCases) { pane in
+            ForEach(Self.menuPanes) { pane in
                 Toggle(
                     pane.title(chinese: l10n.language == .chinese),
                     isOn: Binding(

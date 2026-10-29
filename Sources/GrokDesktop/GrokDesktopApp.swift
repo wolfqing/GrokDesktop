@@ -102,10 +102,26 @@ struct GrokDesktopApp: App {
                     model.destination = .build
                 }
                 .keyboardShortcut("i", modifiers: .command)
+                Button(model.copy.t("Changes", "变更")) {
+                    model.toggleInspectorTool(.changes)
+                }
+                .keyboardShortcut("d", modifiers: [.command, .shift])
+                Button(model.copy.t("Preview", "预览")) {
+                    model.toggleInspectorTool(.preview)
+                }
+                .keyboardShortcut("p", modifiers: [.command, .shift])
+                Button(model.copy.t("Terminal", "终端")) {
+                    model.toggleInspectorTool(.terminal)
+                }
+                .keyboardShortcut("j", modifiers: .command)
                 Button(model.copy.t("By the way", "顺便问")) {
-                    model.openAsideComposer()
+                    model.toggleInspectorTool(.aside)
                 }
                 .keyboardShortcut("b", modifiers: [.command, .shift])
+                Button(model.copy.t("Close pane", "关闭窗格")) {
+                    model.closeInspectorPane()
+                }
+                .keyboardShortcut("\\", modifiers: .command)
                 Button(model.copy.t("Cycle mode", "切换模式")) { model.cycleMode() }
                     .keyboardShortcut(.tab, modifiers: .shift)
                 Button(model.copy.t("Always approve", "全权")) {

@@ -1,3 +1,4 @@
+import GrokDesktopCore
 import SwiftUI
 
 enum AppearancePreference: String, CaseIterable, Identifiable {
@@ -86,6 +87,33 @@ enum InspectorPane: String, CaseIterable, Identifiable {
         case .hooks: return chinese ? "钩子" : "Hooks"
         case .aside: return chinese ? "顺便问" : "Aside"
         case .shell: return chinese ? "终端" : "Terminal"
+        }
+    }
+
+    var tool: InspectorTool {
+        switch self {
+        case .context: return .context
+        case .work: return .tasks
+        case .terminals: return .commands
+        case .changes: return .changes
+        case .hooks: return .hooks
+        case .aside: return .aside
+        case .shell: return .terminal
+        }
+    }
+}
+
+extension InspectorTool {
+    func title(chinese: Bool) -> String {
+        switch self {
+        case .changes: return chinese ? "变更" : "Changes"
+        case .preview: return chinese ? "预览" : "Preview"
+        case .terminal: return chinese ? "终端" : "Terminal"
+        case .aside: return chinese ? "顺便问" : "Aside"
+        case .context: return chinese ? "上下文" : "Context"
+        case .tasks: return chinese ? "任务" : "Tasks"
+        case .commands: return chinese ? "代理命令" : "Agent commands"
+        case .hooks: return chinese ? "钩子" : "Hooks"
         }
     }
 }

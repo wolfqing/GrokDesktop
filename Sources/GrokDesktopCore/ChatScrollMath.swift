@@ -68,6 +68,22 @@ public enum ChatScrollMath {
         )
     }
 
+    /// True when new rows arrived under a viewport that was already following the latest line.
+    /// A few points of streaming should not yank the scroll; a sent prompt does.
+    public static func shouldFollowGrowth(
+        previousContent: CGFloat,
+        content: CGFloat,
+        previousOffset: CGFloat,
+        previousVisible: CGFloat
+    ) -> Bool {
+        guard previousContent > 0, content > previousContent + 8 else { return false }
+        return isNearBottom(
+            offset: previousOffset,
+            visible: max(previousVisible, 1),
+            content: previousContent
+        )
+    }
+
     public static func distanceFromBottom(offset: CGFloat, visible: CGFloat, content: CGFloat) -> CGFloat {
         max(content - offset - visible, 0)
     }
