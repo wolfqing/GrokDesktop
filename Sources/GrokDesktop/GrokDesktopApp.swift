@@ -26,6 +26,10 @@ struct GrokDesktopApp: App {
                     NSApp.setActivationPolicy(.regular)
                     NSApp.activate(ignoringOtherApps: true)
                     for window in NSApp.windows {
+                        if let toolbar = window.toolbar,
+                           toolbar.items.first?.itemIdentifier != .flexibleSpace {
+                            toolbar.insertItem(withItemIdentifier: .flexibleSpace, at: 0)
+                        }
                         window.center()
                         window.makeKeyAndOrderFront(nil)
                         window.orderFrontRegardless()
@@ -41,13 +45,46 @@ struct GrokDesktopApp: App {
                     }
                 }
                 .toolbar {
-                    ToolbarItem(placement: .navigation) {
+                    ToolbarItemGroup(placement: .primaryAction) {
                         Button {
                             model.sidebarCollapsed.toggle()
                         } label: {
                             Image(systemName: "sidebar.left")
                         }
                         .help(model.sidebarCollapsed ? model.copy.t("Expand sidebar", "展开侧栏") : model.copy.collapseSidebar)
+
+                        Button {
+                            if model.destination != .build {
+                                model.destination = .build
+                                model.showInspector = true
+                            } else {
+                                model.showInspector.toggle()
+                            }
+                        } label: {
+                            Image(systemName: "sidebar.right")
+                        }
+                        .help("\(model.copy.inspector) (⌘I)")
+
+                        Menu {
+                            ForEach(InspectorPane.allCases) { pane in
+                                Toggle(
+                                    pane.title(chinese: model.copy.language == .chinese),
+                                    isOn: Binding(
+                                        get: { model.inspectorPaneVisible(pane) },
+                                        set: { visible in
+                                            if visible, model.destination != .build {
+                                                model.destination = .build
+                                            }
+                                            model.setInspectorPane(pane, visible: visible)
+                                        }
+                                    )
+                                )
+                            }
+                        } label: {
+                            Image(systemName: "slider.horizontal.3")
+                        }
+                        .menuIndicator(.hidden)
+                        .help(model.copy.t("Open or close sidebar tools", "打开或关闭右边栏里的功能"))
                     }
                 }
         }

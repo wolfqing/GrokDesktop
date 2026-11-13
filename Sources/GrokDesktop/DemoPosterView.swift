@@ -6,14 +6,18 @@ struct DemoPosterView: View {
     private var palette: Palette { Palette(isDark: isDark) }
 
     var body: some View {
-        HStack(spacing: 0) {
-            sidebar
-                .frame(width: 260)
-            Rectangle().fill(palette.hairline).frame(width: 1)
-            chat
-            Rectangle().fill(palette.hairline).frame(width: 1)
-            inspector
-                .frame(width: 320)
+        VStack(spacing: 0) {
+            windowTitleBar
+            Rectangle().fill(palette.hairline).frame(height: 1)
+            HStack(spacing: 0) {
+                sidebar
+                    .frame(width: 260)
+                Rectangle().fill(palette.hairline).frame(width: 1)
+                chat
+                Rectangle().fill(palette.hairline).frame(width: 1)
+                inspector
+                    .frame(width: 320)
+            }
         }
         .background(palette.canvas)
         .frame(width: 1280, height: 840)
@@ -21,6 +25,35 @@ struct DemoPosterView: View {
         .environment(\.colorScheme, isDark ? .dark : .light)
         .environment(\.l10n, L10n(language: .english))
         .environment(\.palette, palette)
+    }
+
+    private var windowTitleBar: some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 8) {
+                Circle().fill(Color(red: 1.0, green: 0.37, blue: 0.34)).frame(width: 12, height: 12)
+                Circle().fill(Color(red: 1.0, green: 0.74, blue: 0.18)).frame(width: 12, height: 12)
+                Circle().fill(Color(red: 0.16, green: 0.78, blue: 0.25)).frame(width: 12, height: 12)
+            }
+            Spacer()
+            HStack(spacing: 2) {
+                toolbarIcon("sidebar.left", active: true)
+                toolbarIcon("sidebar.right", active: true)
+                toolbarIcon("slider.horizontal.3", active: false)
+            }
+            .padding(3)
+            .background(palette.chip, in: Capsule())
+            .overlay(Capsule().stroke(palette.hairline, lineWidth: 1))
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 38)
+        .background(palette.sidebar)
+    }
+
+    private func toolbarIcon(_ name: String, active: Bool) -> some View {
+        Image(systemName: name)
+            .font(.system(size: 12.5, weight: .medium))
+            .foregroundStyle(active ? palette.text : palette.secondary)
+            .frame(width: 28, height: 24)
     }
 
     private var sidebar: some View {
@@ -213,15 +246,9 @@ struct DemoPosterView: View {
                     .padding(.horizontal, 9)
                     .padding(.vertical, 4.5)
                     .background(palette.chip, in: Capsule())
-
-                Image(systemName: "sidebar.right")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(palette.text)
-                    .frame(width: 28, height: 28)
-                    .background(palette.selected, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
             }
             .padding(.horizontal, 18)
-            .padding(.vertical, 9)
+            .frame(height: 38)
             .overlay(alignment: .bottom) {
                 Rectangle().fill(palette.hairline).frame(height: 1)
             }
@@ -425,19 +452,21 @@ struct DemoPosterView: View {
     }
 
     private var inspector: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text("Inspector")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 12.5, weight: .semibold))
                     .foregroundStyle(palette.text)
                 Spacer()
-                Image(systemName: "slider.horizontal.3")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(palette.secondary)
             }
-            .padding(.bottom, 2)
+            .padding(.horizontal, 14)
+            .frame(height: 38)
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(palette.hairline).frame(height: 1)
+            }
 
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) {
                 Text("CONTEXT")
                     .font(.system(size: 10.5, weight: .semibold))
                     .tracking(0.5)
@@ -501,9 +530,10 @@ struct DemoPosterView: View {
             .padding(12)
             .grokCard(cornerRadius: 12)
 
-            Spacer()
+                Spacer()
+            }
+            .padding(14)
         }
-        .padding(14)
         .background(palette.sidebar)
     }
 

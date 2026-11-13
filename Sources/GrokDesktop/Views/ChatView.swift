@@ -618,22 +618,9 @@ struct ChatView: View {
                 .buttonStyle(.plain)
                 .help(model.contextWindowNoteText ?? l10n.sessionContext)
             }
-
-            InspectorPanelsMenu()
-
-            GrokIconButton(
-                systemImage: "sidebar.right",
-                size: 28,
-                iconSize: 13,
-                selected: model.showInspector,
-                cornerRadius: 7,
-                helpText: "\(l10n.inspector) (⌘I)"
-            ) {
-                model.showInspector.toggle()
-            }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 7)
+        .frame(height: 38)
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(palette.hairline)

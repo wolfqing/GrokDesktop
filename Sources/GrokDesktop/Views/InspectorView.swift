@@ -154,10 +154,9 @@ struct InspectorView: View {
                 }
                 .buttonStyle(.plain)
             }
-            InspectorPanelsMenu()
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 7.5)
+        .frame(height: 38)
     }
 
     private var detailsHeader: some View {
