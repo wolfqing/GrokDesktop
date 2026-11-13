@@ -1,20 +1,26 @@
 import SwiftUI
 
 struct SidebarTerminalPane: View {
+    var fullHeight: Bool = false
     @EnvironmentObject private var model: AppModel
     @Environment(\.palette) private var palette
     @Environment(\.l10n) private var l10n
 
     var body: some View {
         VStack(spacing: 0) {
-            resizeHandle
+            if !fullHeight {
+                resizeHandle
+            }
             header
             SidebarTerminalHost(shell: model.sidebarShell)
-                .frame(height: model.shellHeight)
+                .frame(maxWidth: .infinity)
+                .frame(height: fullHeight ? nil : model.shellHeight)
+                .frame(maxHeight: fullHeight ? .infinity : nil)
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .padding(.horizontal, 10)
                 .padding(.bottom, 10)
         }
+        .frame(maxWidth: .infinity, maxHeight: fullHeight ? .infinity : nil)
         .background(palette.sidebar)
         .onAppear {
             model.sidebarShell.sync(
@@ -32,8 +38,10 @@ struct SidebarTerminalPane: View {
 
     private var header: some View {
         HStack(spacing: 6) {
-            Text(l10n.t("Terminal", "终端"))
-                .font(.system(size: 12, weight: .semibold))
+            if !fullHeight {
+                Text(l10n.t("Terminal", "终端"))
+                    .font(.system(size: 12, weight: .semibold))
+            }
             Text(folderName)
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(palette.secondary)
@@ -43,18 +51,20 @@ struct SidebarTerminalPane: View {
             headerButton(l10n.t("Restart", "重启"), help: l10n.t("Restart the shell in this project", "在当前项目里重启终端")) {
                 model.sidebarShell.restart(directory: model.client.workingDirectory.path)
             }
-            Button {
-                model.setInspectorPane(.shell, visible: false)
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(palette.secondary)
-                    .frame(width: 16, height: 16)
-            }
-            .buttonStyle(.plain)
-            .help(l10n.t("Close terminal", "关闭终端"))
             headerButton(l10n.t("Open", "打开"), help: l10n.t("Open this folder in Terminal", "用系统终端打开这个文件夹")) {
                 model.openInTerminal()
+            }
+            if !fullHeight {
+                Button {
+                    model.setInspectorPane(.shell, visible: false)
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(palette.secondary)
+                        .frame(width: 16, height: 16)
+                }
+                .buttonStyle(.plain)
+                .help(l10n.t("Close terminal", "关闭终端"))
             }
         }
         .padding(.horizontal, 12)

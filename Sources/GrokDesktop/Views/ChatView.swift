@@ -600,9 +600,9 @@ struct ChatView: View {
                 .help(l10n.t("Manage worktrees", "管理 Worktree"))
             }
 
-            Spacer()
+            Spacer(minLength: 12)
 
-            if model.client.sessionID != nil || model.displayedContextUsed > 0 {
+            if !model.showInspector, (model.client.sessionID != nil || model.displayedContextUsed > 0) {
                 Button {
                     model.refreshContextBreakdown()
                     model.showContextSheet = true
@@ -617,7 +617,14 @@ struct ChatView: View {
                 }
                 .buttonStyle(.plain)
                 .help(model.contextWindowNoteText ?? l10n.sessionContext)
+
+                Rectangle()
+                    .fill(palette.hairline)
+                    .frame(width: 1, height: 14)
+                    .padding(.horizontal, 2)
             }
+
+            rightSidebarControls
         }
         .padding(.horizontal, 16)
         .frame(height: 38)
@@ -626,6 +633,65 @@ struct ChatView: View {
                 .fill(palette.hairline)
                 .frame(height: 1)
         }
+    }
+
+    private var rightSidebarControls: some View {
+        let chinese = model.language.resolved() == .chinese
+        return HStack(spacing: 4) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 2) {
+                    ForEach(InspectorFocus.allCases) { focus in
+                        rightSidebarTabButton(focus, chinese: chinese, compact: false)
+                    }
+                }
+                .fixedSize(horizontal: true, vertical: false)
+
+                HStack(spacing: 2) {
+                    ForEach(InspectorFocus.allCases) { focus in
+                        rightSidebarTabButton(focus, chinese: chinese, compact: true)
+                    }
+                }
+                .fixedSize(horizontal: true, vertical: false)
+            }
+
+            GrokIconButton(
+                systemImage: "sidebar.right",
+                size: 28,
+                iconSize: 13,
+                selected: model.showInspector,
+                cornerRadius: 7,
+                helpText: "\(l10n.inspector) (⌘I)"
+            ) {
+                model.showInspector.toggle()
+            }
+        }
+        .layoutPriority(1)
+    }
+
+    private func rightSidebarTabButton(_ focus: InspectorFocus, chinese: Bool, compact: Bool) -> some View {
+        let active = model.showInspector && model.inspectorFocus == focus
+        let title = focus.title(chinese: chinese)
+        return Button {
+            model.toggleInspectorFocus(focus)
+        } label: {
+            HStack(spacing: 4.5) {
+                Image(systemName: focus.systemImage)
+                    .font(.system(size: 11, weight: .medium))
+                if !compact {
+                    Text(title)
+                        .font(.system(size: 12, weight: active ? .semibold : .medium))
+                        .lineLimit(1)
+                }
+            }
+            .fixedSize(horizontal: true, vertical: false)
+            .foregroundStyle(active ? palette.text : palette.secondary)
+            .padding(.horizontal, compact ? 7 : 8)
+            .padding(.vertical, 5)
+            .grokHover(cornerRadius: 7, selected: active)
+            .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .help(title)
     }
 
     private var loadingState: some View {

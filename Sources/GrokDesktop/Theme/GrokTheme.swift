@@ -114,6 +114,33 @@ enum InspectorPane: String, CaseIterable, Identifiable {
     }
 }
 
+enum InspectorFocus: String, CaseIterable, Identifiable {
+    case changes
+    case preview
+    case terminal
+    case aside
+
+    var id: String { rawValue }
+
+    var systemImage: String {
+        switch self {
+        case .changes: return "chevron.left.forwardslash.chevron.right"
+        case .preview: return "eye"
+        case .terminal: return "terminal"
+        case .aside: return "text.bubble"
+        }
+    }
+
+    func title(chinese: Bool) -> String {
+        switch self {
+        case .changes: return chinese ? "变更" : "Changes"
+        case .preview: return chinese ? "预览" : "Preview"
+        case .terminal: return chinese ? "终端" : "Terminal"
+        case .aside: return chinese ? "顺便问" : "Aside"
+        }
+    }
+}
+
 enum GrokTheme {
     static let contentWidth: CGFloat = 700
     static let sidebarWidth: CGFloat = 260

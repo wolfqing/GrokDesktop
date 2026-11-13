@@ -28,32 +28,20 @@ struct DemoPosterView: View {
     }
 
     private var windowTitleBar: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 14) {
             HStack(spacing: 8) {
                 Circle().fill(Color(red: 1.0, green: 0.37, blue: 0.34)).frame(width: 12, height: 12)
                 Circle().fill(Color(red: 1.0, green: 0.74, blue: 0.18)).frame(width: 12, height: 12)
                 Circle().fill(Color(red: 0.16, green: 0.78, blue: 0.25)).frame(width: 12, height: 12)
             }
+            Image(systemName: "sidebar.left")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(palette.secondary)
             Spacer()
-            HStack(spacing: 2) {
-                toolbarIcon("sidebar.left", active: true)
-                toolbarIcon("sidebar.right", active: true)
-                toolbarIcon("slider.horizontal.3", active: false)
-            }
-            .padding(3)
-            .background(palette.chip, in: Capsule())
-            .overlay(Capsule().stroke(palette.hairline, lineWidth: 1))
         }
         .padding(.horizontal, 16)
-        .frame(height: 38)
+        .frame(height: 36)
         .background(palette.sidebar)
-    }
-
-    private func toolbarIcon(_ name: String, active: Bool) -> some View {
-        Image(systemName: name)
-            .font(.system(size: 12.5, weight: .medium))
-            .foregroundStyle(active ? palette.text : palette.secondary)
-            .frame(width: 28, height: 24)
     }
 
     private var sidebar: some View {
@@ -240,14 +228,20 @@ struct DemoPosterView: View {
 
                 Spacer()
 
-                Text("22% · 44k / 200k")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(palette.secondary)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 4.5)
-                    .background(palette.chip, in: Capsule())
+                HStack(spacing: 3) {
+                    rightTabPill("chevron.left.forwardslash.chevron.right", "Changes", active: false)
+                    rightTabPill("eye", "Preview", active: false)
+                    rightTabPill("terminal", "Terminal", active: false)
+                    rightTabPill("text.bubble", "Aside", active: false)
+                }
+
+                Image(systemName: "sidebar.right")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(palette.text)
+                    .frame(width: 28, height: 28)
+                    .background(palette.selected, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
             }
-            .padding(.horizontal, 18)
+            .padding(.horizontal, 16)
             .frame(height: 38)
             .overlay(alignment: .bottom) {
                 Rectangle().fill(palette.hairline).frame(height: 1)
@@ -451,13 +445,36 @@ struct DemoPosterView: View {
         .shadow(color: .black.opacity(isDark ? 0.28 : 0.06), radius: 14, y: 4)
     }
 
+    private func rightTabPill(_ icon: String, _ title: String, active: Bool) -> some View {
+        HStack(spacing: 4.5) {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .medium))
+            Text(title)
+                .font(.system(size: 12, weight: active ? .semibold : .medium))
+                .lineLimit(1)
+        }
+        .fixedSize(horizontal: true, vertical: false)
+        .foregroundStyle(active ? palette.text : palette.secondary)
+        .padding(.horizontal, 7.5)
+        .padding(.vertical, 5)
+        .background(active ? palette.selected : .clear, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+    }
+
     private var inspector: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
+            HStack(spacing: 6) {
                 Text("Inspector")
                     .font(.system(size: 12.5, weight: .semibold))
                     .foregroundStyle(palette.text)
                 Spacer()
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(palette.secondary)
+                    .frame(width: 24, height: 24)
+                Image(systemName: "xmark")
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(palette.secondary)
+                    .frame(width: 24, height: 24)
             }
             .padding(.horizontal, 14)
             .frame(height: 38)

@@ -84,6 +84,7 @@ final class AppModel: ObservableObject {
     @Published var showAbout = false
     @Published var showPalette = false
     @Published var showInspector = true
+    @Published var inspectorFocus: InspectorFocus? = nil
     @Published var inspectorWidth: CGFloat = GrokTheme.inspectorWidth
     @Published var previewedFile: URL?
     @Published var inspectorDetailsVisible = true
@@ -316,6 +317,7 @@ final class AppModel: ObservableObject {
             guard let self else { return }
             self.previewedFile = standardized
             self.showInspector = true
+            self.inspectorFocus = .preview
             self.inspectorDetailsVisible = false
             if self.inspectorWidth <= GrokTheme.inspectorWidth {
                 self.setInspectorWidth(GrokTheme.inspectorPreviewWidth)
@@ -330,7 +332,44 @@ final class AppModel: ObservableObject {
         afterHitTest { [weak self] in
             self?.previewedFile = nil
             self?.inspectorDetailsVisible = true
+            if self?.inspectorFocus == .preview {
+                self?.inspectorFocus = nil
+            }
         }
+    }
+
+    func toggleInspectorFocus(_ focus: InspectorFocus) {
+        if showInspector, inspectorFocus == focus {
+            showInspector = false
+            return
+        }
+        destination = .build
+        showInspector = true
+        inspectorFocus = focus
+        switch focus {
+        case .changes:
+            refreshWorkspace()
+            Task { await client.refreshGit() }
+        case .preview:
+            if previewedFile != nil, inspectorWidth <= GrokTheme.inspectorWidth {
+                setInspectorWidth(GrokTheme.inspectorPreviewWidth)
+            }
+        case .terminal:
+            UserDefaults.standard.set(true, forKey: Self.shellChosenKey)
+        case .aside:
+            focusAsideComposer = true
+        }
+    }
+
+    func choosePreviewFile() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = client.workingDirectory
+        panel.prompt = copy.t("Preview", "预览")
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        previewFile(url)
     }
 
     func setInspectorWidth(_ width: CGFloat) {
@@ -1659,7 +1698,10 @@ final class AppModel: ObservableObject {
     func openAsideComposer(prefill: String = "") {
         destination = .build
         showInspector = true
+        inspectorFocus = .aside
         inspectorDetailsVisible = true
+        hiddenInspectorPanes.remove(InspectorPane.aside.rawValue)
+        persistInspectorPanes()
         showPalette = false
         mentionQuery = nil
         if !prefill.isEmpty {

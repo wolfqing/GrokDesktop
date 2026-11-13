@@ -15,78 +15,17 @@ struct InspectorView: View {
 
             Rectangle().fill(palette.hairline).frame(height: 1)
 
-            if let preview = model.previewedFile {
-                FilePreviewPane(url: preview)
-                    .padding(.horizontal, 14)
-                    .padding(.top, 12)
-                    .padding(.bottom, model.inspectorDetailsVisible ? 10 : 14)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            }
-
-            if showsDetails {
-                if model.previewedFile != nil {
-                    Rectangle().fill(palette.hairline).frame(height: 1)
-                    detailsHeader
-                }
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 14) {
-                        if let story = liveStory {
-                            inspectorCard {
-                                turnSection(story)
-                            }
-                        }
-                        if showsContext, model.inspectorPaneVisible(.context) {
-                            inspectorPaneCard(.context) {
-                                contextSection
-                            }
-                        }
-                        if showsWork, model.inspectorPaneVisible(.work) {
-                            inspectorPaneCard(.work) {
-                                workSection
-                            }
-                        }
-                        if showsTerminals, model.inspectorPaneVisible(.terminals) {
-                            inspectorPaneCard(.terminals) {
-                                terminalsSection
-                            }
-                        }
-                        if showsChanges, model.inspectorPaneVisible(.changes) {
-                            inspectorPaneCard(.changes) {
-                                changesSection
-                            }
-                        }
-                        if showsHooks, model.inspectorPaneVisible(.hooks) {
-                            inspectorPaneCard(.hooks) {
-                                hooksSection
-                            }
-                        }
-                    }
-                    .padding(12)
-                }
-                .scrollIndicators(.never)
-                .frame(maxHeight: model.previewedFile == nil ? .infinity : 280)
-            } else if model.previewedFile == nil {
-                VStack(spacing: 8) {
-                    Spacer()
-                    Image(systemName: "sidebar.right")
-                        .font(.system(size: 20))
-                        .foregroundStyle(palette.tertiary)
-                    Text(l10n.t("Session details show up here.", "会话状态、任务和变更会显示在这里。"))
-                        .font(.system(size: 12))
-                        .foregroundStyle(palette.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 24)
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-
-            if model.inspectorPaneVisible(.aside) {
-                Rectangle().fill(palette.hairline).frame(height: 1)
-                steerPanel
-            }
-            if model.inspectorPaneVisible(.shell) {
-                SidebarTerminalPane()
+            switch model.inspectorFocus {
+            case .changes:
+                focusedChangesBody
+            case .preview:
+                focusedPreviewBody
+            case .terminal:
+                SidebarTerminalPane(fullHeight: true)
+            case .aside:
+                focusedAsideBody
+            case nil:
+                overviewBody
             }
         }
         .background(palette.sidebar)
@@ -106,6 +45,158 @@ struct InspectorView: View {
                 model.focusAsideComposer = false
             }
         }
+    }
+
+    @ViewBuilder
+    private var overviewBody: some View {
+        if let preview = model.previewedFile {
+            FilePreviewPane(url: preview)
+                .padding(.horizontal, 14)
+                .padding(.top, 12)
+                .padding(.bottom, model.inspectorDetailsVisible ? 10 : 14)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+
+        if showsDetails {
+            if model.previewedFile != nil {
+                Rectangle().fill(palette.hairline).frame(height: 1)
+                detailsHeader
+            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    if let story = liveStory {
+                        inspectorCard {
+                            turnSection(story)
+                        }
+                    }
+                    if showsContext, model.inspectorPaneVisible(.context) {
+                        inspectorPaneCard(.context) {
+                            contextSection
+                        }
+                    }
+                    if showsWork, model.inspectorPaneVisible(.work) {
+                        inspectorPaneCard(.work) {
+                            workSection
+                        }
+                    }
+                    if showsTerminals, model.inspectorPaneVisible(.terminals) {
+                        inspectorPaneCard(.terminals) {
+                            terminalsSection
+                        }
+                    }
+                    if showsChanges, model.inspectorPaneVisible(.changes) {
+                        inspectorPaneCard(.changes) {
+                            changesSection
+                        }
+                    }
+                    if showsHooks, model.inspectorPaneVisible(.hooks) {
+                        inspectorPaneCard(.hooks) {
+                            hooksSection
+                        }
+                    }
+                }
+                .padding(12)
+            }
+            .scrollIndicators(.never)
+            .frame(maxHeight: model.previewedFile == nil ? .infinity : 280)
+        } else if model.previewedFile == nil {
+            VStack(spacing: 8) {
+                Spacer()
+                Image(systemName: "sidebar.right")
+                    .font(.system(size: 20))
+                    .foregroundStyle(palette.tertiary)
+                Text(l10n.t("Session details show up here.", "会话状态、任务和变更会显示在这里。"))
+                    .font(.system(size: 12))
+                    .foregroundStyle(palette.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+
+        if model.inspectorPaneVisible(.aside) {
+            Rectangle().fill(palette.hairline).frame(height: 1)
+            steerPanel
+        }
+        if model.inspectorPaneVisible(.shell) {
+            SidebarTerminalPane()
+        }
+    }
+
+    private var focusedChangesBody: some View {
+        Group {
+            if showsChanges {
+                ScrollView {
+                    inspectorCard {
+                        changesSection
+                    }
+                    .padding(12)
+                }
+                .scrollIndicators(.never)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else {
+                VStack(spacing: 10) {
+                    Spacer()
+                    Image(systemName: "chevron.left.forwardslash.chevron.right")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundStyle(palette.tertiary)
+                    Text(l10n.t("No uncommitted changes.", "当前没有未提交的代码变更。"))
+                        .font(.system(size: 12.5, weight: .medium))
+                        .foregroundStyle(palette.secondary)
+                    if model.workspace.isRepo, let branch = model.workspace.branch {
+                        Text(branch)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(palette.tertiary)
+                    }
+                    Button(l10n.t("Refresh", "刷新")) {
+                        model.refreshWorkspace()
+                        Task { await model.client.refreshGit() }
+                    }
+                    .buttonStyle(GrokSecondaryButtonStyle())
+                    .padding(.top, 2)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+
+    private var focusedPreviewBody: some View {
+        Group {
+            if let preview = model.previewedFile {
+                FilePreviewPane(url: preview)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else {
+                VStack(spacing: 10) {
+                    Spacer()
+                    Image(systemName: "eye")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundStyle(palette.tertiary)
+                    Text(l10n.t("Click a file in chat or changes to preview it here.", "点击对话或变更中的文件即可在此预览。"))
+                        .font(.system(size: 12))
+                        .foregroundStyle(palette.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 24)
+                    Button(l10n.t("Choose file…", "选择文件…")) {
+                        model.choosePreviewFile()
+                    }
+                    .buttonStyle(GrokSecondaryButtonStyle())
+                    .padding(.top, 2)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+
+    private var focusedAsideBody: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            steerPanel
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private func inspectorCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
@@ -133,13 +224,20 @@ struct InspectorView: View {
         }
     }
 
+    private var headerTitle: String {
+        if let focus = model.inspectorFocus {
+            return focus.title(chinese: model.language.resolved() == .chinese)
+        }
+        return l10n.inspector
+    }
+
     private var header: some View {
-        HStack(spacing: 8) {
-            Text(l10n.inspector)
+        HStack(spacing: 6) {
+            Text(headerTitle)
                 .font(.system(size: 12.5, weight: .semibold))
                 .foregroundStyle(palette.text)
             Spacer(minLength: 4)
-            if model.previewedFile != nil {
+            if model.inspectorFocus == nil, model.previewedFile != nil {
                 Button {
                     model.inspectorDetailsVisible.toggle()
                 } label: {
@@ -153,6 +251,16 @@ struct InspectorView: View {
                         .grokHover(cornerRadius: 6)
                 }
                 .buttonStyle(.plain)
+            }
+            InspectorPanelsMenu()
+            GrokIconButton(
+                systemImage: "xmark",
+                size: 24,
+                iconSize: 10.5,
+                cornerRadius: 6,
+                helpText: l10n.t("Close sidebar", "关闭右边栏")
+            ) {
+                model.showInspector = false
             }
         }
         .padding(.horizontal, 14)
@@ -1088,25 +1196,39 @@ struct InspectorPanelsMenu: View {
 
     var body: some View {
         Menu {
+            Button {
+                model.inspectorFocus = nil
+                model.showInspector = true
+            } label: {
+                if model.inspectorFocus == nil {
+                    Label(l10n.t("All panels", "全部面板"), systemImage: "checkmark")
+                } else {
+                    Text(l10n.t("All panels", "全部面板"))
+                }
+            }
+            Divider()
             ForEach(InspectorPane.allCases) { pane in
                 Toggle(
                     pane.title(chinese: l10n.language == .chinese),
                     isOn: Binding(
                         get: { model.inspectorPaneVisible(pane) },
-                        set: { model.setInspectorPane(pane, visible: $0) }
+                        set: { visible in
+                            model.inspectorFocus = nil
+                            model.setInspectorPane(pane, visible: visible)
+                        }
                     )
                 )
             }
         } label: {
-            Image(systemName: "slider.horizontal.3")
-                .font(.system(size: 12, weight: .medium))
+            Image(systemName: "ellipsis")
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(hovering ? palette.text : palette.secondary)
-                .frame(width: 26, height: 26)
+                .frame(width: 24, height: 24)
                 .background(
                     hovering ? palette.hover : .clear,
-                    in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    in: RoundedRectangle(cornerRadius: 6, style: .continuous)
                 )
-                .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
