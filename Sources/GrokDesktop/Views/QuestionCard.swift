@@ -10,14 +10,20 @@ struct QuestionCard: View {
     var inset = true
     @State private var selected: [String: Set<String>] = [:]
     @State private var note = ""
+    @FocusState private var noteFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(request.isPlanReview
-                 ? l10n.t("Review this plan", "看看这个计划")
-                 : l10n.t("Grok has a question", "Grok 在问你"))
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(palette.secondary)
+            HStack(spacing: 6) {
+                Image(systemName: request.isPlanReview ? "list.clipboard" : "questionmark.bubble")
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(palette.info)
+                Text(request.isPlanReview
+                     ? l10n.t("Review this plan", "看看这个计划")
+                     : l10n.t("Grok has a question", "Grok 在问你"))
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(palette.info)
+            }
 
             ForEach(request.questions) { question in
                 if case .planReview(let approve) = question.intent {
@@ -31,8 +37,9 @@ struct QuestionCard: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .lineLimit(1...4)
+                .focused($noteFocused)
                 .padding(10)
-                .background(palette.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .grokFieldChrome(cornerRadius: 9, focused: noteFocused)
 
             HStack(spacing: 8) {
                 Button(l10n.t("Continue", "继续")) {
@@ -49,10 +56,10 @@ struct QuestionCard: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(palette.elevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(palette.elevated, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(palette.hairline, lineWidth: 1)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(palette.borderStrong, lineWidth: 1)
         )
         .padding(.horizontal, inset ? 24 : 0)
     }
@@ -73,7 +80,7 @@ struct QuestionCard: View {
             }
             if !question.question.isEmpty {
                 Text(question.question)
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.system(size: 13.5, weight: .medium))
             }
             if !question.detail.isEmpty {
                 Text(question.detail)
@@ -96,7 +103,7 @@ struct QuestionCard: View {
                         HStack(alignment: .top, spacing: 8) {
                             Image(systemName: icon(on: on, multi: question.multiSelect))
                                 .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(on ? Color.orange : palette.secondary)
+                                .foregroundStyle(on ? palette.info : palette.secondary)
                                 .padding(.top, 1)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(option.label)
@@ -120,11 +127,12 @@ struct QuestionCard: View {
                         }
                         .padding(10)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(
-                            on ? palette.selected : palette.chip,
-                            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .grokHover(cornerRadius: 9, selected: on)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .stroke(on ? palette.info.opacity(0.45) : palette.hairline, lineWidth: 1)
                         )
-                        .contentShape(Rectangle())
+                        .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                     }
                     .buttonStyle(.plain)
                 }
@@ -136,7 +144,7 @@ struct QuestionCard: View {
         VStack(alignment: .leading, spacing: 10) {
             if !question.question.isEmpty {
                 Text(question.question)
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.system(size: 13.5, weight: .medium))
             }
             if !question.detail.isEmpty {
                 Text(question.detail)

@@ -151,17 +151,23 @@ struct RootView: View {
                     .zIndex(6)
             }
             if let toast = model.toast {
-                Text(toast)
-                    .font(.system(size: 13, weight: .medium))
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 9)
-                    .background(palette.elevated, in: Capsule())
-                    .overlay(Capsule().stroke(palette.hairline))
-                    .padding(.bottom, 28)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                    .allowsHitTesting(false)
-                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
-                    .zIndex(8)
+                HStack(spacing: 7) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 13))
+                        .foregroundStyle(palette.success)
+                    Text(toast)
+                        .font(.system(size: 12.5, weight: .medium))
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(palette.elevated, in: Capsule())
+                .overlay(Capsule().stroke(palette.borderStrong, lineWidth: 1))
+                .shadow(color: .black.opacity(palette.isDark ? 0.45 : 0.12), radius: 14, y: 6)
+                .padding(.bottom, 26)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .allowsHitTesting(false)
+                .transition(.opacity.combined(with: .scale(scale: 0.96)).combined(with: .move(edge: .bottom)))
+                .zIndex(8)
             }
         }
         .onAppear {
@@ -182,164 +188,168 @@ struct RootView: View {
         .environment(\.l10n, model.copy)
         .foregroundStyle(palette.text)
         .background(palette.canvas)
-        .animation(.easeInOut(duration: 0.16), value: model.toast)
-        .animation(.easeInOut(duration: 0.18), value: model.showInAppLogin)
-        .animation(.easeInOut(duration: 0.18), value: model.showSettings)
-        .animation(.easeInOut(duration: 0.18), value: model.showAbout)
-        .animation(.easeInOut(duration: 0.18), value: model.destination)
-        .animation(.easeInOut(duration: 0.18), value: model.sidebarCollapsed)
-        .animation(.easeInOut(duration: 0.18), value: model.appearanceRaw)
-        .animation(.easeInOut(duration: 0.18), value: model.languageRaw)
-        .animation(.easeInOut(duration: 0.18), value: model.appUpdateNotice)
+        .animation(.easeOut(duration: 0.16), value: model.toast)
+        .animation(.easeOut(duration: 0.16), value: model.showInAppLogin)
+        .animation(.easeOut(duration: 0.16), value: model.showSettings)
+        .animation(.easeOut(duration: 0.16), value: model.showAbout)
+        .animation(.easeOut(duration: 0.16), value: model.destination)
+        .animation(.easeOut(duration: 0.16), value: model.sidebarCollapsed)
+        .animation(.easeOut(duration: 0.16), value: model.appearanceRaw)
+        .animation(.easeOut(duration: 0.16), value: model.languageRaw)
+        .animation(.easeOut(duration: 0.16), value: model.appUpdateNotice)
     }
 
     private var renameSheet: some View {
-        ZStack {
-            palette.overlay.ignoresSafeArea()
-                .onTapGesture { model.renamingSession = nil }
-            VStack(alignment: .leading, spacing: 12) {
-                Text(model.copy.t("Rename session", "重命名会话"))
-                    .font(.system(size: 16, weight: .semibold))
-                TextField(model.copy.t("Title", "标题"), text: $model.renameDraft)
-                    .textFieldStyle(.plain)
-                    .padding(10)
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.hairline))
-                HStack {
-                    Spacer()
-                    Button(model.copy.done) {
-                        if let session = model.renamingSession {
-                            model.rename(session, title: model.renameDraft)
-                        }
+        OverlaySheet(
+            title: model.copy.t("Rename session", "重命名会话"),
+            width: 420,
+            onDismiss: { model.renamingSession = nil }
+        ) {
+            TextField(model.copy.t("Title", "标题"), text: $model.renameDraft)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13.5))
+                .padding(10)
+                .grokFieldChrome(cornerRadius: 9)
+                .onSubmit {
+                    if let session = model.renamingSession {
+                        model.rename(session, title: model.renameDraft)
                     }
-                    .buttonStyle(GrokPrimaryButtonStyle())
                 }
+            HStack {
+                Spacer()
+                Button(model.copy.t("Cancel", "取消")) { model.renamingSession = nil }
+                    .buttonStyle(GrokSecondaryButtonStyle())
+                Button(model.copy.done) {
+                    if let session = model.renamingSession {
+                        model.rename(session, title: model.renameDraft)
+                    }
+                }
+                .buttonStyle(GrokPrimaryButtonStyle())
             }
-            .padding(20)
-            .frame(width: 420)
-            .background(palette.elevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
     }
 
     private var resumePicker: some View {
-        ZStack {
-            palette.overlay.ignoresSafeArea()
-                .onTapGesture { model.showResumePicker = false }
-            VStack(alignment: .leading, spacing: 10) {
-                Text(model.copy.t("Resume session", "恢复会话"))
-                    .font(.system(size: 16, weight: .semibold))
-                HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundStyle(palette.secondary)
-                    TextField(
-                        model.copy.t("Title, folder, or time", "标题、目录或时间"),
-                        text: $model.search
-                    )
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13))
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .background(palette.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 4) {
-                        ForEach(model.filteredSessions.prefix(30)) { session in
-                            Button {
-                                model.showResumePicker = false
-                                model.open(session)
-                            } label: {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(session.title).font(.system(size: 14))
-                                    Text(RelativeTime.meta(session, chinese: model.language.resolved() == .chinese))
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(palette.secondary)
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(8)
+        OverlaySheet(
+            title: model.copy.t("Resume session", "恢复会话"),
+            width: 480,
+            onDismiss: { model.showResumePicker = false }
+        ) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundStyle(palette.secondary)
+                TextField(
+                    model.copy.t("Title, folder, or time", "标题、目录或时间"),
+                    text: $model.search
+                )
+                .textFieldStyle(.plain)
+                .font(.system(size: 13))
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .grokFieldChrome(cornerRadius: 9)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(model.filteredSessions.prefix(30)) { session in
+                        Button {
+                            model.showResumePicker = false
+                            model.open(session)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(session.title)
+                                    .font(.system(size: 13.5, weight: .medium))
+                                    .lineLimit(1)
+                                Text(RelativeTime.meta(session, chinese: model.language.resolved() == .chinese))
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(palette.secondary)
                             }
-                            .buttonStyle(.plain)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .grokHover(cornerRadius: 8)
+                            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                         }
+                        .buttonStyle(.plain)
                     }
                 }
-                .frame(height: 320)
             }
-            .padding(18)
-            .frame(width: 460)
-            .background(palette.elevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .frame(height: 320)
         }
     }
 
     private var addWorkflowSheet: some View {
-        ZStack {
-            palette.overlay.ignoresSafeArea()
-                .onTapGesture { model.showAddWorkflow = false }
-            VStack(alignment: .leading, spacing: 12) {
-                Text(model.copy.t("New workflow", "新建工作流"))
-                    .font(.system(size: 16, weight: .semibold))
-                TextField("review-changes", text: $model.newWorkflowName)
-                    .textFieldStyle(.plain)
-                    .padding(10)
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.hairline))
-                TextField(model.copy.t("What it does", "做什么"), text: $model.newWorkflowDetail, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .lineLimit(2...4)
-                    .padding(10)
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.hairline))
-                Text(model.copy.t("Saves ~/.grok/workflows/<name>.rhai. Run it later from Saved.", "保存到 ~/.grok/workflows/<name>.rhai。之后在「已保存」里运行。"))
-                    .font(.system(size: 12))
-                    .foregroundStyle(palette.secondary)
-                HStack {
-                    Spacer()
-                    Button(model.copy.create) { model.createOfficialWorkflow() }
-                        .buttonStyle(GrokPrimaryButtonStyle())
-                        .disabled(model.newWorkflowName.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
+        OverlaySheet(
+            title: model.copy.t("New workflow", "新建工作流"),
+            width: 460,
+            onDismiss: { model.showAddWorkflow = false }
+        ) {
+            TextField("review-changes", text: $model.newWorkflowName)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13.5))
+                .padding(10)
+                .grokFieldChrome(cornerRadius: 9)
+            TextField(model.copy.t("What it does", "做什么"), text: $model.newWorkflowDetail, axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13.5))
+                .lineLimit(2...4)
+                .padding(10)
+                .grokFieldChrome(cornerRadius: 9)
+            Text(model.copy.t("Saves ~/.grok/workflows/<name>.rhai. Run it later from Saved.", "保存到 ~/.grok/workflows/<name>.rhai。之后在「已保存」里运行。"))
+                .font(.system(size: 12))
+                .foregroundStyle(palette.secondary)
+            HStack {
+                Spacer()
+                Button(model.copy.t("Cancel", "取消")) { model.showAddWorkflow = false }
+                    .buttonStyle(GrokSecondaryButtonStyle())
+                Button(model.copy.create) { model.createOfficialWorkflow() }
+                    .buttonStyle(GrokPrimaryButtonStyle())
+                    .disabled(model.newWorkflowName.trimmingCharacters(in: .whitespaces).isEmpty)
             }
-            .padding(20)
-            .frame(width: 460)
-            .background(palette.elevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
     }
 
     private var addMCPSheet: some View {
-        ZStack {
-            palette.overlay.ignoresSafeArea()
-                .onTapGesture { model.showAddMCP = false }
-            VStack(alignment: .leading, spacing: 12) {
-                Text(model.copy.t("Add MCP server", "添加 MCP"))
-                    .font(.system(size: 16, weight: .semibold))
-                TextField("brave-search", text: $model.mcpName)
-                    .textFieldStyle(.plain)
-                    .padding(10)
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.hairline))
-                Picker(model.copy.t("Transport", "传输"), selection: $model.mcpTransport) {
-                    Text("stdio").tag("stdio")
-                    Text("http").tag("http")
-                    Text("sse").tag("sse")
-                }
-                .pickerStyle(.segmented)
-                TextField(
-                    model.mcpTransport == "stdio" ? "npx" : "https://mcp.example.com/mcp",
-                    text: $model.mcpCommand
-                )
+        OverlaySheet(
+            title: model.copy.t("Add MCP server", "添加 MCP"),
+            width: 480,
+            onDismiss: { model.showAddMCP = false }
+        ) {
+            TextField("brave-search", text: $model.mcpName)
                 .textFieldStyle(.plain)
+                .font(.system(size: 13.5))
                 .padding(10)
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.hairline))
-                if model.mcpTransport == "stdio" {
-                    TextField("-y @modelcontextprotocol/server-github", text: $model.mcpArgs)
-                        .textFieldStyle(.plain)
-                        .padding(10)
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.hairline))
-                }
-                HStack {
-                    Spacer()
-                    Button(model.copy.add) { model.addMCPServer() }
-                        .buttonStyle(GrokPrimaryButtonStyle())
-                        .disabled(model.mcpName.isEmpty || model.mcpCommand.isEmpty)
-                }
+                .grokFieldChrome(cornerRadius: 9)
+            Picker(model.copy.t("Transport", "传输"), selection: $model.mcpTransport) {
+                Text("stdio").tag("stdio")
+                Text("http").tag("http")
+                Text("sse").tag("sse")
             }
-            .padding(20)
-            .frame(width: 480)
-            .background(palette.elevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .pickerStyle(.segmented)
+            TextField(
+                model.mcpTransport == "stdio" ? "npx" : "https://mcp.example.com/mcp",
+                text: $model.mcpCommand
+            )
+            .textFieldStyle(.plain)
+            .font(.system(size: 13.5))
+            .padding(10)
+            .grokFieldChrome(cornerRadius: 9)
+            if model.mcpTransport == "stdio" {
+                TextField("-y @modelcontextprotocol/server-github", text: $model.mcpArgs)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13.5))
+                    .padding(10)
+                    .grokFieldChrome(cornerRadius: 9)
+            }
+            HStack {
+                Spacer()
+                Button(model.copy.t("Cancel", "取消")) { model.showAddMCP = false }
+                    .buttonStyle(GrokSecondaryButtonStyle())
+                Button(model.copy.add) { model.addMCPServer() }
+                    .buttonStyle(GrokPrimaryButtonStyle())
+                    .disabled(model.mcpName.isEmpty || model.mcpCommand.isEmpty)
+            }
         }
     }
 }
@@ -357,8 +367,8 @@ private struct InspectorResizeHandle: View {
     var body: some View {
         let handle = ZStack {
             Rectangle()
-                .fill(hovering || dragOrigin != nil ? Color.accentColor.opacity(0.85) : palette.hairline)
-                .frame(width: 1)
+                .fill(hovering || dragOrigin != nil ? palette.focusRing : palette.hairline)
+                .frame(width: hovering || dragOrigin != nil ? 2 : 1)
             Rectangle()
                 .fill(Color.clear)
                 .frame(width: 8)
@@ -366,6 +376,7 @@ private struct InspectorResizeHandle: View {
         .frame(maxHeight: .infinity)
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.12), value: hovering)
         .gesture(
             DragGesture(minimumDistance: 1, coordinateSpace: .global)
                 .onChanged { value in

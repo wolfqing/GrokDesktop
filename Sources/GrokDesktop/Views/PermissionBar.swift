@@ -11,16 +11,22 @@ struct PermissionBar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(l10n.t("Needs your OK", "需要你点头"))
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(palette.secondary)
-            if !provenance.isEmpty {
-                Text(provenance)
-                    .font(.system(size: 11))
-                    .foregroundStyle(palette.secondary)
+            HStack(spacing: 6) {
+                Image(systemName: "hand.raised.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(palette.warning)
+                Text(l10n.t("Needs your OK", "需要你点头"))
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(palette.warning)
+                Spacer()
+                if !provenance.isEmpty {
+                    Text(provenance)
+                        .font(.system(size: 11))
+                        .foregroundStyle(palette.secondary)
+                }
             }
             Text(displayTitle)
-                .font(.system(size: 14, weight: .medium))
+                .font(.system(size: 13.5, weight: .medium))
                 .lineLimit(3)
             if !request.detail.isEmpty, request.detail != request.title {
                 Text(request.detail)
@@ -28,16 +34,28 @@ struct PermissionBar: View {
                     .foregroundStyle(palette.secondary)
                     .textSelection(.enabled)
                     .lineLimit(6)
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(palette.chip, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
             if let path = request.path, !path.isEmpty {
                 let url = ChatLinkDetector.resolve(path, baseDirectory: model.client.workingDirectory)?.url
                     ?? URL(fileURLWithPath: path)
-                Button(url.lastPathComponent) {
+                Button {
                     ChatLinkActions.activate(url)
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "doc.text")
+                            .font(.system(size: 10.5))
+                        Text(url.lastPathComponent)
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    }
+                    .foregroundStyle(palette.text)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .grokHover(cornerRadius: 6, selected: true)
                 }
                 .buttonStyle(.plain)
-                .font(.system(size: 12))
-                .foregroundStyle(Color(nsColor: .linkColor))
                 .help(path)
                 .contextMenu { ChatLinkContextButtons(url: url) }
             }
@@ -83,13 +101,23 @@ struct PermissionBar: View {
                             }
                         }
                     } label: {
-                        Text(l10n.t("More", "更多"))
-                            .font(.system(size: 13, weight: .medium))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 7)
-                            .background(palette.chip, in: Capsule())
+                        HStack(spacing: 4) {
+                            Text(l10n.t("More", "更多"))
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 9, weight: .bold))
+                        }
+                        .font(.system(size: 12.5, weight: .medium))
+                        .foregroundStyle(palette.text)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(palette.chip, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .stroke(palette.hairline, lineWidth: 1)
+                        )
                     }
                     .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
                     .fixedSize()
                 }
                 Button(l10n.t("Deny", "拒绝")) {
@@ -100,10 +128,10 @@ struct PermissionBar: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(palette.elevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(palette.elevated, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(palette.hairline, lineWidth: 1)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(palette.warning.opacity(0.32), lineWidth: 1)
         )
         .padding(.horizontal, inset ? 24 : 0)
     }

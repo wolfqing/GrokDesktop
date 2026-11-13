@@ -64,9 +64,17 @@ struct ImagineView: View {
                     Text(l10n.imagine)
                         .font(.system(size: 22, weight: .semibold))
                     if recent.isEmpty, pending == nil {
-                        Text(l10n.t("Local generations from grok sessions show up here.", "本机 grok 会话里生成的图会显示在这里。"))
-                            .font(.system(size: 13))
-                            .foregroundStyle(palette.secondary)
+                        VStack(spacing: 10) {
+                            Image(systemName: "sparkles.rectangle.stack")
+                                .font(.system(size: 26, weight: .light))
+                                .foregroundStyle(palette.tertiary)
+                            Text(l10n.t("Local generations from grok sessions show up here.", "本机 grok 会话里生成的图会显示在这里。"))
+                                .font(.system(size: 13))
+                                .foregroundStyle(palette.secondary)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 56)
+                        .grokCard(cornerRadius: 16)
                     } else {
                         LazyVGrid(columns: columns, spacing: 10) {
                             if let pending {
@@ -257,9 +265,13 @@ struct ImagineView: View {
         .padding(.bottom, 14)
         .frame(maxWidth: 720)
         .background(
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .fill(palette.elevated)
-                .shadow(color: Color.black.opacity(palette.isDark ? 0.5 : 0.12), radius: 30, y: 12)
+                .shadow(color: Color.black.opacity(palette.isDark ? 0.5 : 0.12), radius: 28, y: 12)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(palette.borderStrong, lineWidth: 1)
         )
         .padding(.horizontal, 28)
         .padding(.bottom, 22)
@@ -291,22 +303,23 @@ struct ImagineView: View {
                     compact: true
                 )
             }
-            .padding(.horizontal, 7)
+            .padding(.horizontal, 8)
             .padding(.vertical, 5)
-            .contentShape(Rectangle())
+            .grokHover(cornerRadius: 8, selected: showAspectPicker)
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .buttonStyle(.plain)
         .help(l10n.t("Aspect ratio", "画面比例"))
     }
 
     private func toolButton(systemImage: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(palette.secondary)
-                .frame(width: 26, height: 26)
-        }
-        .buttonStyle(.plain)
+        GrokIconButton(
+            systemImage: systemImage,
+            size: 28,
+            iconSize: 12,
+            cornerRadius: 8,
+            action: action
+        )
     }
 
     private func toolLabel(systemImage: String, title: String) -> some View {
@@ -318,8 +331,9 @@ struct ImagineView: View {
         }
         .foregroundStyle(palette.secondary)
         .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .contentShape(Rectangle())
+        .padding(.vertical, 5)
+        .grokHover(cornerRadius: 8)
+        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     private func toolText(_ title: String, on: Bool, action: @escaping () -> Void) -> some View {
@@ -327,9 +341,10 @@ struct ImagineView: View {
             Text(title)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(on ? palette.text : palette.secondary)
-                .padding(.horizontal, 7)
+                .padding(.horizontal, 8)
                 .padding(.vertical, 5)
-                .contentShape(Rectangle())
+                .grokHover(cornerRadius: 8, selected: on)
+                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -339,19 +354,20 @@ struct ImagineView: View {
             HStack {
                 Text(asset.url.lastPathComponent)
                     .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(palette.text)
                     .lineLimit(1)
                     .help(asset.url.path)
                 Spacer()
-                Button {
+                GrokIconButton(
+                    systemImage: "xmark",
+                    size: 24,
+                    iconSize: 10.5,
+                    cornerRadius: 6,
+                    helpText: l10n.t("Close", "关闭")
+                ) {
                     selected = nil
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 11, weight: .semibold))
                 }
-                .buttonStyle(.plain)
-                .help(l10n.t("Close", "关闭"))
             }
-            .foregroundStyle(palette.secondary)
 
             ImagineThumb(url: asset.url, aspect: clampedAspect(asset.aspectRatio), maxPixel: 720)
                 .frame(maxHeight: 280)
@@ -363,7 +379,7 @@ struct ImagineView: View {
                     .foregroundStyle(palette.secondary)
                 Text(asset.url.path)
                     .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(palette.secondary)
+                    .foregroundStyle(palette.tertiary)
                     .lineLimit(3)
                     .textSelection(.enabled)
             }
@@ -403,14 +419,18 @@ struct ImagineView: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Image(systemName: systemImage)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(palette.secondary)
                     .frame(width: 14)
                 Text(title)
+                    .foregroundStyle(palette.text)
                 Spacer()
             }
             .font(.system(size: 13, weight: .medium))
             .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(palette.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .padding(.vertical, 8.5)
+            .grokCard(cornerRadius: 10, interactive: true)
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain)
     }

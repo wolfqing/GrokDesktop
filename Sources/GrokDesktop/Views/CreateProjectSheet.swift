@@ -7,51 +7,34 @@ struct CreateProjectSheet: View {
     @Environment(\.l10n) private var l10n
 
     var body: some View {
-        ZStack {
-            palette.overlay.ignoresSafeArea()
-                .onTapGesture { model.showCreateProject = false }
+        OverlaySheet(
+            title: l10n.createProject,
+            width: 460,
+            onDismiss: { model.showCreateProject = false }
+        ) {
+            TextField(l10n.projectName, text: $model.newProjectName)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13.5))
+                .padding(10)
+                .grokFieldChrome(cornerRadius: 9)
 
-            VStack(alignment: .leading, spacing: 16) {
-                HStack {
-                    Text(l10n.createProject)
-                        .font(.system(size: 18, weight: .semibold))
-                    Spacer()
-                    Button {
-                        model.showCreateProject = false
-                    } label: {
-                        Image(systemName: "xmark")
-                            .foregroundStyle(palette.secondary)
+            HStack {
+                Button {
+                    pickFolder()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "folder.badge.plus")
+                        Text(model.newProjectFolder?.lastPathComponent ?? l10n.chooseFolder)
                     }
-                    .buttonStyle(.plain)
                 }
-
-                TextField(l10n.projectName, text: $model.newProjectName)
-                    .textFieldStyle(.plain)
-                    .padding(10)
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.hairline))
-
-                HStack {
-                    Button {
-                        pickFolder()
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "square.and.arrow.up")
-                            Text(model.newProjectFolder?.lastPathComponent ?? l10n.addFiles)
-                        }
-                        .foregroundStyle(palette.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    Spacer()
-                    Button(l10n.create) { model.createProject() }
-                        .buttonStyle(GrokPrimaryButtonStyle())
-                        .disabled(model.newProjectName.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
+                .buttonStyle(GrokSecondaryButtonStyle())
+                Spacer()
+                Button(l10n.t("Cancel", "取消")) { model.showCreateProject = false }
+                    .buttonStyle(GrokSecondaryButtonStyle())
+                Button(l10n.create) { model.createProject() }
+                    .buttonStyle(GrokPrimaryButtonStyle())
+                    .disabled(model.newProjectName.trimmingCharacters(in: .whitespaces).isEmpty)
             }
-            .padding(22)
-            .frame(width: 460)
-            .background(palette.elevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 16).stroke(palette.hairline))
-            .shadow(color: .black.opacity(0.16), radius: 24, y: 10)
         }
     }
 

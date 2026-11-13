@@ -21,13 +21,9 @@ struct SettingsView: View {
                         Text(title(for: model.settingsSection))
                             .font(.system(size: 20, weight: .semibold))
                         Spacer()
-                        Button {
+                        GrokIconButton(systemImage: "xmark", size: 28, iconSize: 12, helpText: "Esc") {
                             model.showSettings = false
-                        } label: {
-                            Image(systemName: "xmark")
-                                .foregroundStyle(palette.secondary)
                         }
-                        .buttonStyle(.plain)
                     }
                     .padding(.horizontal, 28)
                     .padding(.top, 22)
@@ -44,9 +40,10 @@ struct SettingsView: View {
             }
             .frame(width: 860, height: 580)
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 18).stroke(palette.hairline))
-            .shadow(color: .black.opacity(0.18), radius: 30, y: 12)
+            .overlay(RoundedRectangle(cornerRadius: 18).stroke(palette.borderStrong))
+            .shadow(color: .black.opacity(palette.isDark ? 0.52 : 0.18), radius: 30, y: 12)
         }
+        .onExitCommand { model.showSettings = false }
     }
 
     private var sidebar: some View {
@@ -84,12 +81,14 @@ struct SettingsView: View {
     }
 
     private func item(_ section: SettingsSection, _ title: String, _ icon: String) -> some View {
-        Button {
+        let selected = model.settingsSection == section
+        return Button {
             model.settingsSection = section
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: icon)
                     .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(selected ? palette.text : palette.secondary)
                     .frame(width: 18, height: 18)
                     .imageScale(.medium)
                 Text(title)
@@ -97,13 +96,13 @@ struct SettingsView: View {
                     .truncationMode(.tail)
                 Spacer(minLength: 0)
             }
-            .font(.system(size: 13.5))
-            .foregroundStyle(palette.text)
+            .font(.system(size: 13, weight: selected ? .medium : .regular))
+            .foregroundStyle(selected ? palette.text : palette.text.opacity(0.88))
             .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
-            .background(model.settingsSection == section ? palette.selected : Color.clear, in: RoundedRectangle(cornerRadius: 8))
-            .contentShape(Rectangle())
+            .padding(.vertical, 6.5)
+            .frame(maxWidth: .infinity, minHeight: 31, alignment: .leading)
+            .grokHover(cornerRadius: 8, selected: selected)
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -131,13 +130,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 18) {
             row {
                 HStack(spacing: 12) {
-                    ZStack {
-                        Circle().fill(Color.purple)
-                        Text(accountInitial)
-                            .foregroundStyle(.white)
-                            .font(.system(size: 18, weight: .semibold))
-                    }
-                    .frame(width: 40, height: 40)
+                    GrokAvatar(initial: accountInitial, size: 40, fontSize: 17)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(accountName)
                             .font(.system(size: 15, weight: .medium))

@@ -11,9 +11,18 @@ final class AttentionCenter: NSObject, UNUserNotificationCenterDelegate {
     private var authorized = false
     private var requested = false
 
+    private var center: UNUserNotificationCenter? {
+        guard Bundle.main.bundleURL.pathExtension == "app",
+              Bundle.main.bundleIdentifier != nil
+        else {
+            return nil
+        }
+        return UNUserNotificationCenter.current()
+    }
+
     override private init() {
         super.init()
-        UNUserNotificationCenter.current().delegate = self
+        center?.delegate = self
     }
 
     func prepare() {
@@ -48,7 +57,7 @@ final class AttentionCenter: NSObject, UNUserNotificationCenterDelegate {
         }
         for key in posted where !keys.contains(key) {
             posted.remove(key)
-            UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [key])
+            center?.removeDeliveredNotifications(withIdentifiers: [key])
         }
     }
 
@@ -73,11 +82,11 @@ final class AttentionCenter: NSObject, UNUserNotificationCenterDelegate {
     }
 
     private func requestAccessIfNeeded() {
-        guard !requested else { return }
+        guard !requested, let center else { return }
         requested = true
         Task {
             do {
-                authorized = try await UNUserNotificationCenter.current()
+                authorized = try await center
                     .requestAuthorization(options: [.alert, .sound, .badge])
             } catch {
                 authorized = false
@@ -86,18 +95,19 @@ final class AttentionCenter: NSObject, UNUserNotificationCenterDelegate {
     }
 
     private func post(_ need: AttentionNeed) {
+        guard let center else { return }
         let content = UNMutableNotificationContent()
         content.title = need.title
         content.body = need.body
         content.sound = .default
         content.userInfo = ["sessionID": need.sessionID]
         let request = UNNotificationRequest(identifier: need.key, content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(request)
+        center.add(request)
     }
 
     private func clearPosted() {
         guard !posted.isEmpty else { return }
-        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: Array(posted))
+        center?.removeDeliveredNotifications(withIdentifiers: Array(posted))
         posted.removeAll()
     }
 }

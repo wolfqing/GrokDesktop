@@ -3,6 +3,7 @@ import SwiftUI
 
 struct OverlaySheet<Content: View>: View {
     @Environment(\.palette) private var palette
+    var title: String? = nil
     var width: CGFloat = 520
     var onDismiss: () -> Void
     @ViewBuilder var content: () -> Content
@@ -11,14 +12,35 @@ struct OverlaySheet<Content: View>: View {
         ZStack {
             palette.overlay.ignoresSafeArea()
                 .onTapGesture(perform: onDismiss)
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 14) {
+                if let title, !title.isEmpty {
+                    HStack {
+                        Text(title)
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(palette.text)
+                        Spacer()
+                        GrokIconButton(
+                            systemImage: "xmark",
+                            size: 26,
+                            iconSize: 11,
+                            cornerRadius: 7,
+                            helpText: "Esc",
+                            action: onDismiss
+                        )
+                    }
+                }
                 content()
             }
             .padding(20)
             .frame(width: width)
             .background(palette.elevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 16).stroke(palette.hairline))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(palette.borderStrong, lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(palette.isDark ? 0.52 : 0.16), radius: 28, y: 12)
         }
+        .onExitCommand(perform: onDismiss)
     }
 }
 
@@ -29,13 +51,23 @@ struct PromptHistorySheet: View {
     @State private var query = ""
 
     var body: some View {
-        OverlaySheet(width: 520, onDismiss: { model.showPromptHistory = false }) {
-            Text(l10n.t("Prompt history", "提示词历史"))
-                .font(.system(size: 16, weight: .semibold))
-            TextField(l10n.searchEllipsis, text: $query)
-                .textFieldStyle(.plain)
-                .padding(10)
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.hairline))
+        OverlaySheet(
+            title: l10n.t("Prompt history", "提示词历史"),
+            width: 520,
+            onDismiss: { model.showPromptHistory = false }
+        ) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundStyle(palette.secondary)
+                TextField(l10n.searchEllipsis, text: $query)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13))
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .grokFieldChrome(cornerRadius: 9)
+
             if filtered.isEmpty {
                 Text(l10n.t("No saved prompts yet. Send something first, or press ↑ on an empty composer.", "还没有保存的提示词。先发送一条，或在空输入框按 ↑。"))
                     .font(.system(size: 13))
@@ -43,7 +75,7 @@ struct PromptHistorySheet: View {
                     .padding(.vertical, 12)
             } else {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: 2) {
                         ForEach(Array(filtered.enumerated()), id: \.offset) { _, text in
                             Button {
                                 model.applyHistory(text)
@@ -52,7 +84,10 @@ struct PromptHistorySheet: View {
                                     .font(.system(size: 13))
                                     .lineLimit(3)
                                     .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(8)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 8)
+                                    .grokHover(cornerRadius: 8)
+                                    .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                             }
                             .buttonStyle(.plain)
                         }
@@ -86,13 +121,19 @@ struct CLIReportSheet: View {
                     model.flash(l10n.copied)
                 }
                 .buttonStyle(GrokSecondaryButtonStyle())
+                GrokIconButton(systemImage: "xmark", size: 26, iconSize: 11, cornerRadius: 7) {
+                    model.showCLIReport = false
+                }
             }
             ScrollView {
                 Text(model.cliReportBody)
                     .font(.system(size: 12, design: .monospaced))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
             }
+            .background(palette.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(palette.hairline))
             .frame(height: 380)
         }
     }
@@ -104,37 +145,51 @@ struct DocsPickerSheet: View {
     @Environment(\.l10n) private var l10n
 
     var body: some View {
-        OverlaySheet(width: 520, onDismiss: { model.showDocsPicker = false }) {
-            Text(model.docsPickerTutorial
-                 ? l10n.t("Tutorial", "教程")
-                 : l10n.t("How-to guides", "使用指南"))
-                .font(.system(size: 16, weight: .semibold))
+        OverlaySheet(
+            title: model.docsPickerTutorial
+                ? l10n.t("Tutorial", "教程")
+                : l10n.t("How-to guides", "使用指南"),
+            width: 520,
+            onDismiss: { model.showDocsPicker = false }
+        ) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 2) {
                     ForEach(guides) { guide in
                         Button {
                             model.openGuide(guide)
                         } label: {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(guide.title)
-                                    .font(.system(size: 14, weight: .medium))
-                                Text(guide.filename)
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(palette.secondary)
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(guide.title)
+                                        .font(.system(size: 13.5, weight: .medium))
+                                    Text(guide.filename)
+                                        .font(.system(size: 11, design: .monospaced))
+                                        .foregroundStyle(palette.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(palette.tertiary)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(8)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .grokHover(cornerRadius: 8)
+                            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                         }
                         .buttonStyle(.plain)
                     }
                 }
             }
-            .frame(height: 360)
-            Button(l10n.t("Open web docs", "打开网页文档")) {
-                model.showDocsPicker = false
-                model.openDocs()
+            .frame(height: 350)
+            HStack {
+                Button(l10n.t("Open web docs", "打开网页文档")) {
+                    model.showDocsPicker = false
+                    model.openDocs()
+                }
+                .buttonStyle(GrokSecondaryButtonStyle())
+                Spacer()
             }
-            .buttonStyle(GrokSecondaryButtonStyle())
         }
     }
 
@@ -145,22 +200,28 @@ struct DocsPickerSheet: View {
 
 struct FeedbackSheet: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.palette) private var palette
     @Environment(\.l10n) private var l10n
 
     var body: some View {
-        OverlaySheet(width: 480, onDismiss: { model.showFeedbackSheet = false }) {
-            Text(l10n.t("Feedback", "反馈"))
-                .font(.system(size: 16, weight: .semibold))
+        OverlaySheet(
+            title: l10n.t("Feedback", "反馈"),
+            width: 480,
+            onDismiss: { model.showFeedbackSheet = false }
+        ) {
             Text(l10n.t("This is sent as /feedback in the current session.", "会作为 /feedback 发到当前会话。"))
                 .font(.system(size: 12))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(palette.secondary)
             TextField(l10n.t("What happened?", "发生了什么？"), text: $model.feedbackDraft, axis: .vertical)
                 .textFieldStyle(.plain)
+                .font(.system(size: 13.5))
                 .lineLimit(3...8)
                 .padding(10)
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(.secondary.opacity(0.3)))
+                .grokFieldChrome(cornerRadius: 9)
             HStack {
                 Spacer()
+                Button(l10n.t("Cancel", "取消")) { model.showFeedbackSheet = false }
+                    .buttonStyle(GrokSecondaryButtonStyle())
                 Button(l10n.t("Send", "发送")) { model.submitFeedback() }
                     .buttonStyle(GrokPrimaryButtonStyle())
                     .disabled(model.feedbackDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -175,40 +236,44 @@ struct ShortcutsSheet: View {
     @Environment(\.l10n) private var l10n
 
     var body: some View {
-        OverlaySheet(width: 560, onDismiss: { model.showShortcuts = false }) {
-            Text(l10n.t("Shortcuts", "快捷键"))
-                .font(.system(size: 16, weight: .semibold))
+        OverlaySheet(
+            title: l10n.t("Shortcuts", "快捷键"),
+            width: 520,
+            onDismiss: { model.showShortcuts = false }
+        ) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 6) {
                     row("⌘N", l10n.t("New chat", "新对话"))
+                    row("⌘1 / ⌘2", l10n.t("Switch Chat / Build", "切换对话 / Build"))
                     row("⌘K / ⌘P", l10n.t("Command palette", "命令面板"))
                     row("⌘,", l10n.t("Settings", "设置"))
+                    row("⌘⇧O", l10n.t("Choose folder", "选择工作目录"))
                     row("⌘⇧R", l10n.t("Resume session", "恢复会话"))
                     row("⌘Y", l10n.t("Prompt history", "提示词历史"))
                     row("⌘I", l10n.t("Inspector", "右侧栏"))
+                    row("⌘⇧B", l10n.t("By the way (aside)", "顺便问"))
                     row("⇧⇥", l10n.t("Cycle permission mode", "切换权限模式"))
                     row("⌃\\", l10n.t("Dashboard", "任务面板"))
                     row("↑ / ↓", l10n.t("Recall previous prompts", "回忆上一条提示词"))
                     row("Esc Esc", l10n.t("Clear prompt, or rewind if empty", "清空输入；空输入则回退一轮"))
                     row("Esc", l10n.t("Stop a running turn", "停止进行中的任务"))
                     row("/", l10n.t("Slash commands", "斜杠命令"))
-                    row("@", l10n.t("Attach a file", "附加文件"))
+                    row("@", l10n.t("Attach or mention a file", "附加或引用文件"))
                 }
             }
-            .frame(height: 360)
+            .frame(height: 380)
         }
     }
 
     private func row(_ key: String, _ title: String) -> some View {
         HStack {
             Text(title)
+                .font(.system(size: 13))
             Spacer()
-            Text(key)
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundStyle(palette.secondary)
+            GrokKbdBadge(keys: key)
         }
-        .font(.system(size: 13))
-        .padding(.vertical, 2)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
     }
 }
 
@@ -218,15 +283,20 @@ struct ClaudeImportSheet: View {
     @Environment(\.l10n) private var l10n
 
     var body: some View {
-        OverlaySheet(width: 600, onDismiss: { model.showClaudeImport = false }) {
-            Text(l10n.t("Import Claude settings", "导入 Claude 设置"))
-                .font(.system(size: 16, weight: .semibold))
+        OverlaySheet(
+            title: l10n.t("Import Claude settings", "导入 Claude 设置"),
+            width: 600,
+            onDismiss: { model.showClaudeImport = false }
+        ) {
             ScrollView {
                 Text(model.claudeImport.report)
                     .font(.system(size: 12, design: .monospaced))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
             }
+            .background(palette.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(palette.hairline))
             .frame(height: 280)
             HStack {
                 Button(l10n.t("Import MCP", "导入 MCP")) {
@@ -250,14 +320,23 @@ struct FindSheet: View {
     @Environment(\.l10n) private var l10n
 
     var body: some View {
-        OverlaySheet(width: 560, onDismiss: { model.showFind = false }) {
-            Text(model.findTimeline ? l10n.t("Timeline", "时间线") : l10n.t("Find in conversation", "在对话中查找"))
-                .font(.system(size: 16, weight: .semibold))
+        OverlaySheet(
+            title: model.findTimeline ? l10n.t("Timeline", "时间线") : l10n.t("Find in conversation", "在对话中查找"),
+            width: 560,
+            onDismiss: { model.showFind = false }
+        ) {
             if !model.findTimeline {
-                TextField(l10n.t("Search this chat", "搜索这条对话"), text: $model.findQuery)
-                    .textFieldStyle(.plain)
-                    .padding(10)
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.hairline))
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 12.5, weight: .medium))
+                        .foregroundStyle(palette.secondary)
+                    TextField(l10n.t("Search this chat", "搜索这条对话"), text: $model.findQuery)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13))
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .grokFieldChrome(cornerRadius: 9)
             }
             if model.findHits.isEmpty {
                 Text(l10n.t("No matches.", "没有匹配。"))
@@ -266,7 +345,7 @@ struct FindSheet: View {
                     .padding(.vertical, 16)
             } else {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: 2) {
                         ForEach(model.findHits) { hit in
                             Button {
                                 model.jumpToHit(hit)
@@ -280,7 +359,10 @@ struct FindSheet: View {
                                         .lineLimit(2)
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(8)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 8)
+                                .grokHover(cornerRadius: 8)
+                                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                             }
                             .buttonStyle(.plain)
                         }
@@ -298,9 +380,11 @@ struct RewindSheet: View {
     @Environment(\.l10n) private var l10n
 
     var body: some View {
-        OverlaySheet(width: 560, onDismiss: { model.showRewind = false }) {
-            Text(l10n.t("Rewind to a turn", "回退到某一轮"))
-                .font(.system(size: 16, weight: .semibold))
+        OverlaySheet(
+            title: l10n.t("Rewind to a turn", "回退到某一轮"),
+            width: 560,
+            onDismiss: { model.showRewind = false }
+        ) {
             Text(l10n.t("Everything after the turn you pick is discarded.", "选中这一轮之后的内容都会丢掉。"))
                 .font(.system(size: 12))
                 .foregroundStyle(palette.secondary)
@@ -311,7 +395,7 @@ struct RewindSheet: View {
                     .padding(.vertical, 16)
             } else {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: 2) {
                         ForEach(model.rewindTurns.reversed()) { turn in
                             Button {
                                 model.rewindTo(turn)
@@ -333,7 +417,10 @@ struct RewindSheet: View {
                                         .lineLimit(3)
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(8)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 8)
+                                .grokHover(cornerRadius: 8)
+                                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                             }
                             .buttonStyle(.plain)
                         }
@@ -351,9 +438,11 @@ struct ContextSheet: View {
     @Environment(\.l10n) private var l10n
 
     var body: some View {
-        OverlaySheet(width: 560, onDismiss: { model.showContextSheet = false }) {
-            Text(l10n.t("Context", "上下文"))
-                .font(.system(size: 16, weight: .semibold))
+        OverlaySheet(
+            title: l10n.t("Context", "上下文"),
+            width: 560,
+            onDismiss: { model.showContextSheet = false }
+        ) {
             if let text = model.contextWindowNoteText {
                 Text(text)
                     .font(.system(size: 12))
@@ -385,7 +474,7 @@ struct ContextSheet: View {
                             ZStack(alignment: .leading) {
                                 Capsule().fill(palette.chip)
                                 Capsule()
-                                    .fill(slice.id == "free" ? palette.secondary.opacity(0.35) : Color.orange)
+                                    .fill(slice.id == "free" ? palette.secondary.opacity(0.35) : palette.warning)
                                     .frame(width: geo.size.width * fraction(slice.tokens))
                             }
                         }
@@ -400,9 +489,12 @@ struct ContextSheet: View {
                 Text("tool calls: \(model.contextBreakdown.toolCallCount)")
                 Text("skills: \(model.contextBreakdown.skillCount) · mcp: \(model.contextBreakdown.mcpCount)")
             }
-            .font(.system(size: 12, design: .monospaced))
+            .font(.system(size: 11.5, design: .monospaced))
             .foregroundStyle(palette.secondary)
             .textSelection(.enabled)
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .grokCard(cornerRadius: 10)
         }
     }
 
@@ -443,6 +535,9 @@ struct MemorySheet: View {
                     }
                 ))
                 .toggleStyle(.switch)
+                GrokIconButton(systemImage: "xmark", size: 26, iconSize: 11, cornerRadius: 7) {
+                    model.showMemory = false
+                }
             }
             Text(l10n.t("Markdown under ~/.grok/memory. Open a file to preview or edit.", "文件在 ~/.grok/memory。点开可预览或编辑。"))
                 .font(.system(size: 12))
@@ -454,7 +549,7 @@ struct MemorySheet: View {
                     .padding(.vertical, 12)
             } else {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: 2) {
                         ForEach(model.memoryFiles) { file in
                             Button {
                                 model.openMemoryFile(file)
@@ -467,7 +562,10 @@ struct MemorySheet: View {
                                         .foregroundStyle(palette.secondary)
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(8)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 8)
+                                .grokHover(cornerRadius: 8)
+                                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                             }
                             .buttonStyle(.plain)
                         }
@@ -495,17 +593,20 @@ struct WorktreeSheet: View {
     @Environment(\.l10n) private var l10n
 
     var body: some View {
-        OverlaySheet(width: 560, onDismiss: { model.showWorktrees = false }) {
-            Text(l10n.t("Worktrees", "Worktree"))
-                .font(.system(size: 16, weight: .semibold))
+        OverlaySheet(
+            title: l10n.t("Worktrees", "Worktree"),
+            width: 560,
+            onDismiss: { model.showWorktrees = false }
+        ) {
             Text(l10n.t("Isolated checkouts for this repo. Opening one starts a new session there.", "当前仓库的隔离 checkout。打开会在那个目录开新会话。"))
                 .font(.system(size: 12))
                 .foregroundStyle(palette.secondary)
             HStack(spacing: 8) {
                 TextField(l10n.t("branch name", "分支名"), text: $model.newWorktreeName)
                     .textFieldStyle(.plain)
+                    .font(.system(size: 13))
                     .padding(10)
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.hairline))
+                    .grokFieldChrome(cornerRadius: 9)
                 Button(l10n.t("Create", "创建")) { model.createWorktree() }
                     .buttonStyle(GrokPrimaryButtonStyle())
                     .disabled(model.newWorktreeName.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -517,7 +618,7 @@ struct WorktreeSheet: View {
                     .padding(.vertical, 12)
             } else {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: 2) {
                         ForEach(model.worktrees) { tree in
                             HStack {
                                 Button {
@@ -532,16 +633,22 @@ struct WorktreeSheet: View {
                                             .lineLimit(1)
                                     }
                                     .frame(maxWidth: .infinity, alignment: .leading)
+                                    .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
-                                Button(role: .destructive) {
+                                GrokIconButton(
+                                    systemImage: "trash",
+                                    size: 26,
+                                    iconSize: 11.5,
+                                    cornerRadius: 7,
+                                    helpText: l10n.t("Delete", "删除")
+                                ) {
                                     model.removeWorktree(tree)
-                                } label: {
-                                    Image(systemName: "trash")
                                 }
-                                .buttonStyle(.plain)
                             }
-                            .padding(8)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .grokHover(cornerRadius: 8)
                         }
                     }
                 }
@@ -558,9 +665,11 @@ struct PluginTrustSheet: View {
     @Environment(\.l10n) private var l10n
 
     var body: some View {
-        OverlaySheet(width: 480, onDismiss: { model.pluginPending = nil }) {
-            Text(l10n.t("Trust this plugin?", "信任这个插件？"))
-                .font(.system(size: 16, weight: .semibold))
+        OverlaySheet(
+            title: l10n.t("Trust this plugin?", "信任这个插件？"),
+            width: 480,
+            onDismiss: { model.pluginPending = nil }
+        ) {
             if let plugin = model.pluginPending {
                 Text(plugin.name)
                     .font(.system(size: 14, weight: .medium))

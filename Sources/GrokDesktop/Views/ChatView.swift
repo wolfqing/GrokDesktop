@@ -34,8 +34,6 @@ private struct ChatDefaultBottomAnchor: ViewModifier {
     }
 }
 
-
-
 struct ChatScrollBottomMonitor: NSViewRepresentable {
     var ignoreUntil: Date
     var slack: CGFloat = 56
@@ -225,6 +223,7 @@ struct ChatView: View {
     @State private var bottomHits = 0
     @State private var pinStarted = Date.distantPast
     @State private var copiedPromptID: String?
+    @State private var hoveredPromptID: String?
     @State private var ignoreScrollUntil = Date.distantPast
     @State private var scrollMetrics = ChatScrollMetrics()
     @State private var scrollDriver = ChatScrollDriver()
@@ -246,19 +245,28 @@ struct ChatView: View {
                 emptyState
             } else {
                 if model.client.isReconnecting {
-                    Text(l10n.t("Reconnecting to grok…", "正在重新连接 grok…"))
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Color.orange)
-                        .padding(.horizontal, 24)
-                        .padding(.top, 8)
+                    HStack(spacing: 7) {
+                        RunningStatusIcon(active: true, idleSystemImage: "wifi.exclamationmark", color: palette.warning, size: 11)
+                        Text(l10n.t("Reconnecting to grok…", "正在重新连接 grok…"))
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .foregroundStyle(palette.warning)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(palette.warning.opacity(0.10), in: Capsule())
+                    .padding(.top, 10)
                 }
 
                 if model.client.compacted || !model.client.recap.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
                         if model.client.compacted {
-                            Text(l10n.t("Context compacted", "上下文已压缩"))
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(Color.orange)
+                            HStack(spacing: 5) {
+                                Image(systemName: "rectangle.compress.vertical")
+                                    .font(.system(size: 10, weight: .semibold))
+                                Text(l10n.t("Context compacted", "上下文已压缩"))
+                                    .font(.system(size: 11, weight: .semibold))
+                            }
+                            .foregroundStyle(palette.warning)
                         }
                         if !model.client.recap.isEmpty {
                             Text(model.client.recap)
@@ -268,9 +276,9 @@ struct ChatView: View {
                                 .textSelection(.enabled)
                         }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-                    .background(palette.chip, in: RoundedRectangle(cornerRadius: 10))
+                    .frame(maxWidth: GrokTheme.contentWidth, alignment: .leading)
+                    .padding(11)
+                    .grokCard(cornerRadius: 11)
                     .padding(.horizontal, 24)
                     .padding(.top, 8)
                 }
@@ -279,22 +287,29 @@ struct ChatView: View {
                     Button {
                         _ = model.client.focusIfLoaded(other.id)
                     } label: {
-                        HStack {
-                            Image(systemName: "exclamationmark.circle")
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.circle.fill")
+                                .foregroundStyle(palette.warning)
                             Text(
                                 other.userQuestion != nil
                                     ? l10n.t("Another session is waiting for an answer", "另一个会话在等你回答")
                                     : l10n.t("Another session is waiting for approval", "另一个会话在等你批准")
                             )
+                            .fontWeight(.medium)
                             Spacer()
                             Text(other.title.isEmpty ? String(other.id.prefix(8)) : other.title)
                                 .foregroundStyle(palette.secondary)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(palette.tertiary)
                         }
                         .font(.system(size: 12))
-                        .padding(10)
-                        .background(palette.chip, in: RoundedRectangle(cornerRadius: 10))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 9)
+                        .grokCard(cornerRadius: 10, interactive: true)
                     }
                     .buttonStyle(.plain)
+                    .frame(maxWidth: GrokTheme.contentWidth)
                     .padding(.horizontal, 24)
                     .padding(.top, 8)
                 }
@@ -327,7 +342,7 @@ struct ChatView: View {
                                     .id("latest-anchor")
                             }
                             .frame(maxWidth: GrokTheme.contentWidth)
-                            .padding(.vertical, model.compactChat ? 16 : 32)
+                            .padding(.vertical, model.compactChat ? 16 : 28)
                             .frame(maxWidth: .infinity)
                         }
                         .scrollIndicators(.never)
@@ -363,20 +378,10 @@ struct ChatView: View {
                         }
                         .overlay(alignment: .bottom) {
                             if showJumpToLatest {
-                                Button {
+                                JumpToLatestButton(label: l10n.jumpToLatest) {
                                     jumpToLatest(proxy)
-                                } label: {
-                                    Image(systemName: "arrow.down")
-                                        .font(.system(size: 13, weight: .semibold))
-                                        .foregroundStyle(palette.text)
-                                        .frame(width: 34, height: 34)
-                                        .background(palette.elevated, in: Circle())
-                                        .overlay(Circle().stroke(palette.hairline, lineWidth: 1))
                                 }
-                                .buttonStyle(.plain)
-                                .help(l10n.jumpToLatest)
-                                .padding(.bottom, 10)
-                                .accessibilityLabel(l10n.jumpToLatest)
+                                .padding(.bottom, 12)
                                 .transition(.opacity.combined(with: .scale(scale: 0.92)))
                             }
                         }
@@ -430,19 +435,27 @@ struct ChatView: View {
             }
 
             if let error = model.client.lastError, model.firstRunReason == nil, !model.client.isReconnecting {
-                HStack(alignment: .top, spacing: 8) {
+                HStack(alignment: .center, spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(palette.warning)
                     Text(error)
                         .textSelection(.enabled)
+                        .lineLimit(3)
                     Spacer()
                     Button(l10n.t("Dismiss", "关闭")) { model.client.dismissError() }
-                        .buttonStyle(.plain)
+                        .buttonStyle(GrokSecondaryButtonStyle())
                 }
                 .font(.system(size: 12))
-                .padding(10)
-                .background(Color.orange.opacity(0.15), in: RoundedRectangle(cornerRadius: 10))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .background(palette.warning.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(palette.warning.opacity(0.25), lineWidth: 1)
+                )
+                .frame(maxWidth: 760)
                 .padding(.horizontal, 24)
-                .padding(.bottom, 8)
+                .padding(.bottom, 10)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -461,99 +474,131 @@ struct ChatView: View {
             TimelineView(.periodic(from: .now, by: 0.25)) { timeline in
                 turnStatusRow(now: timeline.date)
             }
-            .frame(maxWidth: GrokTheme.contentWidth)
-            .padding(.horizontal, model.compactChat ? 16 : 28)
-            .padding(.bottom, 4)
+            .frame(maxWidth: 760)
+            .padding(.horizontal, 28)
+            .padding(.bottom, 6)
         }
     }
 
     private func turnStatusRow(now: Date) -> some View {
         let turn = model.client.turnStartedAt.map { now.timeIntervalSince($0) }
         return HStack(spacing: 8) {
-            if model.client.isStopping {
-                Text(l10n.stopping)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(palette.secondary)
-            }
+            RunningStatusIcon(
+                active: !model.client.isStopping,
+                idleSystemImage: "stop.circle",
+                color: palette.warning,
+                size: 11
+            )
+            Text(model.client.isStopping ? l10n.stopping : l10n.t("Working…", "正在处理…"))
+                .font(.system(size: 11.5, weight: .medium))
+                .foregroundStyle(palette.secondary)
             Spacer(minLength: 8)
             if let turn, turn >= 1 {
                 Text(PromptTimestamp.formatCompactElapsed(turn))
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(palette.secondary)
+                    .font(.system(size: 11.5, design: .monospaced))
+                    .foregroundStyle(palette.tertiary)
                     .fixedSize()
             }
             if model.displayedContextUsed > 0 {
                 Text("⇣\(PromptTimestamp.compactCount(model.displayedContextUsed))")
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(palette.secondary)
+                    .font(.system(size: 11.5, design: .monospaced))
+                    .foregroundStyle(palette.tertiary)
                     .fixedSize()
             }
-            Button {
-                if !model.client.isStopping { model.client.stopWork() }
-            } label: {
-                Text("[stop]")
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .foregroundStyle(model.client.isStopping ? palette.secondary : Color.red.opacity(0.85))
-            }
-            .buttonStyle(.plain)
-            .disabled(model.client.isStopping)
-            .help(model.client.isStopping ? l10n.stopping : l10n.stop)
         }
+        .padding(.horizontal, 8)
     }
 
     private var composerBlock: some View {
         ComposerView()
             .frame(maxWidth: 760)
             .padding(.horizontal, 24)
-            .padding(.bottom, 22)
+            .padding(.bottom, 20)
     }
 
     @ViewBuilder
     private var contextWindowNote: some View {
         if let text = model.contextWindowNoteText {
-            HStack(alignment: .top, spacing: 8) {
+            HStack(alignment: .center, spacing: 8) {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(palette.secondary)
                 Text(text)
                     .font(.system(size: 12))
                     .foregroundStyle(palette.text)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 8)
-                Button(l10n.t("Close", "关掉")) {
+                GrokIconButton(
+                    systemImage: "xmark",
+                    size: 22,
+                    iconSize: 10,
+                    helpText: l10n.t("Close", "关掉")
+                ) {
                     model.dismissContextWindowNote()
                 }
-                .buttonStyle(.plain)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(palette.secondary)
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(palette.chip)
+            .background(palette.surface)
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(palette.hairline).frame(height: 1)
+            }
         }
     }
 
     private var header: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             Button {
                 model.chooseWorkingDirectory()
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "folder")
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(palette.secondary)
                     Text(model.client.workingDirectory.lastPathComponent)
+                        .font(.system(size: 12.5, weight: .medium))
+                        .foregroundStyle(palette.text)
                         .lineLimit(1)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8.5, weight: .bold))
+                        .foregroundStyle(palette.tertiary)
                     if model.client.hasActiveWork {
                         RunningStatusIcon(
                             active: !model.client.isStopping,
                             idleSystemImage: "pause.circle",
-                            color: .orange,
+                            color: palette.warning,
                             size: 10
                         )
                     }
                 }
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(palette.secondary)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .grokHover(cornerRadius: 7)
+                .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
             }
             .buttonStyle(.plain)
-            .help(model.client.workingDirectory.path)
+            .help("\(model.client.workingDirectory.path) (⌘⇧O)")
+
+            if model.workspace.isRepo, let branch = model.workspace.branch, !branch.isEmpty {
+                Button {
+                    model.showWorktrees = true
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.triangle.branch")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text(branch)
+                            .font(.system(size: 11.5, weight: .medium, design: .monospaced))
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(palette.secondary)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 4)
+                    .background(palette.chip, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .help(l10n.t("Manage worktrees", "管理 Worktree"))
+            }
 
             Spacer()
 
@@ -565,6 +610,10 @@ struct ChatView: View {
                     Text(model.contextChipLabel)
                         .font(.system(size: 11, weight: .medium, design: .monospaced))
                         .foregroundStyle(palette.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4.5)
+                        .grokHover(cornerRadius: 6)
+                        .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 }
                 .buttonStyle(.plain)
                 .help(model.contextWindowNoteText ?? l10n.sessionContext)
@@ -572,29 +621,31 @@ struct ChatView: View {
 
             InspectorPanelsMenu()
 
-            Button {
+            GrokIconButton(
+                systemImage: "sidebar.right",
+                size: 28,
+                iconSize: 13,
+                selected: model.showInspector,
+                cornerRadius: 7,
+                helpText: "\(l10n.inspector) (⌘I)"
+            ) {
                 model.showInspector.toggle()
-            } label: {
-                Image(systemName: "sidebar.right")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(model.showInspector ? palette.text : palette.secondary)
-                    .frame(width: 26, height: 26)
-                    .background(
-                        model.showInspector ? palette.selected : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    )
             }
-            .buttonStyle(.plain)
-            .help(l10n.inspector)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 7)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(palette.hairline)
+                .frame(height: 1)
+        }
     }
 
     private var loadingState: some View {
         VStack(spacing: 12) {
             Spacer()
             ProgressView()
+                .controlSize(.small)
             Text(l10n.t("Loading conversation…", "正在加载对话…"))
                 .font(.system(size: 13))
                 .foregroundStyle(palette.secondary)
@@ -612,10 +663,12 @@ struct ChatView: View {
                 .contentShape(Rectangle())
                 .onTapGesture { model.dismissComposerSuggestions() }
 
-            GrokMark(size: 32)
+            GrokMark(size: 34)
+                .padding(.bottom, 2)
+
             if model.isHomeDirectory {
                 Text(l10n.t("Open a project to start", "打开一个项目开始工作"))
-                    .font(.system(size: 20, weight: .semibold))
+                    .font(.system(size: 21, weight: .semibold))
                 Text(l10n.t("Home folder is a messy default. Pick a project first.", "当前在家目录，先选一个项目会更干净。"))
                     .font(.system(size: 13))
                     .foregroundStyle(palette.secondary)
@@ -623,22 +676,27 @@ struct ChatView: View {
                     model.chooseWorkingDirectory()
                 }
                 .buttonStyle(GrokPrimaryButtonStyle())
+
                 if !model.visibleProjects.isEmpty {
                     emptyList(title: l10n.t("Recent projects", "最近项目")) {
                         ForEach(model.visibleProjects.prefix(4)) { project in
                             Button {
                                 model.openProject(project)
                             } label: {
-                                HStack {
+                                HStack(spacing: 9) {
                                     Image(systemName: "folder")
+                                        .font(.system(size: 12.5, weight: .medium))
                                         .foregroundStyle(palette.secondary)
                                     Text(project.name)
+                                        .font(.system(size: 13, weight: .medium))
                                     Spacer()
+                                    Image(systemName: "arrow.up.right")
+                                        .font(.system(size: 10.5, weight: .semibold))
+                                        .foregroundStyle(palette.tertiary)
                                 }
-                                .font(.system(size: 13))
                                 .padding(.horizontal, 12)
-                                .padding(.vertical, 8)
-                                .background(palette.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                .padding(.vertical, 9)
+                                .grokCard(cornerRadius: 10, interactive: true)
                                 .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                             }
                             .buttonStyle(.plain)
@@ -646,29 +704,40 @@ struct ChatView: View {
                     }
                 }
             } else {
-                Text(model.client.workingDirectory.lastPathComponent)
-                    .font(.system(size: 20, weight: .semibold))
-                Text(l10n.t("Ask Grok to work in this folder.", "在这个项目里开始问。"))
-                    .font(.system(size: 13))
-                    .foregroundStyle(palette.secondary)
+                VStack(spacing: 6) {
+                    Text(model.client.workingDirectory.lastPathComponent)
+                        .font(.system(size: 21, weight: .semibold))
+                    Text(l10n.t("Ask Grok to explore, plan, or edit in this project.", "在这个项目里提问、规划或直接修改代码。"))
+                        .font(.system(size: 13))
+                        .foregroundStyle(palette.secondary)
+                }
+
+                starterSuggestions
+
                 if !folderSessions.isEmpty {
                     emptyList(title: l10n.t("Continue here", "继续这个项目")) {
                         ForEach(folderSessions.prefix(3)) { session in
                             Button {
                                 model.open(session)
                             } label: {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(session.title)
-                                        .font(.system(size: 13, weight: .medium))
-                                        .lineLimit(1)
-                                    Text(RelativeTime.format(session.updatedAt, chinese: chinese))
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(palette.secondary)
+                                HStack(spacing: 10) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(session.title)
+                                            .font(.system(size: 13, weight: .medium))
+                                            .lineLimit(1)
+                                        Text(RelativeTime.format(session.updatedAt, chinese: chinese))
+                                            .font(.system(size: 11))
+                                            .foregroundStyle(palette.secondary)
+                                    }
+                                    Spacer(minLength: 8)
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .foregroundStyle(palette.tertiary)
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.horizontal, 12)
-                                .padding(.vertical, 8)
-                                .background(palette.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                .padding(.vertical, 8.5)
+                                .grokCard(cornerRadius: 10, interactive: true)
                                 .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                             }
                             .buttonStyle(.plain)
@@ -687,14 +756,65 @@ struct ChatView: View {
         .padding(.horizontal, 24)
     }
 
+    private var starterSuggestions: some View {
+        HStack(spacing: 8) {
+            starterChip(
+                icon: "point.topleft.down.to.point.bottomright.curvepath",
+                label: l10n.t("Plan a task", "规划复杂任务"),
+                badge: "/plan"
+            ) {
+                model.client.setMode(.plan)
+            }
+            starterChip(
+                icon: "at",
+                label: l10n.t("Mention files", "引用项目文件"),
+                badge: "@"
+            ) {
+                if !model.draft.hasSuffix("@") {
+                    model.draft += (model.draft.isEmpty ? "@" : " @")
+                }
+                model.updateMentions(from: model.draft)
+            }
+            starterChip(
+                icon: "command",
+                label: l10n.t("Slash actions", "命令面板"),
+                badge: "⌘K"
+            ) {
+                model.draft = "/"
+                model.showPalette = true
+            }
+        }
+    }
+
+    private func starterChip(icon: String, label: String, badge: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(palette.secondary)
+                Text(label)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(palette.text)
+                GrokKbdBadge(keys: badge)
+            }
+            .padding(.leading, 10)
+            .padding(.trailing, 7)
+            .padding(.vertical, 6)
+            .grokCard(cornerRadius: 10, interactive: true)
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
     private func emptyList<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: 11.5, weight: .semibold))
                 .foregroundStyle(palette.secondary)
+                .padding(.horizontal, 2)
             content()
         }
-        .frame(maxWidth: 420)
+        .frame(maxWidth: 440)
     }
 
     private var displayedRows: [ChatDisplayRow] {
@@ -953,8 +1073,8 @@ struct ChatView: View {
     private func timestamp(_ id: String, always: Bool = false) -> some View {
         if always || model.showTimestamps, let date = model.client.itemDates[id] {
             Text(PromptTimestamp.format(date))
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(palette.secondary)
+                .font(.system(size: 10.5, design: .monospaced))
+                .foregroundStyle(palette.tertiary)
         }
     }
 
@@ -1016,7 +1136,7 @@ struct ChatView: View {
 
     private var waitingStatusRow: some View {
         HStack(spacing: 8) {
-            RunningStatusIcon(active: true, idleSystemImage: "ellipsis", color: .orange, size: 12)
+            RunningStatusIcon(active: true, idleSystemImage: "ellipsis", color: palette.warning, size: 12)
             Text(waitingTitle)
                 .font(.system(size: 13, weight: .medium))
             Spacer()
@@ -1035,10 +1155,13 @@ struct ChatView: View {
         let raw = SessionFold.isAside(text) ? SessionFold.asideDisplay(text) : text
         let shown = PromptMedia.displayText(raw)
         let caption = shown.isEmpty && images.isEmpty ? raw : shown
+        let actionsVisible = hoveredPromptID == id || copiedPromptID == id
         HStack {
-            Spacer(minLength: 80)
+            Spacer(minLength: 72)
             VStack(alignment: .trailing, spacing: 4) {
-                timestamp(id, always: true)
+                if model.showTimestamps {
+                    timestamp(id, always: true)
+                }
                 VStack(alignment: .trailing, spacing: 8) {
                     ForEach(images, id: \.path) { url in
                         PromptImageView(url: url)
@@ -1054,39 +1177,56 @@ struct ChatView: View {
                         )
                     }
                 }
-                .padding(.horizontal, images.isEmpty ? 14 : 8)
-                .padding(.vertical, model.compactChat ? 8 : 10)
+                .padding(.horizontal, images.isEmpty ? 15 : 9)
+                .padding(.vertical, model.compactChat ? 8.5 : 10.5)
                 .background(
                     palette.promptBubble,
                     in: RoundedRectangle(cornerRadius: 16, style: .continuous)
                 )
-                HStack(spacing: 4) {
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(palette.promptBubbleBorder, lineWidth: 1)
+                )
+
+                HStack(spacing: 2) {
+                    if !model.showTimestamps, actionsVisible {
+                        timestamp(id, always: true)
+                            .padding(.trailing, 4)
+                    }
                     if isLatestUser(id) {
-                        Button {
+                        GrokIconButton(
+                            systemImage: "arrow.uturn.backward",
+                            size: 22,
+                            iconSize: 10.5,
+                            cornerRadius: 6,
+                            helpText: l10n.restorePrompt
+                        ) {
                             model.restorePromptToComposer(text)
-                        } label: {
-                            Image(systemName: "arrow.uturn.backward")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(palette.secondary)
-                                .frame(width: 22, height: 22)
                         }
-                        .buttonStyle(.plain)
-                        .help(l10n.restorePrompt)
                     }
-                    Button {
+                    GrokIconButton(
+                        systemImage: copiedPromptID == id ? "checkmark" : "doc.on.doc",
+                        size: 22,
+                        iconSize: 10.5,
+                        cornerRadius: 6,
+                        helpText: copiedPromptID == id ? l10n.copied : l10n.copyPrompt
+                    ) {
                         copyPrompt(id, text)
-                    } label: {
-                        Image(systemName: copiedPromptID == id ? "checkmark" : "square.on.square")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(palette.secondary)
-                            .frame(width: 22, height: 22)
                     }
-                    .buttonStyle(.plain)
-                    .help(copiedPromptID == id ? l10n.copied : l10n.copyPrompt)
                 }
+                .opacity(actionsVisible ? 1 : 0)
+                .animation(.easeOut(duration: 0.12), value: actionsVisible)
             }
         }
         .padding(.horizontal, model.compactChat ? 16 : 28)
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            if hovering {
+                hoveredPromptID = id
+            } else if hoveredPromptID == id {
+                hoveredPromptID = nil
+            }
+        }
     }
 
     @ViewBuilder
@@ -1114,7 +1254,7 @@ struct ChatView: View {
                 }
                 if model.client.isTurnRunning, isCurrentActivity(id) {
                     HStack(spacing: 6) {
-                        RunningStatusIcon(active: true, idleSystemImage: "ellipsis", color: .orange, size: 10)
+                        RunningStatusIcon(active: true, idleSystemImage: "ellipsis", color: palette.warning, size: 10)
                         Text(text.isEmpty
                              ? l10n.t("Thinking…", "正在思考…")
                              : l10n.t("Writing…", "正在回复…"))
@@ -1124,7 +1264,7 @@ struct ChatView: View {
                 } else if let label = turnDurationLabel(for: id) {
                     Text(label)
                         .font(.system(size: 11))
-                        .foregroundStyle(palette.secondary)
+                        .foregroundStyle(palette.tertiary)
                 }
             }
             .padding(.horizontal, model.compactChat ? 16 : 28)
@@ -1142,7 +1282,7 @@ struct ChatView: View {
 
     @ViewBuilder
     private func streamCluster(_ items: [ConversationItem]) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 4) {
             ForEach(ChatDisplay.streamPieces(items, mergeTools: model.mergeToolRows)) { piece in
                 switch piece {
                 case .tools(_, let tools):
@@ -1198,23 +1338,39 @@ struct ChatView: View {
                         markdown: false,
                         color: palette.secondary
                     )
-                    .padding(.leading, 18)
+                    .padding(.leading, 14)
+                    .padding(.vertical, 4)
+                    .overlay(alignment: .leading) {
+                        Rectangle()
+                            .fill(palette.hairline)
+                            .frame(width: 1.5)
+                            .padding(.leading, 4)
+                    }
                 }
             } label: {
-                HStack(spacing: 8) {
-                    diamond(filled: true, color: live ? palette.secondary : palette.secondary.opacity(0.85), active: live)
+                HStack(spacing: 7) {
+                    if live {
+                        RunningStatusIcon(active: true, idleSystemImage: "sparkles", color: palette.warning, size: 11)
+                    } else {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(palette.tertiary)
+                            .frame(width: 12)
+                    }
                     Text(header)
                         .font(.system(size: GrokTheme.chatMetaSize(compact: model.compactChat), weight: .medium))
                         .foregroundStyle(palette.secondary)
                     Spacer(minLength: 0)
                 }
+                .padding(.vertical, 2)
+                .contentShape(Rectangle())
             }
-            .tint(palette.secondary)
+            .tint(palette.tertiary)
             if live, !expandedThoughts.contains(id), !tail.lines.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
                     if tail.ellipsis {
                         Text("…")
-                            .foregroundStyle(palette.secondary)
+                            .foregroundStyle(palette.tertiary)
                     }
                     ForEach(Array(tail.lines.enumerated()), id: \.offset) { _, line in
                         Text(line)
@@ -1224,6 +1380,12 @@ struct ChatView: View {
                 }
                 .font(.system(size: GrokTheme.chatMetaSize(compact: model.compactChat)))
                 .padding(.leading, 18)
+                .overlay(alignment: .leading) {
+                    Rectangle()
+                        .fill(palette.hairline)
+                        .frame(width: 1.5)
+                        .padding(.leading, 8)
+                }
             }
         }
     }
@@ -1243,7 +1405,14 @@ struct ChatView: View {
                     }
                 }
             }
-            .padding(.leading, 18)
+            .padding(.leading, 14)
+            .padding(.vertical, 2)
+            .overlay(alignment: .leading) {
+                Rectangle()
+                    .fill(palette.hairline)
+                    .frame(width: 1.5)
+                    .padding(.leading, 4)
+            }
         } label: {
             toolHeader(
                 status: status,
@@ -1253,7 +1422,7 @@ struct ChatView: View {
                 grouped: true
             )
         }
-        .tint(palette.secondary)
+        .tint(palette.tertiary)
     }
 
     @ViewBuilder
@@ -1280,10 +1449,18 @@ struct ChatView: View {
                     markdown: false,
                     color: palette.secondary
                 )
-                .padding(.leading, grouped ? 0 : 18)
+                .padding(.leading, grouped ? 10 : 14)
+                .padding(.vertical, 4)
+                .overlay(alignment: .leading) {
+                    Rectangle()
+                        .fill(palette.hairline)
+                        .frame(width: 1.5)
+                        .padding(.leading, grouped ? 2 : 4)
+                }
             } label: {
                 toolHeader(status: shownStatus, verb: parsed.verb, target: parsed.target, location: parsed.location)
             }
+            .tint(palette.tertiary)
             .help(id)
         }
     }
@@ -1296,8 +1473,8 @@ struct ChatView: View {
         grouped: Bool = false
     ) -> some View {
         let active = ToolVoice.isActive(status) && model.client.isTurnRunning && !model.client.isStopping
-        return HStack(spacing: 8) {
-            diamond(filled: !grouped || active, color: toolColor(status, active: active), active: active)
+        return HStack(spacing: 7) {
+            toolStatusBadge(status: status, active: active, grouped: grouped)
             Text(verb)
                 .foregroundStyle(palette.secondary)
             if !target.isEmpty {
@@ -1305,7 +1482,8 @@ struct ChatView: View {
                     ChatFileLabel(path: location, title: target)
                 } else {
                     Text(target)
-                        .foregroundStyle(palette.text.opacity(0.82))
+                        .font(.system(size: GrokTheme.chatToolSize(compact: model.compactChat) - 0.5, design: .monospaced))
+                        .foregroundStyle(palette.text.opacity(0.84))
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
@@ -1313,18 +1491,36 @@ struct ChatView: View {
             Spacer(minLength: 0)
             if status == "failed" || status == "cancelled" {
                 Text(ToolVoice.statusLabel(status, chinese: model.language.resolved() == .chinese))
-                    .foregroundStyle(palette.secondary)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(status == "failed" ? palette.warning : palette.tertiary)
             }
         }
         .font(.system(size: GrokTheme.chatToolSize(compact: model.compactChat)))
-        .padding(.vertical, 1)
+        .padding(.vertical, 2)
+        .contentShape(Rectangle())
     }
 
-    private func diamond(filled: Bool, color: Color, active: Bool) -> some View {
-        Text(filled ? "◆" : "◇")
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(color)
-            .opacity(active ? 0.92 : 1)
+    @ViewBuilder
+    private func toolStatusBadge(status: String, active: Bool, grouped: Bool) -> some View {
+        if active {
+            RunningStatusIcon(active: true, idleSystemImage: "circle.dotted", color: palette.success, size: 11)
+                .frame(width: 12)
+        } else if status == "failed" {
+            Image(systemName: "exclamationmark.circle.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(palette.warning)
+                .frame(width: 12)
+        } else if status == "cancelled" {
+            Image(systemName: "minus.circle")
+                .font(.system(size: 11))
+                .foregroundStyle(palette.tertiary)
+                .frame(width: 12)
+        } else {
+            Image(systemName: grouped ? "checkmark.circle" : "checkmark")
+                .font(.system(size: grouped ? 11 : 10, weight: .semibold))
+                .foregroundStyle(palette.tertiary)
+                .frame(width: 12)
+        }
     }
 
     private func toolSucceeded(_ item: ConversationItem) -> Bool {
@@ -1334,20 +1530,31 @@ struct ChatView: View {
         return false
     }
 
-    private func toolColor(_ status: String, active: Bool = false) -> Color {
-        if active {
-            return Color.green.opacity(palette.isDark ? 0.85 : 0.75)
-        }
-        switch status {
-        case "completed": return palette.secondary
-        case "failed": return .orange
-        case "cancelled": return palette.secondary.opacity(0.7)
-        default: return palette.secondary
-        }
-    }
-
     private func looksLikeFileTarget(_ path: String) -> Bool {
         path.hasPrefix("/") || path.hasPrefix("~/") || path.hasPrefix("./") || path.contains("/")
+    }
+}
+
+private struct JumpToLatestButton: View {
+    @Environment(\.palette) private var palette
+    let label: String
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "arrow.down")
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(palette.text)
+                .frame(width: 34, height: 34)
+                .background(hovering ? palette.surface : palette.elevated, in: Circle())
+                .overlay(Circle().stroke(hovering ? palette.borderStrong : palette.hairline, lineWidth: 1))
+                .shadow(color: .black.opacity(palette.isDark ? 0.45 : 0.10), radius: 8, y: 3)
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(label)
+        .accessibilityLabel(label)
     }
 }
 
@@ -1366,6 +1573,10 @@ private struct PromptImageView: View {
                     .aspectRatio(contentMode: .fit)
                     .frame(maxWidth: 360, maxHeight: 260)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(palette.hairline, lineWidth: 1)
+                    )
             } else {
                 HStack(spacing: 8) {
                     Image(systemName: "photo")
@@ -1390,17 +1601,37 @@ private struct ChatFileLabel: View {
     var title: String? = nil
     @EnvironmentObject private var model: AppModel
     @Environment(\.palette) private var palette
+    @State private var hovering = false
 
     var body: some View {
         let url = ChatLinkDetector.resolve(path, baseDirectory: model.client.workingDirectory)?.url
             ?? URL(fileURLWithPath: path)
-        Button(title ?? path) {
+        Button {
             ChatLinkActions.activate(url)
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "doc.text")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(palette.tertiary)
+                Text(title ?? path)
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundStyle(hovering ? palette.text : palette.text.opacity(0.86))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .padding(.horizontal, 6.5)
+            .padding(.vertical, 2)
+            .background(
+                hovering ? palette.selected : palette.chip,
+                in: RoundedRectangle(cornerRadius: 5.5, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 5.5, style: .continuous)
+                    .stroke(hovering ? palette.borderStrong : Color.clear, lineWidth: 1)
+            )
         }
         .buttonStyle(.plain)
-        .font(.system(size: 13))
-        .foregroundStyle(Color(nsColor: .linkColor))
-        .underline()
+        .onHover { hovering = $0 }
         .help(url.path)
         .contextMenu { ChatLinkContextButtons(url: url) }
     }

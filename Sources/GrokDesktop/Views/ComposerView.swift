@@ -10,6 +10,7 @@ struct ComposerView: View {
     private var isChinese: Bool { model.language.resolved() == .chinese }
 
     @State private var showModelMenu = false
+    @FocusState private var editorFocused: Bool
 
     private var draftImages: [URL] {
         PromptMedia.imageURLs(in: model.draft)
@@ -40,8 +41,9 @@ struct ComposerView: View {
                     }
                     TextField(composerPlaceholder, text: $model.draft, axis: .vertical)
                         .textFieldStyle(.plain)
-                        .font(.system(size: 14.5))
+                        .font(.system(size: 14))
                         .lineLimit(1...8)
+                        .focused($editorFocused)
                         .onSubmit {
                             let modifiers = NSEvent.modifierFlags
                             if model.requireCmdEnter && !modifiers.contains(.command) && !modifiers.contains(.control) {
@@ -63,41 +65,23 @@ struct ComposerView: View {
                             model.updateMentions(from: value)
                         }
 
-                    HStack(spacing: 8) {
-                        Button {
+                    HStack(spacing: 6) {
+                        GrokIconButton(
+                            systemImage: model.showAttachMenu ? "xmark" : "plus",
+                            size: 28,
+                            iconSize: 12.5,
+                            selected: model.showAttachMenu,
+                            cornerRadius: 8,
+                            helpText: l10n.t("Attach or mention (@)", "附加文件或引用 (@)")
+                        ) {
                             showModelMenu = false
                             model.showAttachMenu.toggle()
-                        } label: {
-                            Image(systemName: model.showAttachMenu ? "xmark" : "plus")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(palette.secondary)
-                                .frame(width: 26, height: 26)
                         }
-                        .buttonStyle(.plain)
-                        .help("@")
                         .popover(isPresented: $model.showAttachMenu, arrowEdge: .bottom) {
                             attachMenu
                         }
 
-                        Menu {
-                            ForEach(AgentMode.allCases) { mode in
-                                Button {
-                                    model.client.setMode(mode)
-                                } label: {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(mode.title(chinese: isChinese))
-                                        Text(mode.subtitle(chinese: isChinese))
-                                            .font(.system(size: 11))
-                                            .foregroundStyle(palette.secondary)
-                                    }
-                                }
-                            }
-                        } label: {
-                            chip(model.client.mode.title(chinese: isChinese))
-                        }
-                        .menuStyle(.borderlessButton)
-                        .fixedSize()
-                        .help(model.client.mode.subtitle(chinese: isChinese))
+                        modeMenu
 
                         Spacer(minLength: 8)
 
@@ -114,70 +98,76 @@ struct ComposerView: View {
                         )
 
                         if model.client.hasActiveWork {
-                            Button {
+                            ComposerCircleButton(
+                                systemImage: "stop.fill",
+                                loading: model.client.isStopping,
+                                active: true,
+                                fill: palette.send,
+                                glyph: palette.sendGlyph,
+                                helpText: model.client.isStopping ? l10n.stopping : "\(l10n.stop) (Esc)"
+                            ) {
                                 if !model.client.isStopping { model.client.stopWork() }
-                            } label: {
-                                Group {
-                                    if model.client.isStopping {
-                                        ProgressView()
-                                            .controlSize(.small)
-                                    } else {
-                                        Image(systemName: "stop.fill")
-                                            .font(.system(size: 11, weight: .bold))
-                                    }
-                                }
-                                .foregroundStyle(palette.sendGlyph)
-                                .frame(width: 30, height: 30)
-                                .background(palette.send, in: Circle())
                             }
-                            .buttonStyle(.plain)
                             .disabled(model.client.isStopping)
-                            .help(model.client.isStopping ? l10n.stopping : l10n.stop)
                         }
 
-                        Button(action: { submit() }) {
-                            Image(systemName: sendSymbol)
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundStyle(canSend ? palette.sendGlyph : palette.secondary)
-                                .frame(width: 30, height: 30)
-                                .background(
-                                    canSend ? palette.send : palette.chip,
-                                    in: Circle()
-                                )
+                        ComposerCircleButton(
+                            systemImage: sendSymbol,
+                            loading: false,
+                            active: canSend,
+                            fill: canSend ? palette.send : palette.chip,
+                            glyph: canSend ? palette.sendGlyph : palette.tertiary,
+                            helpText: model.requireCmdEnter ? "⌘⏎" : "⏎"
+                        ) {
+                            submit()
                         }
-                        .buttonStyle(.plain)
+                        .disabled(!canSend)
                     }
                 }
-                .padding(14)
-                .background(palette.input, in: RoundedRectangle(cornerRadius: GrokTheme.inputRadius, style: .continuous))
+                .padding(.horizontal, 14)
+                .padding(.top, 13)
+                .padding(.bottom, 11)
+                .background(
+                    editorFocused ? palette.inputFocused : palette.input,
+                    in: RoundedRectangle(cornerRadius: GrokTheme.inputRadius, style: .continuous)
+                )
                 .overlay(
                     RoundedRectangle(cornerRadius: GrokTheme.inputRadius, style: .continuous)
-                        .stroke(palette.hairline, lineWidth: 1)
+                        .stroke(editorFocused ? palette.focusRing : palette.hairline, lineWidth: 1)
                 )
+                .shadow(
+                    color: .black.opacity(palette.isDark ? (editorFocused ? 0.36 : 0.20) : (editorFocused ? 0.07 : 0.03)),
+                    radius: editorFocused ? 14 : 6,
+                    y: editorFocused ? 5 : 2
+                )
+                .animation(.easeOut(duration: 0.15), value: editorFocused)
             }
 
             if !model.client.promptQueue.isEmpty {
                 queuePanel
             }
 
-            Button {
-                model.chooseWorkingDirectory()
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "folder")
-                    Text(model.client.workingDirectory.lastPathComponent)
-                        .lineLimit(1)
-                    if model.isHomeDirectory {
-                        Text(l10n.t("pick a project", "先选项目"))
-                            .foregroundStyle(Color.orange)
+            if model.isHomeDirectory {
+                Button {
+                    model.chooseWorkingDirectory()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "folder.badge.questionmark")
+                        Text(model.client.workingDirectory.lastPathComponent)
+                            .lineLimit(1)
+                        Text("·")
+                        Text(l10n.t("Pick a project folder", "建议先选项目目录"))
+                            .foregroundStyle(palette.warning)
                     }
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(palette.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .grokHover(cornerRadius: 6)
                 }
-                .font(.system(size: 12))
-                .foregroundStyle(palette.secondary)
+                .buttonStyle(.plain)
+                .help(model.client.workingDirectory.path)
             }
-            .buttonStyle(.plain)
-            .help(model.client.workingDirectory.path)
-            .padding(.horizontal, 6)
         }
         .onExitCommand {
             _ = model.handleEscape()
@@ -203,31 +193,57 @@ struct ComposerView: View {
         }
     }
 
-    private var usageChip: some View {
-        Button {
-            model.openUsage()
-        } label: {
-            HStack(spacing: 6) {
-                ZStack {
-                    Circle()
-                        .stroke(palette.secondary.opacity(0.28), lineWidth: 2)
-                    Circle()
-                        .trim(from: 0, to: CGFloat(min(max(usagePercent, 0), 100)) / 100)
-                        .stroke(Color.orange, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                        .rotationEffect(.degrees(-90))
+    private var modeMenu: some View {
+        Menu {
+            ForEach(AgentMode.allCases) { mode in
+                Button {
+                    model.client.setMode(mode)
+                } label: {
+                    Label(
+                        "\(mode.title(chinese: isChinese)) — \(mode.subtitle(chinese: isChinese))",
+                        systemImage: modeIcon(mode)
+                    )
                 }
-                .frame(width: 14, height: 14)
-                Text(model.accountUsage.isLoaded ? "\(usagePercent)%" : "—")
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundStyle(palette.secondary)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(palette.chip, in: Capsule())
+        } label: {
+            ModePillLabel(
+                icon: modeIcon(model.client.mode),
+                title: model.client.mode.title(chinese: isChinese),
+                accent: modeAccent(model.client.mode)
+            )
         }
-        .buttonStyle(.plain)
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
         .fixedSize()
-        .help(l10n.t("Account usage", "账号用量"))
+        .help("\(model.client.mode.subtitle(chinese: isChinese)) (⇧⇥)")
+    }
+
+    private func modeIcon(_ mode: AgentMode) -> String {
+        switch mode {
+        case .normal: return "hand.raised"
+        case .plan: return "point.topleft.down.to.point.bottomright.curvepath"
+        case .auto: return "bolt.shield"
+        case .alwaysApprove: return "checkmark.shield.fill"
+        }
+    }
+
+    private func modeAccent(_ mode: AgentMode) -> Color? {
+        switch mode {
+        case .normal: return nil
+        case .plan: return palette.info
+        case .auto: return palette.success
+        case .alwaysApprove: return palette.warning
+        }
+    }
+
+    private var usageChip: some View {
+        UsagePillButton(
+            percent: usagePercent,
+            isLoaded: model.accountUsage.isLoaded,
+            helpText: l10n.t("Account usage", "账号用量")
+        ) {
+            model.openUsage()
+        }
     }
 
     private var usagePercent: Int {
@@ -285,14 +301,14 @@ struct ComposerView: View {
             SuggestSection(title: l10n.t("Files", "文件"))
             if model.mentionMatches.isEmpty {
                 Text(l10n.t("No matching files", "没有匹配的文件"))
-                    .font(.system(size: 13))
+                    .font(.system(size: 12.5))
                     .foregroundStyle(palette.secondary)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
             } else {
                 ForEach(model.mentionMatches, id: \.path) { url in
                     SuggestRow(
-                        icon: "doc",
+                        icon: "doc.text",
                         title: url.lastPathComponent,
                         detail: url.deletingLastPathComponent().lastPathComponent
                     ) {
@@ -314,35 +330,29 @@ struct ComposerView: View {
         HStack(spacing: 6) {
             Image(systemName: "flag.fill")
                 .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(palette.warning)
             Text(l10n.t("Goal mode", "目标模式"))
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: 11.5, weight: .medium))
+                .foregroundStyle(palette.text)
             Button {
                 model.goalMode = false
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(palette.secondary)
             }
             .buttonStyle(.plain)
             .help(l10n.t("Turn off goal mode", "关闭目标模式"))
         }
-        .foregroundStyle(palette.secondary)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .background(palette.chip, in: Capsule())
+        .padding(.horizontal, 9)
+        .padding(.vertical, 4.5)
+        .background(palette.warning.opacity(0.12), in: Capsule())
+        .overlay(Capsule().stroke(palette.warning.opacity(0.28), lineWidth: 1))
         .help(l10n.t("This prompt is sent as /goal. The agent keeps going until it’s done.", "这条会按 /goal 发出。做到为止。"))
     }
 
-    private func chip(_ title: String, accent: Color? = nil) -> some View {
-        Text(title)
-            .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(accent ?? palette.secondary)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(palette.chip, in: Capsule())
-    }
-
     private var attachMenu: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 2) {
             attachItem(l10n.t("Attach file (@)", "附加文件 (@)"), systemImage: "doc") { attachFiles() }
             attachItem(l10n.t("Paste image", "粘贴图片"), systemImage: "photo") {
                 model.showAttachMenu = false
@@ -361,22 +371,26 @@ struct ComposerView: View {
                 model.toggleGoalMode()
             }
         }
-        .padding(.vertical, 4)
-        .frame(width: 220)
+        .padding(6)
+        .frame(width: 216)
     }
 
     private func attachItem(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 10) {
-                Image(systemName: systemImage).frame(width: 16)
+                Image(systemName: systemImage)
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundStyle(palette.secondary)
+                    .frame(width: 16)
                 Text(title)
+                    .font(.system(size: 13))
                 Spacer()
             }
-            .font(.system(size: 14))
             .foregroundStyle(palette.text)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .contentShape(Rectangle())
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .grokHover(cornerRadius: 7)
+            .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -419,8 +433,8 @@ struct ComposerView: View {
         let count = items.count
         return VStack(alignment: .leading, spacing: 6) {
             Text(queueHeader(count))
-            .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(palette.secondary)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(palette.secondary)
             if count > 3 {
                 ScrollView {
                     queueStack(items)
@@ -431,7 +445,7 @@ struct ComposerView: View {
                 queueStack(items)
             }
         }
-        .padding(.horizontal, 6)
+        .padding(.horizontal, 4)
     }
 
     private func queueStack(_ items: [QueuedPrompt]) -> some View {
@@ -450,7 +464,7 @@ struct ComposerView: View {
         let handoff = model.client.armedQueueID != nil
         return HStack(alignment: .center, spacing: 8) {
             Image(systemName: item.kind == .aside ? "text.bubble" : "clock")
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(size: 10.5, weight: .semibold))
                 .foregroundStyle(palette.secondary)
                 .frame(width: 14)
             if let first = images.first {
@@ -479,13 +493,7 @@ struct ComposerView: View {
                 Button(l10n.sendNow) {
                     model.sendQueuedNow(id: item.id)
                 }
-                .buttonStyle(.plain)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(palette.sendGlyph)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .frame(minHeight: 22)
-                .background(palette.send, in: Capsule())
+                .buttonStyle(GrokPrimaryButtonStyle())
                 .opacity(handoff ? 0.35 : 1)
                 .disabled(handoff)
                 .help(
@@ -494,20 +502,19 @@ struct ComposerView: View {
                         : l10n.t("Send this prompt", "发送这条")
                 )
             }
-            Button {
+            GrokIconButton(
+                systemImage: "xmark",
+                size: 22,
+                iconSize: 9.5,
+                cornerRadius: 6,
+                helpText: l10n.t("Remove from queue", "从队列移除")
+            ) {
                 model.client.removeQueuedPrompt(id: item.id)
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(palette.secondary)
-                    .frame(width: 22, height: 22)
             }
-            .buttonStyle(.plain)
-            .help(l10n.t("Remove from queue", "从队列移除"))
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 11)
         .padding(.vertical, 8)
-        .background(palette.chip, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .grokCard(cornerRadius: 11)
         .help(shown)
     }
 
@@ -569,6 +576,115 @@ struct ComposerView: View {
     }
 }
 
+private struct ModePillLabel: View {
+    @Environment(\.palette) private var palette
+    let icon: String
+    let title: String
+    let accent: Color?
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon)
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(accent ?? palette.secondary)
+            Text(title)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(accent ?? (hovering ? palette.text : palette.secondary))
+            Image(systemName: "chevron.down")
+                .font(.system(size: 8.5, weight: .bold))
+                .foregroundStyle(palette.tertiary)
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(
+            accent != nil
+                ? accent!.opacity(hovering ? 0.16 : 0.10)
+                : (hovering ? palette.selected : palette.chip),
+            in: Capsule()
+        )
+        .overlay(
+            Capsule()
+                .stroke(accent != nil ? accent!.opacity(0.26) : Color.clear, lineWidth: 1)
+        )
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.12), value: hovering)
+    }
+}
+
+private struct UsagePillButton: View {
+    @Environment(\.palette) private var palette
+    let percent: Int
+    let isLoaded: Bool
+    let helpText: String
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5.5) {
+                ZStack {
+                    Circle()
+                        .stroke(palette.secondary.opacity(0.24), lineWidth: 1.8)
+                    Circle()
+                        .trim(from: 0, to: CGFloat(min(max(percent, 0), 100)) / 100)
+                        .stroke(
+                            percent >= 85 ? palette.danger : palette.warning,
+                            style: StrokeStyle(lineWidth: 1.8, lineCap: .round)
+                        )
+                        .rotationEffect(.degrees(-90))
+                }
+                .frame(width: 12.5, height: 12.5)
+                Text(isLoaded ? "\(percent)%" : "—")
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundStyle(hovering ? palette.text : palette.secondary)
+            }
+            .padding(.horizontal, 8.5)
+            .padding(.vertical, 5)
+            .background(hovering ? palette.selected : palette.chip, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.12), value: hovering)
+        .help(helpText)
+    }
+}
+
+private struct ComposerCircleButton: View {
+    let systemImage: String
+    let loading: Bool
+    let active: Bool
+    let fill: Color
+    let glyph: Color
+    let helpText: String
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Group {
+                if loading {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 11.5, weight: .bold))
+                }
+            }
+            .foregroundStyle(glyph)
+            .frame(width: 28, height: 28)
+            .background(fill, in: Circle())
+            .opacity(active && hovering ? 0.88 : 1)
+            .scaleEffect(active && hovering ? 1.03 : 1)
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.12), value: hovering)
+        .help(helpText)
+    }
+}
+
 private struct DraftImageThumb: View {
     let url: URL
     var size: CGFloat = 72
@@ -622,49 +738,32 @@ struct BusySendBar: View {
             }
             if !shown.isEmpty {
                 Text(shown)
-                    .font(.system(size: 14))
+                    .font(.system(size: 13.5))
                     .lineLimit(3)
             } else if images.isEmpty {
                 Text(text)
-                    .font(.system(size: 14))
+                    .font(.system(size: 13.5))
                     .lineLimit(3)
             }
             Text(l10n.busySendDetail)
-                .font(.system(size: 11))
+                .font(.system(size: 11.5))
                 .foregroundStyle(palette.secondary)
             HStack(spacing: 8) {
                 Button(l10n.sendNow) { model.confirmBusySendNow() }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 13, weight: .medium))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .background(palette.send, in: Capsule())
-                    .foregroundStyle(palette.sendGlyph)
+                    .buttonStyle(GrokPrimaryButtonStyle())
                     .keyboardShortcut(.return, modifiers: [])
 
                 Button(l10n.editPrompt) { model.confirmBusyEdit() }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 13, weight: .medium))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .background(palette.chip, in: Capsule())
+                    .buttonStyle(GrokSecondaryButtonStyle())
                     .keyboardShortcut(.escape, modifiers: [])
 
                 Button(l10n.cancelPrompt) { model.confirmBusyCancel() }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 13, weight: .medium))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .background(palette.chip, in: Capsule())
+                    .buttonStyle(GrokSecondaryButtonStyle())
             }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(palette.elevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(palette.hairline, lineWidth: 1)
-        )
+        .grokCard(cornerRadius: 15)
     }
 }
 

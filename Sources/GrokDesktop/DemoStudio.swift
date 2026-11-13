@@ -29,9 +29,10 @@ enum DemoStudio {
     }
 
     @MainActor
-    static func writeScreenshot(model: AppModel, to url: URL) -> Bool {
+    static func writeScreenshot(model: AppModel? = nil, to url: URL) -> Bool {
         _ = model
-        let view = DemoPosterView()
+        let isDark = !ProcessInfo.processInfo.arguments.contains("--demo-light")
+        let view = DemoPosterView(isDark: isDark)
         let renderer = ImageRenderer(content: view)
         renderer.scale = 2
         renderer.proposedSize = ProposedViewSize(width: 1280, height: 840)

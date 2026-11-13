@@ -6,13 +6,14 @@ struct InspectorView: View {
     @Environment(\.palette) private var palette
     @Environment(\.l10n) private var l10n
     @State private var planNote = ""
+    @State private var hoveredPane: InspectorPane?
     @FocusState private var asideFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
 
-            Divider().overlay(palette.hairline)
+            Rectangle().fill(palette.hairline).frame(height: 1)
 
             if let preview = model.previewedFile {
                 FilePreviewPane(url: preview)
@@ -24,39 +25,64 @@ struct InspectorView: View {
 
             if showsDetails {
                 if model.previewedFile != nil {
-                    Divider().overlay(palette.hairline)
+                    Rectangle().fill(palette.hairline).frame(height: 1)
                     detailsHeader
                 }
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 14) {
                         if let story = liveStory {
-                            turnSection(story)
+                            inspectorCard {
+                                turnSection(story)
+                            }
                         }
                         if showsContext, model.inspectorPaneVisible(.context) {
-                            contextSection
+                            inspectorPaneCard(.context) {
+                                contextSection
+                            }
                         }
                         if showsWork, model.inspectorPaneVisible(.work) {
-                            workSection
+                            inspectorPaneCard(.work) {
+                                workSection
+                            }
                         }
                         if showsTerminals, model.inspectorPaneVisible(.terminals) {
-                            terminalsSection
+                            inspectorPaneCard(.terminals) {
+                                terminalsSection
+                            }
                         }
                         if showsChanges, model.inspectorPaneVisible(.changes) {
-                            changesSection
+                            inspectorPaneCard(.changes) {
+                                changesSection
+                            }
                         }
                         if showsHooks, model.inspectorPaneVisible(.hooks) {
-                            hooksSection
+                            inspectorPaneCard(.hooks) {
+                                hooksSection
+                            }
                         }
                     }
-                    .padding(14)
+                    .padding(12)
                 }
+                .scrollIndicators(.never)
                 .frame(maxHeight: model.previewedFile == nil ? .infinity : 280)
             } else if model.previewedFile == nil {
-                Spacer(minLength: 0)
+                VStack(spacing: 8) {
+                    Spacer()
+                    Image(systemName: "sidebar.right")
+                        .font(.system(size: 20))
+                        .foregroundStyle(palette.tertiary)
+                    Text(l10n.t("Session details show up here.", "会话状态、任务和变更会显示在这里。"))
+                        .font(.system(size: 12))
+                        .foregroundStyle(palette.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 24)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
 
             if model.inspectorPaneVisible(.aside) {
-                Divider().overlay(palette.hairline)
+                Rectangle().fill(palette.hairline).frame(height: 1)
                 steerPanel
             }
             if model.inspectorPaneVisible(.shell) {
@@ -82,12 +108,37 @@ struct InspectorView: View {
         }
     }
 
+    private func inspectorCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            content()
+        }
+        .padding(11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .grokCard(cornerRadius: 11)
+    }
+
+    private func inspectorPaneCard<Content: View>(_ pane: InspectorPane, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            content()
+        }
+        .padding(11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .grokCard(cornerRadius: 11)
+        .onHover { hovering in
+            if hovering {
+                hoveredPane = pane
+            } else if hoveredPane == pane {
+                hoveredPane = nil
+            }
+        }
+    }
+
     private var header: some View {
         HStack(spacing: 8) {
             Text(l10n.inspector)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(palette.text)
             Spacer(minLength: 4)
-            InspectorPanelsMenu()
             if model.previewedFile != nil {
                 Button {
                     model.inspectorDetailsVisible.toggle()
@@ -97,32 +148,36 @@ struct InspectorView: View {
                          : l10n.t("Details", "详情"))
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(palette.secondary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3.5)
+                        .grokHover(cornerRadius: 6)
                 }
                 .buttonStyle(.plain)
             }
+            InspectorPanelsMenu()
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(.vertical, 7.5)
     }
 
     private var detailsHeader: some View {
         HStack {
             Text(l10n.t("Context and tasks", "上下文和任务"))
-                .font(.system(size: 11, weight: .medium))
+                .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(palette.secondary)
             Spacer()
-            Button {
+            GrokIconButton(
+                systemImage: "xmark",
+                size: 20,
+                iconSize: 9.5,
+                cornerRadius: 5,
+                helpText: l10n.t("Hide details", "隐藏详情")
+            ) {
                 model.inspectorDetailsVisible = false
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(palette.secondary)
             }
-            .buttonStyle(.plain)
-            .help(l10n.t("Hide details", "隐藏详情"))
         }
         .padding(.horizontal, 14)
-        .padding(.top, 10)
+        .padding(.top, 9)
         .padding(.bottom, 2)
     }
 
@@ -174,11 +229,11 @@ struct InspectorView: View {
                     .font(.system(size: 12, weight: .semibold))
                 Spacer()
                 Text(l10n.t("Won't interrupt", "不打断当前任务"))
-                    .font(.system(size: 10))
-                    .foregroundStyle(palette.secondary)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(palette.tertiary)
             }
             if !asideTurns.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 6) {
                     ForEach(asideTurns.suffix(4)) { turn in
                         asideTurnRow(turn)
                     }
@@ -200,7 +255,7 @@ struct InspectorView: View {
                 } label: {
                     Image(systemName: "arrow.up")
                         .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(canSendAside ? palette.sendGlyph : palette.secondary)
+                        .foregroundStyle(canSendAside ? palette.sendGlyph : palette.tertiary)
                         .frame(width: 24, height: 24)
                         .background(
                             canSendAside ? palette.send : palette.chip,
@@ -209,14 +264,11 @@ struct InspectorView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(!canSendAside)
-                .help(l10n.t("Send aside", "发送旁问"))
+                .help(l10n.t("Send aside (⌘⇧B)", "发送旁问 (⌘⇧B)"))
             }
-            .padding(8)
-            .background(palette.input, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(palette.hairline, lineWidth: 1)
-            )
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .grokFieldChrome(cornerRadius: 12, focused: asideFocused)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -237,29 +289,33 @@ struct InspectorView: View {
                     .foregroundStyle(palette.secondary)
             } else if turn.pending, turn.answer.isEmpty {
                 HStack(spacing: 6) {
-                    RunningStatusIcon(active: true, idleSystemImage: "ellipsis", color: .orange, size: 10)
+                    RunningStatusIcon(active: true, idleSystemImage: "ellipsis", color: palette.warning, size: 10)
                     Text(l10n.t("Waiting for a side answer", "等旁问回复"))
                         .font(.system(size: 11))
                         .foregroundStyle(palette.secondary)
                 }
             } else if !turn.answer.isEmpty {
                 Text(turn.answer)
-                    .font(.system(size: 11))
+                    .font(.system(size: 11.5))
                     .foregroundStyle(palette.secondary)
                     .lineLimit(6)
                     .textSelection(.enabled)
             }
         }
-        .padding(8)
+        .padding(8.5)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(palette.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(palette.surface, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .stroke(palette.hairline, lineWidth: 1)
+        )
     }
 
     private func turnSection(_ story: TurnStory) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(l10n.t("This turn", "本轮"))
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 11.5, weight: .semibold))
                     .foregroundStyle(palette.secondary)
                 Spacer()
                 if story.total > 0 {
@@ -272,7 +328,7 @@ struct InspectorView: View {
                 RunningStatusIcon(
                     active: story.phase == .working,
                     idleSystemImage: "pause.circle",
-                    color: .orange,
+                    color: palette.warning,
                     size: 11
                 )
                 .padding(.top, 2)
@@ -303,8 +359,8 @@ struct InspectorView: View {
             HStack(alignment: .top, spacing: 6) {
                 RunningStatusIcon(
                     active: terminal.running,
-                    idleSystemImage: terminal.exitCode == 0 ? "checkmark" : "xmark",
-                    color: terminal.running ? .orange : palette.secondary,
+                    idleSystemImage: terminal.exitCode == 0 ? "checkmark.circle.fill" : "xmark.circle.fill",
+                    color: terminal.running ? palette.warning : (terminal.exitCode == 0 ? palette.success : palette.danger),
                     size: 11
                 )
                 .padding(.top, 2)
@@ -319,16 +375,16 @@ struct InspectorView: View {
                     }
                     .buttonStyle(.plain)
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Color.orange)
+                    .foregroundStyle(palette.warning)
                 } else if let code = terminal.exitCode {
                     Text("\(code)")
                         .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(palette.secondary)
+                        .foregroundStyle(code == 0 ? palette.tertiary : palette.danger)
                 }
             }
             if !terminal.preview.isEmpty {
                 Text(terminal.preview)
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.system(size: 10.5, design: .monospaced))
                     .foregroundStyle(palette.secondary)
                     .textSelection(.enabled)
                     .lineLimit(8)
@@ -347,8 +403,11 @@ struct InspectorView: View {
                     model.showContextSheet = true
                 } label: {
                     Text(l10n.t("Details", "明细"))
-                        .font(.system(size: 11))
+                        .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(palette.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .grokHover(cornerRadius: 5)
                 }
                 .buttonStyle(.plain)
             }
@@ -369,43 +428,46 @@ struct InspectorView: View {
                 ZStack(alignment: .leading) {
                     Capsule().fill(palette.chip)
                     Capsule()
-                        .fill(Color.orange)
+                        .fill(model.displayedContextPercent >= 85 ? palette.danger : palette.warning)
                         .frame(width: geo.size.width * CGFloat(min(max(model.displayedContextPercent, 0), 100)) / 100)
+                        .animation(.easeOut(duration: 0.2), value: model.displayedContextPercent)
                 }
             }
-            .frame(height: 6)
+            .frame(height: 5)
             if let text = model.contextWindowNoteText {
                 Text(text)
                     .font(.system(size: 11))
                     .foregroundStyle(palette.text)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Button {
-                model.chooseWorkingDirectory()
-            } label: {
-                Text(model.client.workingDirectory.lastPathComponent)
-                    .font(.system(size: 11))
-                    .foregroundStyle(palette.secondary)
-                    .lineLimit(1)
+            HStack(spacing: 8) {
+                if showsConnection {
+                    connectionLine
+                }
+                Spacer(minLength: 0)
+                if !model.client.items.isEmpty {
+                    Button {
+                        Task { await model.client.compact() }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "rectangle.compress.vertical")
+                                .font(.system(size: 9.5, weight: .semibold))
+                            Text(l10n.t("Compact", "压缩"))
+                                .font(.system(size: 11, weight: .medium))
+                        }
+                        .foregroundStyle(palette.secondary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .grokHover(cornerRadius: 6)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
-            .buttonStyle(.plain)
-            .help(model.client.workingDirectory.path)
-            if showsConnection {
-                connectionLine
-            }
-            Button {
-                Task { await model.client.compact() }
-            } label: {
-                Text(l10n.t("Compact now", "立即压缩"))
-                    .font(.system(size: 11, weight: .medium))
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(palette.secondary)
             if !model.client.checkpoints.isEmpty {
+                Rectangle().fill(palette.hairline).frame(height: 1).padding(.vertical, 2)
                 Text(l10n.t("Checkpoints", "检查点"))
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(palette.secondary)
-                    .padding(.top, 4)
                 ForEach(model.client.checkpoints.prefix(6)) { point in
                     VStack(alignment: .leading, spacing: 2) {
                         HStack {
@@ -430,7 +492,7 @@ struct InspectorView: View {
                             }
                             .buttonStyle(.plain)
                             .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Color.orange)
+                            .foregroundStyle(palette.warning)
                             .help(point.promptIndex.map {
                                 l10n.t("Rewind to turn \($0 + 1)", "退回到第 \($0 + 1) 轮")
                             } ?? "")
@@ -442,16 +504,21 @@ struct InspectorView: View {
     }
 
     private var connectionLine: some View {
-        Text(connectionLabel)
-            .font(.system(size: 11))
-            .foregroundStyle(palette.secondary)
+        HStack(spacing: 5) {
+            Circle()
+                .fill(palette.warning)
+                .frame(width: 5.5, height: 5.5)
+            Text(connectionLabel)
+                .font(.system(size: 11))
+                .foregroundStyle(palette.secondary)
+        }
     }
 
     private var connectionLabel: String {
         switch model.client.state {
         case .idle: return l10n.t("Idle", "空闲")
         case .connecting: return l10n.t("Connecting…", "正在连接…")
-        case .initialized: return l10n.t("Agent initialized, no session", "已握手，尚未建会话")
+        case .initialized: return l10n.t("Agent initialized", "已握手")
         case .ready: return l10n.t("Session ready", "会话就绪")
         case .failed(let message): return message
         }
@@ -468,35 +535,35 @@ struct InspectorView: View {
 
     private var workSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                sectionTitle(planIsChecklist ? l10n.t("Plan", "计划") : l10n.tasks)
-                Spacer()
-                if checklistProgress.total > 0 {
-                    Text("\(checklistProgress.done)/\(checklistProgress.total)")
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
-                        .foregroundStyle(palette.secondary)
-                }
-                if model.client.hasActiveWork {
-                    Button(model.client.isStopping ? l10n.stopping : l10n.stop) {
-                        if !model.client.isStopping { model.client.stopWork() }
+            paneHeader(.work, title: planIsChecklist ? l10n.t("Plan", "计划") : l10n.tasks) {
+                HStack(spacing: 6) {
+                    if checklistProgress.total > 0 {
+                        Text("\(checklistProgress.done)/\(checklistProgress.total)")
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .foregroundStyle(palette.secondary)
                     }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Color.orange)
-                    .disabled(model.client.isStopping)
+                    if model.client.hasActiveWork {
+                        Button(model.client.isStopping ? l10n.stopping : l10n.stop) {
+                            if !model.client.isStopping { model.client.stopWork() }
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(palette.warning)
+                        .disabled(model.client.isStopping)
+                    }
                 }
-                paneClose(.work)
             }
             if checklistProgress.total > 0 {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         Capsule().fill(palette.chip)
                         Capsule()
-                            .fill(Color.orange)
+                            .fill(checklistProgress.done == checklistProgress.total ? palette.success : palette.warning)
                             .frame(width: geo.size.width * CGFloat(checklistProgress.done) / CGFloat(max(checklistProgress.total, 1)))
+                            .animation(.easeOut(duration: 0.2), value: checklistProgress.done)
                     }
                 }
-                .frame(height: 6)
+                .frame(height: 5)
             }
             if model.client.mode == .plan, checklist.isEmpty, !keepsPlan {
                 Text(l10n.t("No plan yet.", "还没有计划。"))
@@ -504,7 +571,8 @@ struct InspectorView: View {
                     .foregroundStyle(palette.secondary)
             }
             ForEach(checklist, id: \.id) { row in
-                HStack(alignment: .top, spacing: 6) {
+                let isDone = row.status == "completed" || row.status == "cancelled"
+                HStack(alignment: .top, spacing: 7) {
                     RunningStatusIcon(
                         active: model.client.isTurnRunning && (row.status == "in_progress" || row.status == "running"),
                         idleSystemImage: todoIcon(row.status),
@@ -515,7 +583,8 @@ struct InspectorView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(row.content)
                             .font(.system(size: 12))
-                            .strikethrough(row.status == "completed" || row.status == "cancelled")
+                            .foregroundStyle(isDone ? palette.secondary : palette.text)
+                            .strikethrough(isDone)
                         HStack(spacing: 6) {
                             Text(todoStatusLabel(row.status))
                             if let todo = model.client.todos.first(where: { $0.id == row.id }) {
@@ -527,8 +596,8 @@ struct InspectorView: View {
                                 )
                             }
                         }
-                        .font(.system(size: 10))
-                        .foregroundStyle(palette.secondary)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(palette.tertiary)
                     }
                 }
             }
@@ -537,7 +606,7 @@ struct InspectorView: View {
                 entryCount: model.client.planEntries.count
             ) {
                 Text(l10n.t("Plan", "计划"))
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(palette.secondary)
                     .padding(.top, 4)
                 ForEach(model.client.planEntries) { entry in
@@ -554,7 +623,7 @@ struct InspectorView: View {
             }
             if !extraPlanMarkdown.isEmpty {
                 Text(extraPlanMarkdown)
-                    .font(.system(size: 11))
+                    .font(.system(size: 11.5))
                     .foregroundStyle(palette.secondary)
                     .textSelection(.enabled)
                     .lineLimit(12)
@@ -564,7 +633,7 @@ struct InspectorView: View {
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
                     .padding(8)
-                    .background(palette.chip, in: RoundedRectangle(cornerRadius: 8))
+                    .grokFieldChrome(cornerRadius: 8)
                 HStack(spacing: 6) {
                     Button(l10n.t("Approve", "批准")) {
                         Task { await model.client.approvePlan() }
@@ -582,7 +651,7 @@ struct InspectorView: View {
             }
             if !liveWorkItems.isEmpty {
                 Text(l10n.t("Now", "进行中"))
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(palette.secondary)
                     .padding(.top, checklist.isEmpty ? 0 : 4)
                 ForEach(liveWorkItems) { item in
@@ -591,7 +660,7 @@ struct InspectorView: View {
             }
             if !model.client.scheduledTasks.isEmpty {
                 Text(l10n.t("Loops", "循环任务"))
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(palette.secondary)
                     .padding(.top, 4)
                 ForEach(model.client.scheduledTasks) { task in
@@ -606,7 +675,7 @@ struct InspectorView: View {
                                 .lineLimit(2)
                             Text(task.id)
                                 .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(palette.secondary)
+                                .foregroundStyle(palette.tertiary)
                         }
                         Spacer()
                         Button(l10n.stop) {
@@ -614,13 +683,13 @@ struct InspectorView: View {
                         }
                         .buttonStyle(.plain)
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Color.orange)
+                        .foregroundStyle(palette.warning)
                     }
                 }
             }
             if !finishedSubagents.isEmpty {
                 Text(l10n.subagents)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(palette.secondary)
                     .padding(.top, 4)
                 ForEach(finishedSubagents) { agent in
@@ -637,11 +706,13 @@ struct InspectorView: View {
                                     .font(.system(size: 12))
                                     .lineLimit(2)
                                 Text([agent.isolation, agent.status].filter { !$0.isEmpty }.joined(separator: " · "))
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(palette.secondary)
+                                    .font(.system(size: 10.5))
+                                    .foregroundStyle(palette.tertiary)
                             }
                             Spacer()
                         }
+                        .padding(6)
+                        .grokHover(cornerRadius: 7)
                     }
                     .buttonStyle(.plain)
                 }
@@ -708,7 +779,7 @@ struct InspectorView: View {
     @ViewBuilder
     private func liveWorkRow(_ item: LiveWorkItem) -> some View {
         let row = HStack(alignment: .top, spacing: 6) {
-            RunningStatusIcon(active: true, idleSystemImage: "circle", color: .orange, size: 12)
+            RunningStatusIcon(active: true, idleSystemImage: "circle", color: palette.warning, size: 12)
                 .padding(.top, 2)
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.title)
@@ -728,25 +799,26 @@ struct InspectorView: View {
                             model.client.killTask(taskID)
                         }
                         .buttonStyle(.plain)
-                        .foregroundStyle(Color.orange)
+                        .foregroundStyle(palette.warning)
                     }
                 }
-                .font(.system(size: 10))
+                .font(.system(size: 10.5))
                 .foregroundStyle(palette.secondary)
             }
+            Spacer(minLength: 0)
         }
         if let agent = item.subagent {
             Button {
                 model.openSubagent(agent)
             } label: {
-                row
+                row.padding(6).grokHover(cornerRadius: 7)
             }
             .buttonStyle(.plain)
         } else if let sessionID = item.sessionID {
             Button {
                 _ = model.client.focusIfLoaded(sessionID)
             } label: {
-                row
+                row.padding(6).grokHover(cornerRadius: 7)
             }
             .buttonStyle(.plain)
         } else {
@@ -771,7 +843,6 @@ struct InspectorView: View {
         PlanSurface.keepsBody(entryCount: model.client.planEntries.count, markdown: model.client.planMarkdown)
     }
 
-    /// The checklist is the plan itself, so the section title stays "Plan" after approve.
     private var planIsChecklist: Bool {
         model.client.mode == .plan || (model.client.todos.isEmpty && !model.client.planEntries.isEmpty)
     }
@@ -793,8 +864,8 @@ struct InspectorView: View {
                                 .font(.system(size: 12, weight: .medium))
                             Spacer()
                             Text(event.blocked ? l10n.t("blocked", "已拦截") : l10n.t("ran", "已运行"))
-                                .font(.system(size: 10))
-                                .foregroundStyle(event.blocked ? Color.orange : palette.secondary)
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(event.blocked ? palette.warning : palette.secondary)
                         }
                         if !event.command.isEmpty {
                             Text(event.command)
@@ -811,7 +882,7 @@ struct InspectorView: View {
                         Text(hook.title)
                             .font(.system(size: 12, weight: .medium))
                         Text([hook.sourceKind, hook.pluginName, hook.matcher].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
-                            .font(.system(size: 10))
+                            .font(.system(size: 10.5))
                             .foregroundStyle(palette.secondary)
                     }
                 }
@@ -853,10 +924,10 @@ struct InspectorView: View {
 
     private func todoColor(_ status: String) -> Color {
         switch status {
-        case "completed": return .green
-        case "in_progress": return .orange
-        case "cancelled": return palette.secondary
-        default: return palette.secondary
+        case "completed": return palette.success
+        case "in_progress": return palette.warning
+        case "cancelled": return palette.tertiary
+        default: return palette.tertiary
         }
     }
 
@@ -879,13 +950,26 @@ struct InspectorView: View {
         VStack(alignment: .leading, spacing: 8) {
             paneHeader(.changes, title: l10n.changes) { EmptyView() }
             if model.workspace.isRepo {
-                Text("\(model.workspace.branch ?? "HEAD")  +\(model.workspace.insertions) / -\(model.workspace.deletions)")
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(palette.secondary)
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.triangle.branch")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(palette.tertiary)
+                    Text(model.workspace.branch ?? "HEAD")
+                        .font(.system(size: 11.5, weight: .medium, design: .monospaced))
+                        .foregroundStyle(palette.secondary)
+                    Spacer()
+                    Text("+\(model.workspace.insertions)")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundStyle(palette.success)
+                    Text("-\(model.workspace.deletions)")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundStyle(palette.danger)
+                }
             }
             if !model.client.gitStatusText.isEmpty {
                 Text(model.client.gitStatusText)
                     .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(palette.secondary)
                     .textSelection(.enabled)
                     .lineLimit(8)
             }
@@ -917,18 +1001,26 @@ struct InspectorView: View {
                         Button {
                             model.previewFile(url)
                         } label: {
-                            HStack {
+                            HStack(spacing: 6) {
+                                Image(systemName: "doc.text")
+                                    .font(.system(size: 10.5))
+                                    .foregroundStyle(palette.tertiary)
                                 Text(hunk.name)
+                                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                    .foregroundStyle(palette.text)
                                     .lineLimit(1)
-                                    .underline()
                                 Spacer()
                                 Text("+\(hunk.added)")
-                                    .foregroundStyle(.green)
+                                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                                    .foregroundStyle(palette.success)
                                 Text("-\(hunk.removed)")
-                                    .foregroundStyle(.red)
+                                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                                    .foregroundStyle(palette.danger)
                             }
-                            .font(.system(size: 12))
-                            .contentShape(Rectangle())
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .grokHover(cornerRadius: 7)
+                            .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                         }
                         .buttonStyle(.plain)
                         .help(hunk.path)
@@ -951,7 +1043,7 @@ struct InspectorView: View {
 
     private func sectionTitle(_ title: String) -> some View {
         Text(title)
-            .font(.system(size: 12, weight: .semibold))
+            .font(.system(size: 11.5, weight: .semibold))
             .foregroundStyle(palette.secondary)
     }
 
@@ -961,20 +1053,21 @@ struct InspectorView: View {
             Spacer(minLength: 4)
             extra()
             paneClose(pane)
+                .opacity(hoveredPane == pane ? 1 : 0)
+                .animation(.easeOut(duration: 0.12), value: hoveredPane == pane)
         }
     }
 
     private func paneClose(_ pane: InspectorPane) -> some View {
-        Button {
+        GrokIconButton(
+            systemImage: "xmark",
+            size: 18,
+            iconSize: 8.5,
+            cornerRadius: 5,
+            helpText: l10n.t("Hide this section", "关闭这个区块")
+        ) {
             model.hideInspectorPane(pane)
-        } label: {
-            Image(systemName: "xmark")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(palette.secondary)
-                .frame(width: 16, height: 16)
         }
-        .buttonStyle(.plain)
-        .help(l10n.t("Hide this section", "关闭这个区块"))
     }
 
     private func compactTokens(_ value: Int) -> String {
@@ -992,6 +1085,7 @@ struct InspectorPanelsMenu: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.palette) private var palette
     @Environment(\.l10n) private var l10n
+    @State private var hovering = false
 
     var body: some View {
         Menu {
@@ -1005,15 +1099,20 @@ struct InspectorPanelsMenu: View {
                 )
             }
         } label: {
-            Image(systemName: "ellipsis")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(palette.secondary)
-                .frame(width: 22, height: 22)
-                .contentShape(Rectangle())
+            Image(systemName: "slider.horizontal.3")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(hovering ? palette.text : palette.secondary)
+                .frame(width: 26, height: 26)
+                .background(
+                    hovering ? palette.hover : .clear,
+                    in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
+        .onHover { hovering = $0 }
         .help(l10n.t("Open or close sidebar tools", "打开或关闭右边栏里的功能"))
     }
 }
@@ -1049,29 +1148,46 @@ private struct DiffFileBlock: View {
         let url = ChatLinkDetector.resolve(file.path, baseDirectory: model.client.workingDirectory)?.url
             ?? URL(fileURLWithPath: file.path)
         VStack(alignment: .leading, spacing: 6) {
-            HStack {
+            HStack(spacing: 6) {
                 Button {
-                    DispatchQueue.main.async { expanded.toggle() }
+                    withAnimation(.easeOut(duration: 0.14)) { expanded.toggle() }
                 } label: {
                     Image(systemName: "chevron.down")
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(.system(size: 8.5, weight: .bold))
+                        .foregroundStyle(palette.tertiary)
                         .rotationEffect(.degrees(expanded ? 0 : -90))
+                        .frame(width: 14, height: 14)
                 }
                 .buttonStyle(.plain)
-                Button(file.name) {
+
+                Button {
                     model.previewFile(url)
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "doc.text")
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(palette.tertiary)
+                        Text(file.name)
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .foregroundStyle(palette.text)
+                            .lineLimit(1)
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .grokHover(cornerRadius: 6)
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(Color(nsColor: .linkColor))
                 .help(file.path)
                 .contextMenu { ChatLinkContextButtons(url: url) }
+
                 Spacer()
                 Text("+\(file.added)")
-                    .foregroundStyle(.green)
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundStyle(palette.success)
                 Text("-\(file.removed)")
-                    .foregroundStyle(.red)
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundStyle(palette.danger)
             }
-            .font(.system(size: 12))
             if expanded {
                 VStack(alignment: .leading, spacing: 1) {
                     ForEach(Array(file.lines.prefix(40).enumerated()), id: \.offset) { _, line in
@@ -1082,16 +1198,20 @@ private struct DiffFileBlock: View {
                                 .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.horizontal, 6)
-                                .padding(.vertical, 1)
+                                .padding(.vertical, 1.5)
                                 .background(background(for: line.kind), in: RoundedRectangle(cornerRadius: 3, style: .continuous))
                         }
                     }
                     if file.lines.count > 40 {
                         Text("+\(file.lines.count - 40)")
                             .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(palette.secondary)
+                            .foregroundStyle(palette.tertiary)
+                            .padding(.horizontal, 6)
                     }
                 }
+                .padding(4)
+                .background(palette.chip.opacity(0.6), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+
                 ChangeNoteField(
                     sessionID: model.client.sessionID ?? "",
                     path: file.path,
@@ -1104,8 +1224,8 @@ private struct DiffFileBlock: View {
 
     private func color(for kind: DiffLine.Kind) -> Color {
         switch kind {
-        case .added: return Color.green
-        case .removed: return Color.red
+        case .added: return palette.success
+        case .removed: return palette.danger
         case .header: return palette.secondary
         case .meta, .context: return palette.text
         }
@@ -1113,8 +1233,8 @@ private struct DiffFileBlock: View {
 
     private func background(for kind: DiffLine.Kind) -> Color {
         switch kind {
-        case .added: return Color.green.opacity(0.12)
-        case .removed: return Color.red.opacity(0.12)
+        case .added: return palette.success.opacity(0.12)
+        case .removed: return palette.danger.opacity(0.12)
         default: return .clear
         }
     }
@@ -1129,21 +1249,24 @@ struct ChangeNoteField: View {
     @Environment(\.palette) private var palette
     @Environment(\.l10n) private var l10n
     @State private var note = ""
+    @FocusState private var focused: Bool
 
     var body: some View {
         HStack(spacing: 6) {
             TextField(l10n.t("Comment on this change…", "对这里写一句…"), text: $note)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12))
+                .font(.system(size: 11.5))
+                .focused($focused)
                 .onSubmit(send)
             Button(l10n.t("Send", "发送"), action: send)
                 .buttonStyle(.plain)
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(canSend ? Color.orange : palette.secondary)
+                .foregroundStyle(canSend ? palette.text : palette.tertiary)
                 .disabled(!canSend)
         }
-        .padding(8)
-        .background(palette.input, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .padding(.horizontal, 9)
+        .padding(.vertical, 6.5)
+        .grokFieldChrome(cornerRadius: 8, focused: focused)
     }
 
     private var canSend: Bool {

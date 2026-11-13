@@ -6,6 +6,7 @@ struct DashboardView: View {
     @Environment(\.palette) private var palette
     @Environment(\.l10n) private var l10n
     @State private var dispatchDraft = ""
+    @FocusState private var dispatchFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -18,13 +19,20 @@ struct DashboardView: View {
 
             if rows.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(l10n.t("Nothing is running.", "现在没有进行中的任务。"))
-                        .font(.system(size: 15, weight: .medium))
+                    HStack(spacing: 8) {
+                        Image(systemName: "circle.hexagongrid")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(palette.secondary)
+                        Text(l10n.t("Nothing is running.", "现在没有进行中的任务。"))
+                            .font(.system(size: 14.5, weight: .medium))
+                    }
                     Text(l10n.t("Type a job above to start a new agent.", "在上面输入任务，派一个新 agent。"))
                         .font(.system(size: 13))
                         .foregroundStyle(palette.secondary)
                 }
-                .padding(.top, 8)
+                .padding(18)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .grokCard(cornerRadius: 14)
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
@@ -38,7 +46,7 @@ struct DashboardView: View {
             Spacer(minLength: 0)
         }
         .padding(32)
-        .frame(maxWidth: 760)
+        .frame(maxWidth: 780)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(palette.canvas)
         .onAppear { model.noteDashboardVisible() }
@@ -56,7 +64,7 @@ struct DashboardView: View {
     }
 
     private var dispatchBar: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .bottom, spacing: 10) {
                 TextField(
                     l10n.t("Dispatch a new agent…", "派一个新任务…"),
@@ -64,15 +72,16 @@ struct DashboardView: View {
                     axis: .vertical
                 )
                 .textFieldStyle(.plain)
-                .font(.system(size: 15))
+                .font(.system(size: 14.5))
                 .lineLimit(1...4)
+                .focused($dispatchFocused)
                 .onSubmit(dispatch)
 
                 Button(action: dispatch) {
                     Image(systemName: "arrow.up")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(canDispatch ? palette.sendGlyph : palette.secondary)
-                        .frame(width: 30, height: 30)
+                        .font(.system(size: 11.5, weight: .bold))
+                        .foregroundStyle(canDispatch ? palette.sendGlyph : palette.tertiary)
+                        .frame(width: 28, height: 28)
                         .background(canDispatch ? palette.send : palette.chip, in: Circle())
                 }
                 .buttonStyle(.plain)
@@ -97,25 +106,26 @@ struct DashboardView: View {
                     model.chooseDispatchDirectory()
                 }
             } label: {
-                HStack(spacing: 6) {
+                HStack(spacing: 5) {
                     Image(systemName: "folder")
+                        .font(.system(size: 11, weight: .medium))
                     Text(model.client.workingDirectory.lastPathComponent)
                     Image(systemName: "chevron.down")
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(.system(size: 8.5, weight: .bold))
                 }
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(palette.secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(palette.chip, in: Capsule())
             }
             .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
             .fixedSize()
             .help(model.client.workingDirectory.path)
         }
         .padding(14)
-        .background(palette.input, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(palette.hairline, lineWidth: 1)
-        )
+        .grokFieldChrome(cornerRadius: 16, focused: dispatchFocused)
     }
 
     private var canDispatch: Bool {
@@ -146,7 +156,7 @@ struct DashboardView: View {
             statusLine(
                 active: pending.error == nil,
                 symbol: pending.error == nil ? "circle" : "exclamationmark.circle",
-                tint: pending.error == nil ? palette.secondary : .orange,
+                tint: pending.error == nil ? palette.secondary : palette.warning,
                 title: pending.error == nil
                     ? l10n.t("Starting…", "正在开始…")
                     : l10n.t("Didn't start", "没发出去")
@@ -164,7 +174,7 @@ struct DashboardView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(palette.chip, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .grokCard(cornerRadius: 14)
     }
 
     private func liveCard(_ workspace: SessionWorkspace) -> some View {
@@ -178,7 +188,7 @@ struct DashboardView: View {
                         symbol: workspace.permission != nil || workspace.userQuestion != nil
                             ? "exclamationmark.circle"
                             : "checkmark.circle",
-                        tint: workspace.permission != nil || workspace.userQuestion != nil ? .orange : palette.secondary,
+                        tint: workspace.permission != nil || workspace.userQuestion != nil ? palette.warning : palette.secondary,
                         title: statusText(workspace),
                         trailing: workspace.mode.title(chinese: model.language.resolved() == .chinese)
                     )
@@ -198,9 +208,10 @@ struct DashboardView: View {
                             .foregroundStyle(palette.secondary)
                         Spacer()
                     }
-                    .font(.system(size: 13))
+                    .font(.system(size: 12.5))
                     .foregroundStyle(palette.text)
                 }
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
@@ -217,7 +228,7 @@ struct DashboardView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(palette.chip, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .grokCard(cornerRadius: 14, interactive: true)
     }
 
     private func unseenCard(_ turn: UnseenTurn) -> some View {
@@ -229,7 +240,7 @@ struct DashboardView: View {
                     statusLine(
                         active: false,
                         symbol: turn.failed ? "exclamationmark.circle" : "checkmark.circle",
-                        tint: turn.failed ? .orange : palette.secondary,
+                        tint: turn.failed ? palette.warning : palette.success,
                         title: turn.failed
                             ? l10n.t("Failed, not opened", "出错了，还没看")
                             : l10n.t("Finished, not opened", "跑完了，还没看")
@@ -240,6 +251,7 @@ struct DashboardView: View {
                         path: turn.cwd
                     )
                 }
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             ForEach(model.unseenHunks[turn.id] ?? []) { hunk in
@@ -253,7 +265,7 @@ struct DashboardView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(palette.chip, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .grokCard(cornerRadius: 14, interactive: true)
     }
 
     private func placeLine(folder: String, isolated: Bool) -> String {
@@ -274,13 +286,16 @@ struct DashboardView: View {
         HStack(spacing: 8) {
             RunningStatusIcon(active: active, idleSystemImage: symbol, color: tint, size: 12)
             Text(title)
-                .font(.system(size: 14, weight: .semibold))
+                .font(.system(size: 13.5, weight: .semibold))
                 .foregroundStyle(palette.text)
             Spacer()
             if let trailing {
                 Text(trailing)
-                    .font(.system(size: 12))
+                    .font(.system(size: 11.5, weight: .medium))
                     .foregroundStyle(palette.secondary)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2.5)
+                    .background(palette.chip, in: Capsule())
             }
         }
     }
@@ -296,8 +311,8 @@ struct DashboardView: View {
 
     private func repoLine(_ name: String, path: String) -> some View {
         Text(name)
-            .font(.system(size: 12))
-            .foregroundStyle(palette.secondary)
+            .font(.system(size: 11.5))
+            .foregroundStyle(palette.tertiary)
             .help(path)
     }
 

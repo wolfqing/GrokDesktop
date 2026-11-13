@@ -90,33 +90,68 @@ struct FirstRunView: View {
 
 struct GrokPrimaryButtonStyle: ButtonStyle {
     @Environment(\.palette) private var palette
+    @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
+        GrokPrimaryButtonBody(configuration: configuration, palette: palette, isEnabled: isEnabled)
+    }
+}
+
+private struct GrokPrimaryButtonBody: View {
+    let configuration: ButtonStyle.Configuration
+    let palette: Palette
+    let isEnabled: Bool
+    @State private var hovering = false
+
+    var body: some View {
         configuration.label
-            .font(.system(size: 13, weight: .semibold))
+            .font(.system(size: 12.5, weight: .semibold))
             .foregroundStyle(palette.sendGlyph)
             .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(palette.send, in: Capsule())
+            .padding(.vertical, 7)
+            .background(palette.send, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
             .scaleEffect(configuration.isPressed ? 0.97 : 1)
-            .opacity(configuration.isPressed ? 0.88 : 1)
+            .opacity(!isEnabled ? 0.40 : (configuration.isPressed ? 0.85 : (hovering ? 0.90 : 1)))
+            .onHover { hovering = $0 }
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            .animation(.easeOut(duration: 0.12), value: hovering)
     }
 }
 
 struct GrokSecondaryButtonStyle: ButtonStyle {
     @Environment(\.palette) private var palette
+    @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
+        GrokSecondaryButtonBody(configuration: configuration, palette: palette, isEnabled: isEnabled)
+    }
+}
+
+private struct GrokSecondaryButtonBody: View {
+    let configuration: ButtonStyle.Configuration
+    let palette: Palette
+    let isEnabled: Bool
+    @State private var hovering = false
+
+    var body: some View {
         configuration.label
-            .font(.system(size: 13, weight: .medium))
+            .font(.system(size: 12.5, weight: .medium))
             .foregroundStyle(palette.text)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(palette.chip, in: Capsule())
+            .padding(.horizontal, 13)
+            .padding(.vertical, 7)
+            .background(
+                hovering ? palette.selected : palette.chip,
+                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .stroke(hovering ? palette.borderStrong : palette.hairline, lineWidth: 1)
+            )
             .scaleEffect(configuration.isPressed ? 0.97 : 1)
-            .opacity(configuration.isPressed ? 0.88 : 1)
+            .opacity(!isEnabled ? 0.40 : (configuration.isPressed ? 0.86 : 1))
+            .onHover { hovering = $0 }
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            .animation(.easeOut(duration: 0.12), value: hovering)
     }
 }
 

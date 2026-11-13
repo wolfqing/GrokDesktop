@@ -16,6 +16,7 @@ struct ModelEffortPicker: View {
     @State private var page: Page = .home
     @State private var showAdvanced = false
     @State private var hovered: String?
+    @State private var chipHover = false
 
     private enum Page {
         case home
@@ -44,22 +45,25 @@ struct ModelEffortPicker: View {
         Button {
             isOpen.toggle()
         } label: {
-            HStack(spacing: 6) {
+            HStack(spacing: 5.5) {
                 Text(ModelCatalog.shortTitle(for: modelID, choices: choices))
+                    .foregroundStyle(palette.text)
                 Text(effort.title(chinese: chinese))
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(palette.secondary)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8.5, weight: .bold))
+                    .foregroundStyle(palette.tertiary)
             }
-            .font(.system(size: 13, weight: .medium))
-            .foregroundStyle(palette.text)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .background(palette.chip, in: Capsule())
+            .font(.system(size: 12, weight: .medium))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(chipHover || isOpen ? palette.selected : palette.chip, in: Capsule())
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .fixedSize()
+        .onHover { chipHover = $0 }
+        .animation(.easeOut(duration: 0.12), value: chipHover)
         .help("\(ModelCatalog.name(for: modelID, choices: choices)) · \(effort.title(chinese: chinese))")
     }
 

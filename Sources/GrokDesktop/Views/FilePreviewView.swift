@@ -34,41 +34,44 @@ struct FilePreviewPane: View {
     }
 
     private func chrome(_ preview: FilePreviewDocument) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             Image(systemName: icon(for: preview.kind))
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(palette.secondary)
             Text(preview.name)
                 .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(palette.text)
                 .lineLimit(1)
                 .help(preview.url.path)
             Spacer(minLength: 4)
-            Button {
+            GrokIconButton(
+                systemImage: "folder",
+                size: 24,
+                iconSize: 11,
+                cornerRadius: 6,
+                helpText: l10n.t("Show in Finder", "在 Finder 中显示")
+            ) {
                 ChatLinkActions.reveal(preview.url)
-            } label: {
-                Image(systemName: "folder")
-                    .font(.system(size: 11, weight: .medium))
             }
-            .buttonStyle(.plain)
-            .help(l10n.t("Show in Finder", "在 Finder 中显示"))
-            Button {
+            GrokIconButton(
+                systemImage: "arrow.up.forward",
+                size: 24,
+                iconSize: 11,
+                cornerRadius: 6,
+                helpText: l10n.t("Open", "打开")
+            ) {
                 ChatLinkActions.open(preview.url)
-            } label: {
-                Image(systemName: "arrow.up.forward")
-                    .font(.system(size: 11, weight: .medium))
             }
-            .buttonStyle(.plain)
-            .help(l10n.t("Open", "打开"))
-            Button {
+            GrokIconButton(
+                systemImage: "xmark",
+                size: 24,
+                iconSize: 10.5,
+                cornerRadius: 6,
+                helpText: l10n.t("Close preview", "关闭预览")
+            ) {
                 model.clearPreview()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .semibold))
             }
-            .buttonStyle(.plain)
-            .help(l10n.t("Close preview", "关闭预览"))
         }
-        .foregroundStyle(palette.secondary)
     }
 
     @ViewBuilder
@@ -83,8 +86,12 @@ struct FilePreviewPane: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(palette.chip, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(palette.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(palette.hairline, lineWidth: 1)
+        )
     }
 
     @ViewBuilder

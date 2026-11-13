@@ -30,7 +30,8 @@ struct AppUpdateBanner: View {
         if let notice = model.appUpdateNotice {
             HStack(spacing: 10) {
                 Image(systemName: symbol(for: notice))
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(symbolColor(for: notice))
                 Text(message(for: notice))
                     .font(.system(size: 12, weight: .medium))
                     .lineLimit(2)
@@ -46,14 +47,15 @@ struct AppUpdateBanner: View {
                         model.checkAppUpdate()
                     }
                     .buttonStyle(GrokSecondaryButtonStyle())
-                    Button {
+                    GrokIconButton(
+                        systemImage: "xmark",
+                        size: 24,
+                        iconSize: 10.5,
+                        cornerRadius: 6,
+                        helpText: l10n.t("Dismiss", "关闭")
+                    ) {
                         model.appUpdateNotice = nil
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 11, weight: .semibold))
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(palette.secondary)
                 case .moveToApplications:
                     Button(l10n.t("Show in Finder", "在访达中显示")) {
                         if let url = RunningApp.bundleURL() {
@@ -72,6 +74,15 @@ struct AppUpdateBanner: View {
             .overlay(alignment: .bottom) {
                 Rectangle().fill(palette.hairline).frame(height: 1)
             }
+        }
+    }
+
+    private func symbolColor(for notice: AppUpdateNotice) -> Color {
+        switch notice {
+        case .downloading: return palette.info
+        case .ready: return palette.success
+        case .moveToApplications: return palette.warning
+        case .failed: return palette.danger
         }
     }
 

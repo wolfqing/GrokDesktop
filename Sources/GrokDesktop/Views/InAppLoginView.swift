@@ -18,17 +18,25 @@ struct InAppLoginView: View {
                     Spacer()
                     if let code = model.client.authChallenge?.userCode, !code.isEmpty {
                         Text(code)
-                            .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(palette.secondary)
+                            .font(.system(size: 12.5, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(palette.text)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(palette.chip, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                     }
                     Button(l10n.t("System browser", "系统浏览器")) {
                         model.openLoginInSystemBrowser()
                     }
                     .buttonStyle(GrokSecondaryButtonStyle())
-                    Button(l10n.t("Close", "关闭")) {
+                    GrokIconButton(
+                        systemImage: "xmark",
+                        size: 28,
+                        iconSize: 11.5,
+                        cornerRadius: 7,
+                        helpText: l10n.t("Close", "关闭")
+                    ) {
                         model.dismissInAppLogin()
                     }
-                    .buttonStyle(GrokSecondaryButtonStyle())
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
@@ -48,11 +56,14 @@ struct InAppLoginView: View {
             .frame(minWidth: 720, minHeight: 560)
             .frame(maxWidth: 920, maxHeight: 680)
             .background(palette.elevated, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(palette.hairline)
+                    .stroke(palette.borderStrong, lineWidth: 1)
             )
+            .shadow(color: .black.opacity(palette.isDark ? 0.52 : 0.16), radius: 28, y: 12)
         }
+        .onExitCommand { model.dismissInAppLogin() }
     }
 }
 

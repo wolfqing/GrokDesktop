@@ -7,6 +7,12 @@ struct GrokDesktopApp: App {
     @Environment(\.colorScheme) private var systemScheme
 
     init() {
+        if DemoStudio.shouldExitAfterScreenshot, let url = DemoStudio.screenshotURL {
+            _ = NSApplication.shared
+            let ok = DemoStudio.writeScreenshot(to: url)
+            fputs(ok ? "Wrote demo screenshot \(url.path)\n" : "Failed to write demo screenshot\n", stderr)
+            exit(ok ? 0 : 1)
+        }
         AppUpdateLaunch.installStagedAndRelaunchIfNeeded()
         NSApplication.shared.setActivationPolicy(.regular)
     }
