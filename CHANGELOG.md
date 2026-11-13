@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.36 - 2026-11-13
+
+Text stays in place when the window changes size, and the composer scrolls.
+
+- Dragging the window no longer paints a reply on top of itself.
+- With a picture attached, the draft keeps its lines. After eight lines, the box scrolls.
+
 ## 0.1.35 - 2026-11-12
 
 Cleaner surfaces, hover states, and right-aligned sidebar controls.

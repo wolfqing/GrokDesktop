@@ -106,15 +106,21 @@ private struct LinkedTextNSView: NSViewRepresentable {
         view.displaysLinkToolTips = true
         view.textContainerInset = .zero
         view.textContainer?.lineFragmentPadding = 0
-        view.textContainer?.widthTracksTextView = fillsWidth
+        view.textContainer?.widthTracksTextView = false
         view.textContainer?.heightTracksTextView = false
+        view.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
         view.isHorizontallyResizable = false
         view.isVerticallyResizable = true
         view.minSize = .zero
         view.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        view.autoresizingMask = [.width]
+        view.clipsToBounds = true
+        view.wantsLayer = true
+        view.layerContentsRedrawPolicy = .duringViewResize
         view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         view.delegate = context.coordinator
         view.chinese = chinese
+        view.tracksBoundsWidth = fillsWidth
         apply(to: view)
         return view
     }
@@ -122,7 +128,9 @@ private struct LinkedTextNSView: NSViewRepresentable {
     func updateNSView(_ view: ChatTextView, context: Context) {
         view.chinese = chinese
         view.delegate = context.coordinator
+        view.tracksBoundsWidth = fillsWidth
         apply(to: view)
+        view.reflowToBounds()
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: ChatTextView, context: Context) -> CGSize? {
@@ -131,18 +139,18 @@ private struct LinkedTextNSView: NSViewRepresentable {
             ? (proposal.width ?? maxContentWidth)
             : min(proposal.width ?? maxContentWidth, maxContentWidth)
         let width = max(proposedWidth, 40)
-        nsView.textContainer?.widthTracksTextView = fillsWidth
-        nsView.textContainer?.size = NSSize(width: width, height: .greatestFiniteMagnitude)
-        nsView.layoutManager?.ensureLayout(for: nsView.textContainer!)
-        guard let container = nsView.textContainer, let manager = nsView.layoutManager else {
-            return CGSize(width: width, height: fontSize + 4)
+        // Do not write this width onto the live text container. SwiftUI probes
+        // several widths during a drag, and a half-applied wrap is what leaves
+        // the previous lines sitting under the new ones.
+        nsView.tracksBoundsWidth = fillsWidth
+        if !fillsWidth {
+            nsView.lockedWrapWidth = width
         }
-        let used = manager.usedRect(for: container)
-        let height = max(ceil(used.height), fontSize + 2)
+        let measured = nsView.measuredSize(fittingWidth: width)
         if fillsWidth {
-            return CGSize(width: width, height: height)
+            return CGSize(width: width, height: measured.height)
         }
-        return CGSize(width: min(width, max(ceil(used.width + 2), 12)), height: height)
+        return CGSize(width: min(width, measured.width), height: measured.height)
     }
 
     private func apply(to view: ChatTextView) {
@@ -254,15 +262,110 @@ private struct LinkedTextNSView: NSViewRepresentable {
 final class ChatTextView: NSTextView {
     var chinese = false
     var appliedFingerprint = ""
+    /// Assistant prose follows the view width. A user bubble keeps the width it was measured at.
+    var tracksBoundsWidth = true
+    var lockedWrapWidth: CGFloat = 0
     private var mouseDownPoint: NSPoint?
+    private var measuring = false
 
     override var intrinsicContentSize: NSSize {
-        guard let container = textContainer, let manager = layoutManager else {
+        guard let container = textContainer, let manager = layoutManager, bounds.width > 1 else {
             return NSSize(width: NSView.noIntrinsicMetric, height: 20)
         }
         manager.ensureLayout(for: container)
         let used = manager.usedRect(for: container)
-        return NSSize(width: NSView.noIntrinsicMetric, height: ceil(used.height))
+        return NSSize(width: NSView.noIntrinsicMetric, height: max(ceil(used.height), 20))
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        let widthChanged = abs(newSize.width - frame.width) > 0.5
+        super.setFrameSize(newSize)
+        guard widthChanged else { return }
+        reflowToBounds()
+        // SwiftUI is already measuring this drag. Invalidating here re-enters layout.
+        if !inLiveResize {
+            invalidateIntrinsicContentSize()
+        } else {
+            needsDisplay = true
+        }
+    }
+
+    override func layout() {
+        super.layout()
+        reflowToBounds()
+    }
+
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        wantsLayer = true
+        layerContentsRedrawPolicy = .duringViewResize
+        clipsToBounds = true
+        superview?.layerContentsRedrawPolicy = .duringViewResize
+    }
+
+    override func viewDidEndLiveResize() {
+        super.viewDidEndLiveResize()
+        reflowToBounds()
+        invalidateIntrinsicContentSize()
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        if inLiveResize, let context = NSGraphicsContext.current {
+            context.saveGraphicsState()
+            context.compositingOperation = .copy
+            NSColor.clear.setFill()
+            dirtyRect.fill()
+            context.restoreGraphicsState()
+        }
+        super.draw(dirtyRect)
+    }
+
+    /// Lays the visible text out at the width it will actually draw. Skips the work when that width is unchanged.
+    func reflowToBounds() {
+        guard let container = textContainer, let manager = layoutManager else { return }
+        let target = tracksBoundsWidth ? bounds.width - textContainerInset.width * 2 : lockedWrapWidth
+        guard target > 1, abs(container.containerSize.width - target) > 0.5 else { return }
+        container.containerSize = NSSize(width: target, height: CGFloat.greatestFiniteMagnitude)
+        let length = textStorage?.length ?? 0
+        if length > 0 {
+            manager.invalidateLayout(
+                forCharacterRange: NSRange(location: 0, length: length),
+                actualCharacterRange: nil
+            )
+        }
+        manager.ensureLayout(for: container)
+    }
+
+    /// Height and width for `width`, without touching the line fragments currently on screen.
+    func measuredSize(fittingWidth width: CGFloat) -> CGSize {
+        let usable = max(width, 1)
+        let minHeight = (font?.pointSize ?? 16) + 2
+        guard let storage = textStorage, storage.length > 0 else {
+            return CGSize(width: 12, height: minHeight)
+        }
+        if measuring {
+            return CGSize(width: usable, height: minHeight)
+        }
+        if let container = textContainer,
+           let manager = layoutManager,
+           container.containerSize.width > 1,
+           abs(container.containerSize.width - usable) < 0.5 {
+            manager.ensureLayout(for: container)
+            let used = manager.usedRect(for: container)
+            return CGSize(width: max(ceil(used.width), 12), height: max(ceil(used.height), minHeight))
+        }
+        measuring = true
+        defer { measuring = false }
+        let measureStorage = NSTextStorage(attributedString: storage)
+        let container = NSTextContainer(size: NSSize(width: usable, height: CGFloat.greatestFiniteMagnitude))
+        container.lineFragmentPadding = textContainer?.lineFragmentPadding ?? 0
+        let manager = NSLayoutManager()
+        manager.addTextContainer(container)
+        measureStorage.addLayoutManager(manager)
+        manager.ensureLayout(for: container)
+        let used = manager.usedRect(for: container)
+        return CGSize(width: max(ceil(used.width), 12), height: max(ceil(used.height), minHeight))
     }
 
     override func mouseDown(with event: NSEvent) {

@@ -42,32 +42,28 @@ struct ComposerView: View {
                                 }
                             }
                         }
+                        .frame(height: 72)
                     }
-                    TextField(composerPlaceholder, text: $model.draft, axis: .vertical)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 14))
-                        .lineLimit(1...8)
-                        .focused($editorFocused)
-                        .onSubmit {
-                            let modifiers = NSEvent.modifierFlags
-                            if model.requireCmdEnter && !modifiers.contains(.command) && !modifiers.contains(.control) {
-                                model.draft += "\n"
-                            } else if modifiers.contains(.shift) {
-                                model.draft += "\n"
-                            } else if model.client.isTurnRunning && canSend && (modifiers.contains(.command) || modifiers.contains(.control)) {
-                                submit(forceNow: true)
-                            } else {
-                                submit()
-                            }
+                    PromptEditor(
+                        text: $model.draft,
+                        placeholder: composerPlaceholder,
+                        fontSize: 14,
+                        minLines: 1,
+                        maxLines: 8,
+                        prefersNewline: composerPrefersNewline,
+                        onImagePaste: pasteComposerImage,
+                        onFocusChange: { editorFocused = $0 },
+                        onSubmit: submitFromEditor
+                    )
+                    .layoutPriority(1)
+                    .onChange(of: model.draft) { _, value in
+                        if model.suppressSuggest {
+                            model.suppressSuggest = false
+                            return
                         }
-                        .onChange(of: model.draft) { _, value in
-                            if model.suppressSuggest {
-                                model.suppressSuggest = false
-                                return
-                            }
-                            model.showPalette = value.hasPrefix("/") && !value.contains(where: \.isWhitespace)
-                            model.updateMentions(from: value)
-                        }
+                        model.showPalette = value.hasPrefix("/") && !value.contains(where: \.isWhitespace)
+                        model.updateMentions(from: value)
+                    }
                     if !speech.status.isEmpty {
                         Text(speech.status)
                             .font(.system(size: 11))
@@ -527,6 +523,28 @@ struct ComposerView: View {
         guard !base.isEmpty else { return spoken }
         if base.last?.isWhitespace == true { return base + spoken }
         return base + " " + spoken
+    }
+
+    /// Plain Return inserts a line when the setting asks for Cmd-Return to send.
+    private func composerPrefersNewline() -> Bool {
+        let flags = NSEvent.modifierFlags
+        if flags.contains(.shift) { return true }
+        return model.requireCmdEnter && !flags.contains(.command) && !flags.contains(.control)
+    }
+
+    /// Image data on the pasteboard becomes an attachment. A text paste falls through.
+    private func pasteComposerImage() -> Bool {
+        guard !AppModel.clipboardAttachmentURLs().isEmpty else { return false }
+        model.pasteAttachments()
+        return true
+    }
+
+    private func submitFromEditor() {
+        let flags = NSEvent.modifierFlags
+        let force = model.client.isTurnRunning
+            && canSend
+            && (flags.contains(.command) || flags.contains(.control))
+        submit(forceNow: force)
     }
 
     private func submit(forceNow: Bool = false) {

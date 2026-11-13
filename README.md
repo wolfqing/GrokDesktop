@@ -22,7 +22,9 @@ Community project. Not an official xAI / SpaceXAI product.
 
 ## Install
 
-**Download:** [Grok-Desktop-0.1.35.zip](https://github.com/wolfqing/GrokDesktop/releases/download/v0.1.35/Grok-Desktop-0.1.35.zip) · [All releases](https://github.com/wolfqing/GrokDesktop/releases) · [Changelog](CHANGELOG.md)
+**Download:** [Grok-Desktop-0.1.36.zip](https://github.com/wolfqing/GrokDesktop/releases/download/v0.1.36/Grok-Desktop-0.1.36.zip) · [All releases](https://github.com/wolfqing/GrokDesktop/releases) · [Changelog](CHANGELOG.md)
+
+**From 0.1.35.** Dragging the window no longer stacks a reply on top of itself. With a picture attached, the draft keeps its lines and scrolls after eight.
 
 **From 0.1.34.** Changes, Preview, Terminal, and Aside sit on the right next to the inspector toggle (collapsing to icons when narrow). Layered Dark and Light surface tokens, 1px hairline borders, focus rings, semantic status badges, and hover micro-interactions refine the workspace, Markdown code blocks, composer, and overlay sheets. When no single tool is pinned, the right sidebar shows live overview cards for turn status, context, tasks, agent commands, diffs, and hooks.
 

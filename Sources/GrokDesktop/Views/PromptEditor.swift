@@ -14,6 +14,11 @@ struct PromptEditor: View {
     var fontSize: CGFloat = 14
     var minLines: Int = 1
     var maxLines: Int = 4
+    /// Return true to insert a newline instead of submitting. Shift-Return always inserts a newline.
+    var prefersNewline: () -> Bool = { false }
+    /// Return true when the paste was consumed, for example an image attachment.
+    var onImagePaste: () -> Bool = { false }
+    var onFocusChange: (Bool) -> Void = { _ in }
     var onSubmit: () -> Void
 
     @Environment(\.palette) private var palette
@@ -30,6 +35,9 @@ struct PromptEditor: View {
             placeholderColor: NSColor(palette.secondary),
             minLines: minLines,
             maxLines: maxLines,
+            prefersNewline: prefersNewline,
+            onImagePaste: onImagePaste,
+            onFocusChange: onFocusChange,
             onSubmit: onSubmit
         )
         .frame(maxWidth: .infinity, minHeight: minHeight, maxHeight: maxHeight, alignment: .topLeading)
@@ -45,10 +53,13 @@ private struct PromptEditorView: NSViewRepresentable {
     var placeholderColor: NSColor
     var minLines: Int
     var maxLines: Int
+    var prefersNewline: () -> Bool
+    var onImagePaste: () -> Bool
+    var onFocusChange: (Bool) -> Void
     var onSubmit: () -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text, onSubmit: onSubmit)
+        Coordinator(text: $text, prefersNewline: prefersNewline, onSubmit: onSubmit)
     }
 
     func makeNSView(context: Context) -> PromptScrollView {
@@ -105,6 +116,11 @@ private struct PromptEditorView: NSViewRepresentable {
         textView.focusRingType = .none
         textView.insertionPointColor = textColor
         textView.string = text
+        textView.wantsLayer = true
+        textView.layerContentsRedrawPolicy = .duringViewResize
+        textView.clipsToBounds = true
+        textView.imagePaste = onImagePaste
+        textView.onFocusChange = onFocusChange
 
         scroll.documentView = textView
         context.coordinator.scroll = scroll
@@ -114,6 +130,7 @@ private struct PromptEditorView: NSViewRepresentable {
     func updateNSView(_ scroll: PromptScrollView, context: Context) {
         context.coordinator.text = $text
         context.coordinator.onSubmit = onSubmit
+        context.coordinator.prefersNewline = prefersNewline
         let font = NSFont.systemFont(ofSize: fontSize)
         scroll.lineMetrics = PromptLineMetrics(font: font, minLines: minLines, maxLines: maxLines)
         guard let textView = scroll.documentView as? PromptTextView else { return }
@@ -122,11 +139,21 @@ private struct PromptEditorView: NSViewRepresentable {
         textView.placeholder = placeholder
         textView.placeholderColor = placeholderColor
         textView.insertionPointColor = textColor
+        textView.imagePaste = onImagePaste
+        textView.onFocusChange = onFocusChange
+        textView.wantsLayer = true
+        textView.layerContentsRedrawPolicy = .duringViewResize
         if !textView.hasMarkedText(), textView.string != text {
+            let previous = textView.string as NSString
             let selected = textView.selectedRange()
+            let wasAtEnd = selected.location >= previous.length
             textView.string = text
             let end = (text as NSString).length
-            textView.setSelectedRange(NSRange(location: min(selected.location, end), length: 0))
+            let caret = wasAtEnd ? end : min(selected.location, end)
+            textView.setSelectedRange(NSRange(location: caret, length: 0))
+            if wasAtEnd {
+                textView.scrollRangeToVisible(NSRange(location: caret, length: 0))
+            }
         }
         textView.needsDisplay = true
         scroll.invalidateIntrinsicContentSize()
@@ -141,11 +168,13 @@ private struct PromptEditorView: NSViewRepresentable {
 
     final class Coordinator: NSObject, NSTextViewDelegate {
         var text: Binding<String>
+        var prefersNewline: () -> Bool
         var onSubmit: () -> Void
         weak var scroll: PromptScrollView?
 
-        init(text: Binding<String>, onSubmit: @escaping () -> Void) {
+        init(text: Binding<String>, prefersNewline: @escaping () -> Bool, onSubmit: @escaping () -> Void) {
             self.text = text
+            self.prefersNewline = prefersNewline
             self.onSubmit = onSubmit
         }
 
@@ -163,7 +192,8 @@ private struct PromptEditorView: NSViewRepresentable {
         func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
             if commandSelector == #selector(NSResponder.insertNewline(_:)) {
                 if textView.hasMarkedText() { return false }
-                if NSApp.currentEvent?.modifierFlags.contains(.shift) == true {
+                let flags = NSApp.currentEvent?.modifierFlags ?? []
+                if flags.contains(.shift) || prefersNewline() {
                     textView.insertNewlineIgnoringFieldEditor(nil)
                     return true
                 }
@@ -215,7 +245,16 @@ private final class PromptScrollView: NSScrollView {
         if abs(textView.frame.width - usable) > 0.5 {
             textView.frame.size.width = usable
         }
-        container.containerSize = NSSize(width: usable, height: CGFloat.greatestFiniteMagnitude)
+        if abs(container.containerSize.width - usable) > 0.5 {
+            container.containerSize = NSSize(width: usable, height: CGFloat.greatestFiniteMagnitude)
+            let length = textView.textStorage?.length ?? 0
+            if length > 0 {
+                manager.invalidateLayout(
+                    forCharacterRange: NSRange(location: 0, length: length),
+                    actualCharacterRange: nil
+                )
+            }
+        }
         manager.ensureLayout(for: container)
         let used = manager.usedRect(for: container)
         let inset = textView.textContainerInset.height * 2
@@ -234,7 +273,9 @@ private final class PromptScrollView: NSScrollView {
     override func scrollWheel(with event: NSEvent) {
         let visible = contentView.bounds.height
         let content = documentView?.bounds.height ?? 0
-        if content > visible + 0.5 {
+        let overflows = content > visible + 0.5
+        verticalScrollElasticity = overflows ? .automatic : .none
+        if overflows {
             super.scrollWheel(with: event)
         } else {
             nextResponder?.scrollWheel(with: event)
@@ -245,16 +286,38 @@ private final class PromptScrollView: NSScrollView {
 private final class PromptTextView: NSTextView {
     var placeholder = ""
     var placeholderColor: NSColor = .placeholderTextColor
+    var imagePaste: () -> Bool = { false }
+    var onFocusChange: (Bool) -> Void = { _ in }
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted { onFocusChange(true) }
+        return accepted
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        if resigned { onFocusChange(false) }
+        return resigned
+    }
 
     override var intrinsicContentSize: NSSize {
         enclosingScrollView?.intrinsicContentSize ?? super.intrinsicContentSize
     }
 
     override func paste(_ sender: Any?) {
+        if imagePaste() { return }
         pasteAsPlainText(sender)
     }
 
     override func draw(_ dirtyRect: NSRect) {
+        if inLiveResize, let context = NSGraphicsContext.current {
+            context.saveGraphicsState()
+            context.compositingOperation = .copy
+            NSColor.clear.setFill()
+            dirtyRect.fill()
+            context.restoreGraphicsState()
+        }
         super.draw(dirtyRect)
         guard string.isEmpty, !hasMarkedText(), !placeholder.isEmpty else { return }
         let font = self.font ?? NSFont.systemFont(ofSize: 14)
