@@ -26,10 +26,27 @@ enum SemanticLanguage: String {
 }
 
 struct L10n {
-    var language: SemanticLanguage
+    var localeID: String
+
+    init(language: SemanticLanguage) {
+        localeID = language == .chinese ? "zh-Hans" : "en"
+    }
+
+    init(localeID: String) {
+        self.localeID = localeID
+    }
+
+    var language: SemanticLanguage {
+        localeID == "zh-Hans" || localeID == "zh-Hant" ? .chinese : .english
+    }
 
     func t(_ en: String, _ zh: String) -> String {
-        language == .chinese ? zh : en
+        PhraseBook.translate(en, zh: zh, locale: localeID)
+    }
+
+    func adapt(_ text: String) -> String {
+        guard localeID == "zh-Hant" else { return text }
+        return text.applyingTransform(StringTransform("Hans-Hant"), reverse: false) ?? text
     }
 
     var search: String { t("Search", "搜索") }

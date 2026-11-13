@@ -1,3 +1,4 @@
+import GrokDesktopCore
 import SwiftUI
 
 struct FirstRunView: View {
@@ -17,6 +18,19 @@ struct FirstRunView: View {
                 .frame(maxWidth: 460)
 
             if reason == .missingCLI {
+                Text(model.shell(.firstRunTitle))
+                    .font(.system(size: 18, weight: .semibold))
+                Text(model.shell(.firstRunBody))
+                    .font(.system(size: 13))
+                    .foregroundStyle(palette.secondary)
+                    .multilineTextAlignment(.center)
+                TextField(l10n.t("Path to grok", "grok 的路径"), text: $model.manualGrokPath)
+                    .textFieldStyle(.plain)
+                    .padding(10)
+                    .frame(maxWidth: 420)
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.hairline))
+                Button(l10n.t("Use this binary", "使用这个程序")) { model.saveManualBinary() }
+                    .buttonStyle(GrokSecondaryButtonStyle())
                 Text("curl -fsSL https://x.ai/cli/install.sh | bash")
                     .font(.system(size: 13, design: .monospaced))
                     .padding(12)
@@ -73,10 +87,7 @@ struct FirstRunView: View {
     private var message: String {
         switch reason {
         case .missingCLI:
-            return l10n.t(
-                "The grok CLI was not found. Install official Grok Build, sign in, then reopen this app.",
-                "本机没有找到 grok CLI。先安装官方 Grok Build，登录后再打开这个应用。"
-            )
+            return model.shell(.errorCLI)
         case .unsigned:
             return l10n.t(
                 "No grok.com session or XAI_API_KEY. Sign in with grok login, or use the ACP login URL.",

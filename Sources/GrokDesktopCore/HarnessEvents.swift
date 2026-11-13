@@ -46,6 +46,9 @@ public struct HookEvent: Identifiable, Hashable, Sendable {
     public var durationMs: Int
     public var output: String
     public var timestamp: Date?
+    /// How many identical runs this row stands for. A tool hook can fire on every call.
+    public var count: Int
+    public var failed: Bool
 
     public init(
         id: String,
@@ -54,7 +57,9 @@ public struct HookEvent: Identifiable, Hashable, Sendable {
         blocked: Bool = false,
         durationMs: Int = 0,
         output: String = "",
-        timestamp: Date? = nil
+        timestamp: Date? = nil,
+        count: Int = 1,
+        failed: Bool = false
     ) {
         self.id = id
         self.event = event
@@ -63,6 +68,8 @@ public struct HookEvent: Identifiable, Hashable, Sendable {
         self.durationMs = durationMs
         self.output = output
         self.timestamp = timestamp
+        self.count = max(count, 1)
+        self.failed = failed
     }
 
     public var elapsed: TimeInterval? {
@@ -140,27 +147,83 @@ public enum HarnessEvents {
     }
 
     public static func hookEvent(from update: SessionUpdate) -> HookEvent {
+        hookEvents(from: update).first ?? HookEvent(id: UUID().uuidString, event: "hook")
+    }
+
+    /// One row per run. Grok reports `event_name` plus a `runs` array, not a single command.
+    public static func hookEvents(from update: SessionUpdate) -> [HookEvent] {
         let raw = update.raw
-        let event = raw["event"] as? String
-            ?? raw["hook_event_name"] as? String
-            ?? raw["hookEvent"] as? String
-            ?? update.title
-        let command = raw["command"] as? String ?? raw["target"] as? String ?? update.text
+        let event = eventName(in: raw, title: update.title)
+        if let runs = raw["runs"] as? [[String: Any]], !runs.isEmpty {
+            return runs.map { run in
+                let status = run["status"] as? [String: Any] ?? [:]
+                let statusText = (status["status"] as? String ?? "").lowercased()
+                let name = shortHookName(run["name"] as? String ?? "")
+                let blocked = (run["blocked"] as? Bool ?? false)
+                    || statusText == "blocked"
+                    || statusText == "deny"
+                    || statusText == "denied"
+                let failed = statusText == "error" || statusText == "failed"
+                let elapsed = status["elapsed_ms"] as? Int ?? status["duration_ms"] as? Int ?? 0
+                return HookEvent(
+                    id: groupID(event: event, name: name, blocked: blocked, failed: failed),
+                    event: event,
+                    command: name,
+                    blocked: blocked,
+                    durationMs: elapsed,
+                    output: String(((status["error"] as? String) ?? (run["output"] as? String) ?? "").prefix(240)),
+                    timestamp: update.timestamp,
+                    failed: failed
+                )
+            }
+        }
+        let command = shortHookName(raw["command"] as? String ?? raw["target"] as? String ?? update.text)
         let blocked = (raw["blocked"] as? Bool)
             ?? (raw["deny"] as? Bool)
             ?? ((raw["decision"] as? String)?.lowercased() == "deny")
         let duration = raw["duration_ms"] as? Int
             ?? raw["durationMs"] as? Int
             ?? 0
-        return HookEvent(
-            id: raw["id"] as? String ?? UUID().uuidString,
-            event: event.isEmpty ? "hook" : event,
+        return [HookEvent(
+            id: raw["id"] as? String ?? groupID(event: event, name: command, blocked: blocked, failed: false),
+            event: event,
             command: command,
             blocked: blocked,
             durationMs: duration,
             output: String((raw["output"] as? String ?? update.text).prefix(240)),
             timestamp: update.timestamp
-        )
+        )]
+    }
+
+    /// Problems first, then the hooks that simply ran. A repeated success stays one row.
+    public static func hookRows(_ events: [HookEvent], limit: Int = 4) -> [HookEvent] {
+        let problems = events.filter { $0.blocked || $0.failed }
+        let quiet = events.filter { !$0.blocked && !$0.failed }
+        return Array((problems + quiet).prefix(max(limit, 0)))
+    }
+
+    public static func shortHookName(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        let head = trimmed.split(separator: ":", maxSplits: 1).first.map(String.init) ?? trimmed
+        let parts = head.split(separator: "/").map(String.init)
+        if head.hasPrefix("plugin/"), parts.count >= 2 { return parts[1] }
+        if head.hasPrefix("global/"), parts.count >= 2 { return parts[1] }
+        return head
+    }
+
+    private static func eventName(in raw: [String: Any], title: String) -> String {
+        let name = (raw["event_name"] as? String)
+            ?? (raw["event"] as? String)
+            ?? (raw["hook_event_name"] as? String)
+            ?? (raw["hookEvent"] as? String)
+            ?? title
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "hook" : trimmed
+    }
+
+    private static func groupID(event: String, name: String, blocked: Bool, failed: Bool) -> String {
+        "\(event)|\(name)|\(blocked)|\(failed)"
     }
 
     public static func checkpoint(from update: SessionUpdate) -> CompactionCheckpoint {

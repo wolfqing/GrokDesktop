@@ -251,7 +251,11 @@ struct ShortcutsSheet: View {
                     row("⌘⇧R", l10n.t("Resume session", "恢复会话"))
                     row("⌘Y", l10n.t("Prompt history", "提示词历史"))
                     row("⌘I", l10n.t("Inspector", "右侧栏"))
-                    row("⌘⇧B", l10n.t("By the way (aside)", "顺便问"))
+                    row("⌘⇧D", l10n.t("Changes", "变更"))
+                    row("⌘⇧P", l10n.t("Preview", "预览"))
+                    row("⌘J", l10n.t("Terminal", "终端"))
+                    row("⌘⇧B", l10n.t("Aside", "顺便问"))
+                    row("⌘\\", l10n.t("Close the open tool", "关闭当前窗格"))
                     row("⇧⇥", l10n.t("Cycle permission mode", "切换权限模式"))
                     row("⌃\\", l10n.t("Dashboard", "任务面板"))
                     row("↑ / ↓", l10n.t("Recall previous prompts", "回忆上一条提示词"))
@@ -261,7 +265,7 @@ struct ShortcutsSheet: View {
                     row("@", l10n.t("Attach or mention a file", "附加或引用文件"))
                 }
             }
-            .frame(height: 380)
+            .frame(height: 440)
         }
     }
 
@@ -636,6 +640,8 @@ struct WorktreeSheet: View {
                                     .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
+                                Button(l10n.t("Use folder", "用这个目录")) { model.switchWorktree(tree) }
+                                    .buttonStyle(GrokSecondaryButtonStyle())
                                 GrokIconButton(
                                     systemImage: "trash",
                                     size: 26,

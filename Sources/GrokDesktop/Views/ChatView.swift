@@ -59,6 +59,9 @@ struct ChatScrollBottomMonitor: NSViewRepresentable {
         var onUserScroll: (ChatScrollMetrics) -> Void = { _ in }
         var driver: ChatScrollDriver?
         private var attachAttempts = 0
+        private var lastDocumentHeight: CGFloat = 0
+        private var lastOffset: CGFloat = 0
+        private var lastVisible: CGFloat = 0
 
         func attach(from view: NSView) {
             if clip != nil {
@@ -115,9 +118,36 @@ struct ChatScrollBottomMonitor: NSViewRepresentable {
             if let scroll {
                 driver?.attach(scroll)
             }
+            let preview = Self.metrics(from: clip, slack: slack)
+            let shrunk = ChatScrollMath.shouldRevealBottom(
+                previousContent: lastDocumentHeight,
+                content: preview.content,
+                previousOffset: lastOffset,
+                previousVisible: lastVisible
+            )
+            let follow = ChatScrollMath.shouldFollowGrowth(
+                previousContent: lastDocumentHeight,
+                content: preview.content,
+                previousOffset: lastOffset,
+                previousVisible: lastVisible
+            )
+            lastDocumentHeight = preview.content
+            lastOffset = preview.offset
+            lastVisible = preview.visible
+            if shrunk && !userScroll {
+                driver?.revealBottom()
+            } else if follow && !userScroll {
+                driver?.seek(to: 1)
+            } else {
+                driver?.clampIfOutside()
+            }
             let metrics = Self.metrics(from: clip, slack: slack)
+            lastDocumentHeight = metrics.content
+            lastOffset = metrics.offset
+            lastVisible = metrics.visible
+            let programmatic = driver?.consumeProgrammatic(originY: clip.bounds.origin.y) ?? false
             driver?.update(metrics: metrics, isDark: isDark)
-            if userScroll {
+            if userScroll, !programmatic {
                 onUserScroll(metrics)
             }
             if ChatScrollMath.jumpChromeChanged(
@@ -220,6 +250,8 @@ struct ChatView: View {
     @State private var stickToLatest = true
     @State private var pinningToLatest = false
     @State private var pinToken = 0
+    @State private var settleToken = 0
+    @State private var suppressReleaseUntil = Date.distantPast
     @State private var bottomHits = 0
     @State private var pinStarted = Date.distantPast
     @State private var copiedPromptID: String?
@@ -233,6 +265,19 @@ struct ChatView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            conversationColumn
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(palette.canvas)
+        .onReceive(NotificationCenter.default.publisher(for: .grokCopyOnSelect)) { note in
+            if let text = note.object as? String {
+                model.copySelection(text)
+            }
+        }
+    }
+
+    private var conversationColumn: some View {
+        VStack(spacing: 0) {
             contextWindowNote
 
             if let reason = model.firstRunReason, model.client.items.isEmpty, model.client.outgoingPreview == nil {
@@ -347,6 +392,9 @@ struct ChatView: View {
                         }
                         .scrollIndicators(.never)
                         .modifier(ChatDefaultBottomAnchor())
+                        .transaction { transaction in
+                            transaction.animation = nil
+                        }
                         .modifier(ChatScrollGeometryReader { applyScrollMetrics($0) })
                         .background(
                             ChatScrollBottomMonitor(
@@ -377,13 +425,17 @@ struct ChatView: View {
                             }
                         }
                         .overlay(alignment: .bottom) {
-                            if showJumpToLatest {
-                                JumpToLatestButton(label: l10n.jumpToLatest) {
-                                    jumpToLatest(proxy)
+                            Group {
+                                if showJumpToLatest {
+                                    JumpToLatestButton(label: l10n.jumpToLatest) {
+                                        jumpToLatest(proxy)
+                                    }
+                                    .accessibilityLabel(l10n.jumpToLatest)
+                                    .padding(.bottom, 12)
+                                    .transition(.opacity.combined(with: .scale(scale: 0.92)))
                                 }
-                                .padding(.bottom, 12)
-                                .transition(.opacity.combined(with: .scale(scale: 0.92)))
                             }
+                            .animation(.easeOut(duration: 0.16), value: showJumpToLatest)
                         }
                     }
                     .id(model.client.sessionID ?? "none")
@@ -403,6 +455,20 @@ struct ChatView: View {
                             if #unavailable(macOS 15.0) {
                                 snapToLatest(proxy)
                             }
+                        }
+                    }
+                    .onChange(of: model.client.isTurnRunning) { wasRunning, running in
+                        if running, !wasRunning, !scrollbarDragging {
+                            stickToLatest = true
+                            settleLatest(proxy)
+                        } else if wasRunning, !running, stickToLatest, !scrollbarDragging {
+                            settleLatest(proxy)
+                        }
+                    }
+                    .onChange(of: showsOutgoingPreview) { _, showing in
+                        if showing, !scrollbarDragging {
+                            stickToLatest = true
+                            settleLatest(proxy)
                         }
                     }
                     .onChange(of: model.jumpTarget) { _, target in
@@ -459,13 +525,9 @@ struct ChatView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(palette.canvas)
-        .animation(.easeOut(duration: 0.16), value: showJumpToLatest)
-        .onReceive(NotificationCenter.default.publisher(for: .grokCopyOnSelect)) { note in
-            if let text = note.object as? String {
-                model.copySelection(text)
-            }
-        }
+        .simultaneousGesture(
+            TapGesture().onEnded { model.noteConversationFocus() }
+        )
     }
 
     @ViewBuilder
@@ -635,20 +697,26 @@ struct ChatView: View {
         }
     }
 
+    private static let rightSidebarTools: [(tool: InspectorTool, shortcut: String)] = [
+        (.changes, "⌘⇧D"),
+        (.preview, "⌘⇧P"),
+        (.terminal, "⌘J"),
+        (.aside, "⌘⇧B"),
+    ]
+
     private var rightSidebarControls: some View {
-        let chinese = model.language.resolved() == .chinese
-        return HStack(spacing: 4) {
+        HStack(spacing: 4) {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 2) {
-                    ForEach(InspectorFocus.allCases) { focus in
-                        rightSidebarTabButton(focus, chinese: chinese, compact: false)
+                    ForEach(Self.rightSidebarTools, id: \.tool) { item in
+                        inspectorToolButton(item.tool, shortcut: item.shortcut, compact: false)
                     }
                 }
                 .fixedSize(horizontal: true, vertical: false)
 
                 HStack(spacing: 2) {
-                    ForEach(InspectorFocus.allCases) { focus in
-                        rightSidebarTabButton(focus, chinese: chinese, compact: true)
+                    ForEach(Self.rightSidebarTools, id: \.tool) { item in
+                        inspectorToolButton(item.tool, shortcut: item.shortcut, compact: true)
                     }
                 }
                 .fixedSize(horizontal: true, vertical: false)
@@ -668,30 +736,31 @@ struct ChatView: View {
         .layoutPriority(1)
     }
 
-    private func rightSidebarTabButton(_ focus: InspectorFocus, chinese: Bool, compact: Bool) -> some View {
-        let active = model.showInspector && model.inspectorFocus == focus
-        let title = focus.title(chinese: chinese)
+    private func inspectorToolButton(_ tool: InspectorTool, shortcut: String, compact: Bool) -> some View {
+        let pressed = model.inspectorToolPressed(tool)
+        let title = tool.title(chinese: l10n.language == .chinese)
         return Button {
-            model.toggleInspectorFocus(focus)
+            model.toggleInspectorTool(tool)
         } label: {
             HStack(spacing: 4.5) {
-                Image(systemName: focus.systemImage)
+                Image(systemName: tool.systemImage)
                     .font(.system(size: 11, weight: .medium))
                 if !compact {
                     Text(title)
-                        .font(.system(size: 12, weight: active ? .semibold : .medium))
+                        .font(.system(size: 12, weight: pressed ? .semibold : .medium))
                         .lineLimit(1)
                 }
             }
             .fixedSize(horizontal: true, vertical: false)
-            .foregroundStyle(active ? palette.text : palette.secondary)
+            .foregroundStyle(pressed ? palette.text : palette.secondary)
             .padding(.horizontal, compact ? 7 : 8)
             .padding(.vertical, 5)
-            .grokHover(cornerRadius: 7, selected: active)
+            .grokHover(cornerRadius: 7, selected: pressed)
             .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
         }
         .buttonStyle(.plain)
-        .help(title)
+        .help("\(title)  \(shortcut)")
+        .accessibilityLabel(title)
     }
 
     private var loadingState: some View {
@@ -708,7 +777,7 @@ struct ChatView: View {
     }
 
     private var emptyState: some View {
-        let chinese = model.language.resolved() == .chinese
+        let chinese = model.showsChinese
         let folderSessions = model.filteredSessions.filter { $0.cwd == model.client.workingDirectory.path }
         return VStack(spacing: 16) {
             Color.clear
@@ -889,7 +958,11 @@ struct ChatView: View {
         guard !pinningToLatest, !scrollbarDragging else { return }
         scrollDriver.update(metrics: metrics, isDark: palette.isDark)
         if metrics.userReleased {
-            stickToLatest = false
+            let offsetMoved = abs(metrics.offset - scrollMetrics.offset) > 1
+            if Date() >= suppressReleaseUntil, offsetMoved || scrollMetrics.visible <= 1 {
+                stickToLatest = false
+                settleToken += 1
+            }
         } else if metrics.isNearBottom {
             stickToLatest = true
         }
@@ -1044,6 +1117,26 @@ struct ChatView: View {
         pinningToLatest = false
         stickToLatest = true
         ignoreScrollUntil = Date().addingTimeInterval(0.8)
+        snapToLatest(proxy)
+    }
+
+    /// The finished turn folds tools and thinking, and swaps the live reply for markdown.
+    /// The scroll offset can sit in that vacated gap, which stays blank until a wheel event.
+    private func settleLatest(_ proxy: ScrollViewProxy) {
+        settleToken += 1
+        let token = settleToken
+        suppressReleaseUntil = Date().addingTimeInterval(0.36)
+        reveal(proxy)
+        for delay in [0.08, 0.24] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                guard token == settleToken, stickToLatest, !scrollbarDragging else { return }
+                reveal(proxy)
+            }
+        }
+    }
+
+    private func reveal(_ proxy: ScrollViewProxy) {
+        scrollDriver.revealBottom()
         snapToLatest(proxy)
     }
 
@@ -1445,7 +1538,7 @@ struct ChatView: View {
 
     @ViewBuilder
     private func toolCluster(_ items: [ConversationItem]) -> some View {
-        let chinese = model.language.resolved() == .chinese
+        let chinese = model.showsChinese
         let status = items.allSatisfy(toolSucceeded) ? "completed" : (items.contains(where: { item in
             if case .tool(_, _, let value, _) = item { return value == "failed" }
             return false
@@ -1486,7 +1579,7 @@ struct ChatView: View {
         detail: String,
         grouped: Bool = false
     ) -> some View {
-        let chinese = model.language.resolved() == .chinese
+        let chinese = model.showsChinese
         let active = ToolVoice.isActive(status) && model.client.isTurnRunning
         let parsed = ToolVoice.line(title, chinese: chinese, cwd: model.client.workingDirectory, running: active)
         let shownStatus = model.client.isStopping && ToolVoice.isActive(status) ? "cancelled" : status
@@ -1543,7 +1636,7 @@ struct ChatView: View {
             }
             Spacer(minLength: 0)
             if status == "failed" || status == "cancelled" {
-                Text(ToolVoice.statusLabel(status, chinese: model.language.resolved() == .chinese))
+                Text(ToolVoice.statusLabel(status, chinese: model.showsChinese))
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(status == "failed" ? palette.warning : palette.tertiary)
             }

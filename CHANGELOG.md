@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.1.34 - 2026-10-29
+
+The right side opens one tool at a time.
+
+- The session title is followed by Changes, Preview, Terminal, and Aside. One of them fills the column. Clicking the open tool again closes it. Clicking it while you are in the conversation brings it forward.
+- Changes stays unpressed when there is nothing to review. Context, tasks, agent commands, and hooks stay in the menu on that column.
+- Changes is ⌘⇧D, Preview is ⌘⇧P, Terminal is ⌘J, Aside is ⌘⇧B. ⌘\ closes the open tool. ⌘I still shows or hides the column.
+- A prompt follows the latest line when you were already there. Reading earlier messages stays where it is.
+- Repeated hook runs stay on one row, under a short name. A blocked or failed run stays in front.
+
+## 0.1.33 - 2026-10-29
+
+The conversation stays on screen when a turn finishes.
+
+- Tool rows and thinking fold up at the end of a turn. The view no longer sits in the blank gap that fold leaves behind, so the reply is there without scrolling for it.
+
+## 0.1.32 - 2026-10-23
+
+You can speak a draft, and a saved bridge can take new messages while the app is open.
+
+- The composer and the small Desk window have a microphone. What you say fills the draft, with a live level. Stopping leaves the sentence in the box. The microphone and speech recognition are requested when you start.
+- Start live on the bridges you already saved. Telegram, Discord, Matrix, Slack, QQ, DingTalk, Weibo, and Messages deliver new inbound text into a trusted project. Personal WeChat stays paste-only. Feishu checks the credential, then you still paste. LINE and WeCom can take a signed or local callback on this Mac. Messages already waiting when live starts stay out.
+- The phone page shows an address on this Mac, or one other devices on the same network can open. A Cloudflare quick-tunnel address is taken from the tunnel log.
+- English and Simplified Chinese stay as written. Traditional Chinese is converted. The other languages in the list use the phrase table and fall back to English.
+- The main window is centered once at launch. Opening a file preview changes the sidebar width on the next turn, so that click no longer aborts the app. A diff is parsed once per patch, and only the newest file starts expanded.
+
+## 0.1.31 - 2026-10-21
+
+Sessions, trusted folders, a phone mirror, message bridges, and a remote host.
+
+- A follow-up can wait, or steer the turn that is running. A session can attach files, fork, and keep up to three earlier sessions in view. Search, rename, archive, and delete stay on this Mac. Import still reads the grok CLI sessions. Session files can stay in `~/.grok` or live in an app folder. The two stores are not merged.
+- A new folder starts untrusted. Removing it from the sidebar leaves the folder on disk. An untrusted folder cannot receive agent writes. Switching a worktree moves that session's folder.
+- A diff can be accepted, rejected, or reverted one file at a time or as a batch. Text files edit in place. Images, video, audio, PDF, and Office files preview when the path is inside a trusted project.
+- Ask is the default. Allow once, allow for the session, or deny. Always-approve is optional, and it can be set per project.
+- A saved bridge turns inbound text into a turn only for a project you already trust. `/p` starts a session there. `/r` resumes one that already exists. The app does not sign in to those networks.
+- The phone mirror listens on this Mac. It lists sessions and continues one you already have. A busy session queues the text instead of interrupting it. The token is not shown in the window. Keep it on this Mac, open it on the local network, or start a Cloudflare quick tunnel.
+- A remote session uses the OpenSSH already on this Mac. The agent runs on the remote host. Remote files, the remote terminal, and remote skills stay on that host.
+- One session can watch several pull requests. When `gh` can read them, a new comment, a review, a failing check, or a green check is queued as a follow-up.
+- More than one account can sign in. The API key stays in the keychain. Logs and the diagnostic export leave secrets out. A custom relay can use its own Grok home, or share `~/.grok` without rewriting the other copy.
+- MCP servers, plugins, skills, agents, and hooks can be turned off. A note you schedule runs on its own and keeps a log.
+- A small window can stay above other windows. From there you can dictate, send, and stop.
+- The first launch looks for `grok` and accepts a path you pick. A missing CLI, a sign-in problem, a network problem, and an agent crash stay separate.
+- An HTTP or SOCKS proxy is passed through. The sandbox can be off or restricted.
+- With no language chosen, the shell follows the system language. You can pick English, Simplified or Traditional Chinese, Japanese, Korean, German, French, Russian, Spanish, Brazilian Portuguese, Italian, Indonesian, Tamil, Ukrainian, Filipino, or Turkish. Chat and Build stay those words.
+- The Dock and Finder icon is the Grok mark from grok.com.
+
 ## 0.1.30 - 2026-10-16
 
 Grok Desktop updates itself from GitHub Releases.

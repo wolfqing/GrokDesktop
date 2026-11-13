@@ -11,6 +11,7 @@ final class AttentionCenter: NSObject, UNUserNotificationCenterDelegate {
     private var authorized = false
     private var requested = false
 
+    /// `swift run` is a bare executable. UserNotifications aborts unless this process is an .app bundle.
     private var center: UNUserNotificationCenter? {
         guard Bundle.main.bundleURL.pathExtension == "app",
               Bundle.main.bundleIdentifier != nil

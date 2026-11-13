@@ -84,10 +84,12 @@ final class AppModel: ObservableObject {
     @Published var showAbout = false
     @Published var showPalette = false
     @Published var showInspector = true
-    @Published var inspectorFocus: InspectorFocus? = nil
     @Published var inspectorWidth: CGFloat = GrokTheme.inspectorWidth
+    /// One-shot request for the inspector to show a mode. The view clears it.
+    @Published var inspectorFocusRequest: String?
     @Published var previewedFile: URL?
-    @Published var inspectorDetailsVisible = true
+    @Published var inspectorTool: InspectorTool?
+    @Published var inspectorToolFocused = false
     @Published var shellHeight: CGFloat = GrokTheme.shellHeight
     let sidebarShell = SidebarShell()
     @Published var hiddenInspectorPanes: Set<String> = []
@@ -208,6 +210,7 @@ final class AppModel: ObservableObject {
 
     @AppStorage("appearancePreference") var appearanceRaw = AppearancePreference.system.rawValue
     @AppStorage("languagePreference") var languageRaw = AppLanguage.system.rawValue
+    @AppStorage("grokBinaryPath") var manualGrokPath = ""
     @AppStorage("wrapCodeLines") var wrapCodeLines = false
     @AppStorage("autoScroll") var autoScroll = false
     @AppStorage("notifyThinking") var notifyThinking = true
@@ -244,10 +247,16 @@ final class AppModel: ObservableObject {
     }
 
     var copy: L10n {
-        L10n(language: language.resolved())
+        L10n(localeID: LocaleCatalog.resolve(preference: desk.localeID, preferredLanguages: Locale.preferredLanguages))
     }
 
-    let sessionIndex: SessionIndex
+    var showsChinese: Bool {
+        copy.language == .chinese
+    }
+
+    var sessionIndex: SessionIndex
+    var desk = DeskController()
+    let bridgeLiveRunner = BridgeLive()
     let locator: GrokBinaryLocator
     let configStore = ConfigStore()
     let automationStore = AutomationStore()
@@ -271,10 +280,14 @@ final class AppModel: ObservableObject {
         self.client = ACPClient(locator: locator)
         restoreInspectorWidth()
         restoreInspectorPanes()
+        restoreInspectorTool()
         restoreShellPane()
         restoreWorkingDirectory()
         restoreProductSurface()
         refreshAll()
+        alignSessionRoot()
+        seedProjectTrust()
+        loadAccountSlots()
         refreshModelChoices()
         client.buildModel = grokConfig.defaultModel.isEmpty ? ModelCatalog.fallbackID : grokConfig.defaultModel
         client.effort = grokConfig.defaultEffortLevel
@@ -283,6 +296,16 @@ final class AppModel: ObservableObject {
         refreshWorkspace()
         refreshAccountUsage()
         bindClient()
+        client.permissionPolicy = desk.policy()
+        syncAgentHome()
+        loadExtensionToggles()
+        desk.sessionAPI.onQueued = { [weak self] id, _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.client.deliverMirrorContinues(server: self.desk.sessionAPI, sessionID: id)
+                self.publishMirrorSessions()
+            }
+        }
         if DemoStudio.isEnabled {
             applyDemoStudio()
         }
@@ -306,6 +329,10 @@ final class AppModel: ObservableObject {
 
     func previewFile(_ url: URL) {
         let standardized = url.standardizedFileURL
+        if !mediaAllowed(standardized) {
+            flash(copy.t("That file is outside the trusted folders.", "这个文件不在已信任的目录里。"))
+            return
+        }
         var isDir: ObjCBool = false
         if FileManager.default.fileExists(atPath: standardized.path, isDirectory: &isDir), isDir.boolValue {
             ChatLinkActions.open(standardized)
@@ -316,48 +343,25 @@ final class AppModel: ObservableObject {
         afterHitTest { [weak self] in
             guard let self else { return }
             self.previewedFile = standardized
-            self.showInspector = true
-            self.inspectorFocus = .preview
-            self.inspectorDetailsVisible = false
-            if self.inspectorWidth <= GrokTheme.inspectorWidth {
+            self.presentInspectorTool(.preview)
+            // Width is a second turn. Changing it in the same pass as the new
+            // preview hits AppKit's constraint update and aborts the process.
+            let widen = self.inspectorWidth <= GrokTheme.inspectorWidth
+            guard widen else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.inspectorWidth <= GrokTheme.inspectorWidth else { return }
                 self.setInspectorWidth(GrokTheme.inspectorPreviewWidth)
-            }
-            if self.destination != .build {
-                self.destination = .build
             }
         }
     }
 
     func clearPreview() {
         afterHitTest { [weak self] in
-            self?.previewedFile = nil
-            self?.inspectorDetailsVisible = true
-            if self?.inspectorFocus == .preview {
-                self?.inspectorFocus = nil
+            guard let self else { return }
+            self.previewedFile = nil
+            if self.inspectorTool == .preview {
+                self.closeInspectorPane()
             }
-        }
-    }
-
-    func toggleInspectorFocus(_ focus: InspectorFocus) {
-        if showInspector, inspectorFocus == focus {
-            showInspector = false
-            return
-        }
-        destination = .build
-        showInspector = true
-        inspectorFocus = focus
-        switch focus {
-        case .changes:
-            refreshWorkspace()
-            Task { await client.refreshGit() }
-        case .preview:
-            if previewedFile != nil, inspectorWidth <= GrokTheme.inspectorWidth {
-                setInspectorWidth(GrokTheme.inspectorPreviewWidth)
-            }
-        case .terminal:
-            UserDefaults.standard.set(true, forKey: Self.shellChosenKey)
-        case .aside:
-            focusAsideComposer = true
         }
     }
 
@@ -383,53 +387,101 @@ final class AppModel: ObservableObject {
         setInspectorWidth(previewedFile == nil ? GrokTheme.inspectorWidth : GrokTheme.inspectorPreviewWidth)
     }
 
+    var inspectorColumnVisible: Bool {
+        showInspector && destination == .build
+    }
+
+    var inspectorChangesEmpty: Bool {
+        client.hunks.isEmpty
+            && client.gitDiffText.isEmpty
+            && !(workspace.isRepo && (workspace.insertions + workspace.deletions) > 0)
+    }
+
+    func inspectorToolPressed(_ tool: InspectorTool) -> Bool {
+        guard inspectorColumnVisible else { return false }
+        return InspectorToolToggle.pressed(
+            tool: tool,
+            state: inspectorToolState,
+            changesEmpty: inspectorChangesEmpty
+        )
+    }
+
+    func toggleInspectorTool(_ tool: InspectorTool) {
+        let result = InspectorToolToggle.toggle(
+            columnVisible: inspectorColumnVisible,
+            state: inspectorToolState,
+            tool: tool
+        )
+        if !inspectorColumnVisible {
+            showInspector = true
+            if destination != .build {
+                destination = .build
+            }
+        }
+        applyInspectorTool(result.state)
+    }
+
+    func presentInspectorTool(_ tool: InspectorTool) {
+        showInspector = true
+        if destination != .build {
+            destination = .build
+        }
+        applyInspectorTool(InspectorToolState(tool: tool, focused: true))
+    }
+
+    func closeInspectorPane() {
+        applyInspectorTool(InspectorToolToggle.next(inspectorToolState, .close))
+    }
+
+    func noteConversationFocus() {
+        guard inspectorToolFocused else { return }
+        inspectorToolFocused = false
+    }
+
+    func noteInspectorFocus() {
+        guard inspectorTool != nil, !inspectorToolFocused else { return }
+        inspectorToolFocused = true
+    }
+
+    private var inspectorToolState: InspectorToolState {
+        InspectorToolState(tool: inspectorTool, focused: inspectorToolFocused)
+    }
+
+    private func applyInspectorTool(_ state: InspectorToolState) {
+        inspectorTool = state.tool
+        inspectorToolFocused = state.focused
+        if state.tool == .terminal {
+            UserDefaults.standard.set(true, forKey: Self.shellChosenKey)
+        }
+        if state.tool == .aside {
+            focusAsideComposer = true
+        }
+        persistInspectorTool()
+    }
+
     func inspectorPaneVisible(_ pane: InspectorPane) -> Bool {
-        !hiddenInspectorPanes.contains(pane.rawValue)
+        inspectorColumnVisible && inspectorTool == pane.tool
     }
 
     func setInspectorPane(_ pane: InspectorPane, visible: Bool) {
-        if pane == .shell {
-            UserDefaults.standard.set(true, forKey: Self.shellChosenKey)
-        }
         if visible {
-            showInspector = true
-            hiddenInspectorPanes.remove(pane.rawValue)
-            inspectorDetailsVisible = true
-        } else {
-            hiddenInspectorPanes.insert(pane.rawValue)
+            presentInspectorTool(pane.tool)
+        } else if inspectorTool == pane.tool {
+            closeInspectorPane()
         }
-        persistInspectorPanes()
     }
 
     func hideInspectorPane(_ pane: InspectorPane) {
         afterHitTest { [weak self] in
-            guard let self else { return }
-            self.hiddenInspectorPanes.insert(pane.rawValue)
-            self.persistInspectorPanes()
+            guard let self, self.inspectorTool == pane.tool else { return }
+            self.closeInspectorPane()
         }
     }
 
     func showInspectorPane(_ pane: InspectorPane) {
         afterHitTest { [weak self] in
-            guard let self else { return }
-            self.showInspector = true
-            self.hiddenInspectorPanes.remove(pane.rawValue)
-            self.inspectorDetailsVisible = true
-            self.persistInspectorPanes()
+            self?.presentInspectorTool(pane.tool)
         }
-    }
-
-    func showAllInspectorPanes() {
-        afterHitTest { [weak self] in
-            guard let self else { return }
-            self.hiddenInspectorPanes.removeAll()
-            self.inspectorDetailsVisible = true
-            self.persistInspectorPanes()
-        }
-    }
-
-    var hiddenInspectorPaneList: [InspectorPane] {
-        InspectorPane.allCases.filter { hiddenInspectorPanes.contains($0.rawValue) }
     }
 
     private var contextMatchesSession: Bool {
@@ -500,7 +552,8 @@ final class AppModel: ObservableObject {
         destination = .build
         lastBuildDestination = .build
         showInspector = true
-        inspectorDetailsVisible = true
+        inspectorTool = .changes
+        inspectorToolFocused = true
         hiddenInspectorPanes = InspectorPane.closedUntilChosen
         previewedFile = nil
         client.applyDemo(
@@ -526,15 +579,27 @@ final class AppModel: ObservableObject {
     }
 
     private func afterHitTest(_ work: @escaping @MainActor () -> Void) {
-        Task { @MainActor in
-            work()
-        }
+        // `Task { @MainActor }` can still run inside the click that started it.
+        // The next run-loop turn is after AppKit finishes that constraint pass.
+        DispatchQueue.main.async(execute: work)
     }
 
     private static let shellChosenKey = "inspectorShellChosen"
+    private static let inspectorToolKey = "inspectorTool"
 
-    private func persistInspectorPanes() {
-        UserDefaults.standard.set(Array(hiddenInspectorPanes), forKey: "hiddenInspectorPanes")
+    private func persistInspectorTool() {
+        if let inspectorTool {
+            UserDefaults.standard.set(inspectorTool.rawValue, forKey: Self.inspectorToolKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: Self.inspectorToolKey)
+        }
+    }
+
+    private func restoreInspectorTool() {
+        guard let raw = UserDefaults.standard.string(forKey: Self.inspectorToolKey),
+              let tool = InspectorTool(rawValue: raw) else { return }
+        inspectorTool = tool
+        inspectorToolFocused = false
     }
 
     private func restoreInspectorPanes() {
@@ -769,7 +834,7 @@ final class AppModel: ObservableObject {
     }
 
     var attentionNeeds: [AttentionNeed] {
-        let chinese = language.resolved() == .chinese
+        let chinese = showsChinese
         return client.liveWorkspaces.compactMap { workspace in
             if workspace.userQuestion != nil {
                 return AttentionNeed(
@@ -796,7 +861,7 @@ final class AppModel: ObservableObject {
         + unseenTurns.filter { turn in
             !client.liveWorkspaces.contains { $0.id == turn.id }
         }.map { turn in
-            let chinese = language.resolved() == .chinese
+            let chinese = showsChinese
             let result = UnseenTurn.changePhrase(count: turn.changedFiles, chinese: chinese)
             let lead = turn.prompt.isEmpty ? turn.cwdName : turn.prompt
             return AttentionNeed(
@@ -1111,7 +1176,7 @@ final class AppModel: ObservableObject {
 
     var contextWindowNoteText: String? {
         guard let note = contextWindowNote, note.sessionID == client.sessionID else { return nil }
-        return note.message(chinese: language.resolved() == .chinese)
+        return note.message(chinese: showsChinese)
     }
 
     func dismissContextWindowNote() {
@@ -1192,7 +1257,7 @@ final class AppModel: ObservableObject {
         let visible = sessions.filter { !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return visible }
-        let chinese = language.resolved() == .chinese
+        let chinese = showsChinese
         return visible.filter { SessionSearch.matches($0, query: query, chinese: chinese) }
     }
 
@@ -1273,7 +1338,7 @@ final class AppModel: ObservableObject {
     }
 
     var skillGroups: [(id: String, title: String, items: [SkillRecord])] {
-        let chinese = language.resolved() == .chinese
+        let chinese = showsChinese
         let order: [(String, String)] = [
             ("project", chinese ? "项目" : "Project"),
             ("user", chinese ? "个人" : "Personal"),
@@ -1324,6 +1389,21 @@ final class AppModel: ObservableObject {
             guard self.client.workingDirectory.standardizedFileURL.path == cwd.standardizedFileURL.path else { return }
             self.workspace = loaded
         }
+        if !DemoStudio.isEnabled {
+            reapIdleSessions()
+        }
+    }
+
+    func reapIdleSessions() {
+        var idle: [String: Int] = [:]
+        for id in client.workspaceIDs {
+            idle[id] = client.idleAge(id: id)
+        }
+        _ = client.reapSessions(idleSeconds: idle, focusedID: client.sessionID)
+    }
+
+    func shell(_ key: ShellString) -> String {
+        ShellLocale.chrome(key, preference: desk.localeID, preferredLanguages: Locale.preferredLanguages)
     }
 
     func openInFinder() {
@@ -1390,10 +1470,12 @@ final class AppModel: ObservableObject {
         startNewSession(cwd: client.workingDirectory)
     }
 
-    func startNewSession(cwd: URL) {
+    func startNewSession(cwd: URL, remoteHost: String = "") {
+        client.remoteHost = SSHWorkspace.sessionHost(remoteHost) ?? ""
         destination = .build
         expandHistoryFolder(path: cwd.path)
         rememberWorkingDirectory(cwd)
+        applyWriteGate(cwd)
         Task {
             do {
                 try await client.newSession(cwd: cwd)
@@ -1449,6 +1531,628 @@ final class AppModel: ObservableObject {
         newProjectName = ""
         newProjectFolder = nil
         startNewSession(cwd: folder)
+    }
+
+    func alignSessionRoot() {
+        let mode = SessionDataMode(rawValue: desk.sessionDataMode) ?? .shared
+        let next = SessionDataLayout.root(mode: mode, independent: independentSessionsRoot, shared: sharedSessionsRoot)
+        if sessionIndex.sessionsRoot.standardizedFileURL.path != next.standardizedFileURL.path {
+            sessionIndex = SessionIndex(sessionsRoot: next)
+            refreshSessions()
+        }
+        client.sessionIndex = sessionIndex
+    }
+
+    func setSessionDataMode(_ mode: SessionDataMode) {
+        desk.sessionDataMode = mode.rawValue
+        alignSessionRoot()
+    }
+
+    var independentSessionsRoot: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("GrokDesktop/sessions", isDirectory: true)
+    }
+
+    var sharedSessionsRoot: URL {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".grok/sessions", isDirectory: true)
+    }
+
+    func seedProjectTrust() {
+        guard !desk.trustSeeded else { return }
+        var paths = Set(namedProjects.map { ProjectTrust.normalize($0.path) })
+        paths.insert(ProjectTrust.normalize(client.workingDirectory.path))
+        desk.setTrusted(paths)
+        desk.trustSeeded = true
+    }
+
+    func trustProject(_ project: NamedProject) {
+        var paths = desk.trustedPaths
+        paths.insert(ProjectTrust.normalize(project.path))
+        desk.setTrusted(paths)
+        desk.trustSeeded = true
+    }
+
+    func trustCurrentFolder() {
+        var paths = desk.trustedPaths
+        paths.insert(ProjectTrust.normalize(client.workingDirectory.path))
+        desk.setTrusted(paths)
+        desk.trustSeeded = true
+    }
+
+    func removeProject(_ project: NamedProject) {
+        namedProjects = ProjectTrust.remove(projects: namedProjects, id: project.id)
+        projectStore.save(namedProjects)
+        var paths = desk.trustedPaths
+        paths.remove(ProjectTrust.normalize(project.path))
+        desk.setTrusted(paths)
+    }
+
+    func applyWriteGate(_ cwd: URL) {
+        let trusted = ProjectTrust.allowsWrite(path: cwd.path, trusted: desk.trustedPaths, enforce: desk.trustSeeded)
+        if !SandboxMode.allowsWrite(trusted: trusted, profile: grokConfig.sandboxProfile) {
+            client.setMode(.plan)
+        }
+    }
+
+    func mediaAllowed(_ url: URL) -> Bool {
+        var roots = Array(desk.trustedPaths)
+        if !desk.trustSeeded {
+            roots.append(client.workingDirectory.path)
+        }
+        let appData = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("GrokDesktop").path
+        return MediaPathScope.allows(
+            path: url.path,
+            trustedRoots: roots,
+            appData: appData,
+            temp: FileManager.default.temporaryDirectory.path,
+            grants: []
+        )
+    }
+
+    func attachReference() {
+        let id = desk.referenceDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return }
+        client.attachReference(id)
+        desk.referenceDraft = ""
+    }
+
+    func archiveSession(_ record: SessionRecord) {
+        let root = SessionArchive.root(sessionsRoot: sessionIndex.sessionsRoot)
+        do {
+            _ = try SessionArchive.move(sessionDirectory: record.directory, archiveRoot: root)
+            client.dropWorkspace(record.id)
+            clearUnseen(record.id)
+            refreshSessions()
+        } catch {
+            flash(error.localizedDescription)
+        }
+    }
+
+    func importCLISessions() {
+        let source = sharedSessionsRoot
+        let destination = sessionIndex.sessionsRoot
+        let ids = CLISessionImport.candidates(source: source, destination: destination)
+        guard !ids.isEmpty else {
+            flash(copy.t("No CLI sessions to import.", "没有可导入的命令行会话。"))
+            return
+        }
+        for id in ids.prefix(20) {
+            try? CLISessionImport.copy(id: id, source: source, destination: destination)
+        }
+        refreshSessions()
+    }
+
+    func switchWorktree(_ tree: WorktreeRecord) {
+        guard let path = WorktreeSwitch.cwd(current: client.workingDirectory.path, worktrees: worktrees, selected: tree.path) else { return }
+        let url = URL(fileURLWithPath: path)
+        client.workingDirectory = url
+        rememberWorkingDirectory(url)
+        applyWriteGate(url)
+        showWorktrees = false
+    }
+
+    func reviewDiff(action: DiffReview.Action, paths: [String]) {
+        let root = client.workingDirectory
+        let files = paths.map { path in
+            let url = root.appendingPathComponent(path)
+            let working = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+            let baseline = TimedProcess.git(cwd: root, ["show", "HEAD:\(path)"]) ?? ""
+            return ReviewedFile(path: path, baseline: baseline, working: working)
+        }
+        do {
+            _ = try DiffReview.apply(action: action, files: files, paths: paths, root: root)
+            Task { await client.refreshGit() }
+        } catch {
+            flash(error.localizedDescription)
+        }
+    }
+
+    func saveAccountKey(_ secret: String) {
+        let trimmed = secret.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let account = desk.activeAccount.isEmpty ? "default" : desk.activeAccount
+        _ = AccountKeychain.save(account: account, secret: trimmed)
+        flash(AccountKeychain.logLine(account: account, secret: trimmed))
+    }
+
+    func saveAccountSlot() {
+        let label = desk.slotLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !label.isEmpty else { return }
+        let id = UUID().uuidString
+        let auth = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".grok/auth.json")
+        let vault = accountVault.appendingPathComponent("\(id).json")
+        try? FileManager.default.createDirectory(at: accountVault, withIntermediateDirectories: true)
+        if FileManager.default.fileExists(atPath: auth.path) {
+            try? FileManager.default.copyItem(at: auth, to: vault)
+        }
+        desk.accountSlots.append(AccountSlot(id: id, label: label))
+        desk.activeAccount = AccountSwitch.select(slots: desk.accountSlots, id: id, active: desk.activeAccount)
+        desk.slotLabel = ""
+        persistSlots()
+    }
+
+    func activateAccount(_ slot: AccountSlot) {
+        let next = AccountSwitch.select(slots: desk.accountSlots, id: slot.id, active: desk.activeAccount)
+        guard next == slot.id else { return }
+        let auth = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".grok/auth.json")
+        let vault = accountVault.appendingPathComponent("\(slot.id).json")
+        if let current = desk.accountSlots.first(where: { $0.id == desk.activeAccount }),
+           FileManager.default.fileExists(atPath: auth.path) {
+            let backup = accountVault.appendingPathComponent("\(current.id).json")
+            try? FileManager.default.removeItem(at: backup)
+            try? FileManager.default.copyItem(at: auth, to: backup)
+        }
+        if FileManager.default.fileExists(atPath: vault.path) {
+            try? FileManager.default.removeItem(at: auth)
+            try? FileManager.default.copyItem(at: vault, to: auth)
+        }
+        desk.activeAccount = next
+        persistSlots()
+        client.refreshAuth()
+    }
+
+    private var accountVault: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("GrokDesktop/accounts", isDirectory: true)
+    }
+
+    private func persistSlots() {
+        let url = accountVault.appendingPathComponent("slots.json")
+        try? FileManager.default.createDirectory(at: accountVault, withIntermediateDirectories: true)
+        if let data = try? JSONEncoder().encode(desk.accountSlots) {
+            try? data.write(to: url, options: .atomic)
+        }
+        UserDefaults.standard.set(desk.activeAccount, forKey: "activeAccountSlot")
+    }
+
+    func loadAccountSlots() {
+        let url = accountVault.appendingPathComponent("slots.json")
+        if let data = try? Data(contentsOf: url),
+           let slots = try? JSONDecoder().decode([AccountSlot].self, from: data) {
+            desk.accountSlots = slots
+        }
+        desk.activeAccount = UserDefaults.standard.string(forKey: "activeAccountSlot") ?? ""
+    }
+
+    func saveRelay() {
+        let preset = desk.relayPreset
+        let base = desk.relayBase.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? RelayPresets.baseURL(preset)
+            : desk.relayBase.trimmingCharacters(in: .whitespacesAndNewlines)
+        let profile = RelayProfile(preset: preset, baseURL: base, defaultModel: desk.relayModel, keyAccount: "relay-\(preset)")
+        if !desk.relayKey.isEmpty {
+            _ = AccountKeychain.save(account: profile.keyAccount, secret: desk.relayKey)
+            desk.relayKey = ""
+        }
+        let mode = RelayHomeMode(rawValue: desk.relayMode) ?? .independent
+        let independent = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("GrokDesktop/relay-home", isDirectory: true)
+        let shared = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".grok", isDirectory: true)
+        do {
+            _ = try RelayHome.apply(mode: mode, profile: profile, independentRoot: independent, sharedRoot: shared)
+            UserDefaults.standard.set(mode == .independent, forKey: "relayHomeApplied")
+            UserDefaults.standard.set(mode.rawValue, forKey: "relayHomeMode")
+            syncAgentHome()
+            desk.relayNote = copy.t("Relay saved. The key stays in the keychain.", "中转已保存。密钥留在钥匙串。")
+        } catch {
+            desk.relayNote = error.localizedDescription
+        }
+    }
+
+    func testRelay() {
+        let base = desk.relayBase.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? RelayPresets.baseURL(desk.relayPreset)
+            : desk.relayBase.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: base), !base.isEmpty else {
+            desk.relayNote = relaySentence(.other)
+            return
+        }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 8
+        let typed = desk.relayKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = typed.isEmpty ? (AccountKeychain.load(account: "relay-\(desk.relayPreset)") ?? "") : typed
+        if !key.isEmpty { request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
+        Task {
+            do {
+                let (_, response) = try await URLSession.shared.data(for: request)
+                let status = (response as? HTTPURLResponse)?.statusCode
+                let kind = RelayProbe.classify(httpStatus: status, urlErrorCode: nil)
+                await MainActor.run { desk.relayNote = self.relaySentence(kind) }
+            } catch let error as URLError {
+                let kind = RelayProbe.classify(httpStatus: nil, urlErrorCode: error.code.rawValue)
+                await MainActor.run { desk.relayNote = self.relaySentence(kind) }
+            } catch {
+                await MainActor.run { desk.relayNote = self.relaySentence(.other) }
+            }
+        }
+    }
+
+    private func relaySentence(_ kind: RelayProbeResult) -> String {
+        switch kind {
+        case .ok:
+            return copy.t("The relay answered.", "中转有响应。")
+        case .auth:
+            return copy.t("The relay rejected the key.", "中转拒绝了这个密钥。")
+        case .timeout:
+            return copy.t("The relay timed out.", "中转超时。")
+        case .dns:
+            return copy.t("The relay host did not resolve.", "中转地址解析失败。")
+        case .other:
+            return copy.t("The relay did not answer. Check the base URL.", "中转没有正常响应。检查一下地址。")
+        }
+    }
+
+    func saveBridge() {
+        let config = IMBridgeConfig(channel: desk.imChannel, fields: desk.imFields)
+        guard config.isComplete else {
+            flash(copy.t("This bridge is missing a field.", "这个桥接还有空项。"))
+            return
+        }
+        desk.bridges.removeAll { $0.channel == config.channel }
+        desk.bridges.append(config)
+        let url = bridgeStoreURL
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if let data = try? JSONEncoder().encode(desk.bridges) {
+            try? data.write(to: url, options: .atomic)
+        }
+        flash(copy.t("Bridge saved. Paste inbound text below to deliver it.", "桥接已保存。把进来的文字贴到下面送进会话。"))
+        if desk.bridgeLive {
+            bridgeLiveRunner.start(model: self)
+        }
+    }
+
+    func loadBridges() {
+        let url = bridgeStoreURL
+        guard let data = try? Data(contentsOf: url),
+              let saved = try? JSONDecoder().decode([IMBridgeConfig].self, from: data)
+        else { return }
+        desk.bridges = saved.filter(\.isComplete)
+        if let current = desk.bridges.first(where: { $0.channel == desk.imChannel }) {
+            desk.imFields = current.fields
+        }
+    }
+
+    func toggleBridgeLive() {
+        if desk.bridgeLive {
+            bridgeLiveRunner.stop()
+            desk.bridgeLive = false
+            desk.bridgeNotes = ["live": copy.t("Live is off.", "实时已关闭。")]
+            return
+        }
+        guard desk.bridges.contains(where: \.isComplete) else {
+            flash(copy.t("Save a bridge before starting live.", "先保存桥接，再开实时。"))
+            return
+        }
+        desk.bridgeLive = true
+        bridgeLiveRunner.start(model: self)
+    }
+
+    func resumeBridgeLive() {
+        loadBridges()
+        guard desk.bridgeLive else { return }
+        bridgeLiveRunner.start(model: self)
+    }
+
+    private var bridgeStoreURL: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("GrokDesktop/bridges.json")
+    }
+
+    func toggleMirror() {
+        if desk.mirrorOn {
+            desk.sessionAPI.stop()
+            desk.mirrorTunnel.stop()
+            desk.mirrorOn = false
+            desk.mirrorPublicURL = ""
+            return
+        }
+        let exposure = MirrorExposure(rawValue: desk.mirrorExposure) ?? .loopback
+        let token = desk.ensureMirrorToken()
+        do {
+            let port = try desk.sessionAPI.start(token: token, exposure: exposure)
+            desk.mirrorPort = port
+            desk.mirrorOn = true
+            desk.mirrorPublicURL = ""
+            publishMirrorSessions()
+            if exposure == .tunnel {
+                desk.mirrorTunnel.onPublicURL = { [weak self] url in
+                    Task { @MainActor in
+                        self?.desk.mirrorPublicURL = url
+                    }
+                }
+                try desk.mirrorTunnel.launch(port: port)
+            }
+        } catch {
+            flash(shell(.errorGeneric))
+        }
+    }
+
+    var mirrorAddressLine: String {
+        let exposure = MirrorExposure(rawValue: desk.mirrorExposure) ?? .loopback
+        if exposure == .tunnel {
+            return desk.mirrorPublicURL
+        }
+        let host = MirrorBind.lanHost(addresses: MirrorBind.interfaceAddresses())
+        return MirrorBind.displayURL(exposure: exposure, port: desk.mirrorPort, lanHost: host)
+    }
+
+    func publishMirrorSessions() {
+        let rows = sessions.map { record in
+            SessionAPIServer.ListedSession(id: record.id, busy: client.liveWorkspaces.contains { $0.id == record.id && $0.isTurnRunning })
+        }
+        desk.sessionAPI.update(sessions: rows)
+    }
+
+    func copyMirrorToken() {
+        let token = desk.ensureMirrorToken()
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(token, forType: .string)
+        flash(copy.t("Token copied. It stays hidden here.", "令牌已复制。这里仍然不显示。"))
+    }
+
+    func refreshSSHHosts() {
+        desk.sshHosts = SSHWorkspace.loadHosts()
+    }
+
+    func testSSHHost() {
+        runSSHArgv(SSHWorkspace.testArgv(host: desk.sshAlias), timeout: 8)
+    }
+
+    func watchSSHHost() {
+        guard let argv = SSHWorkspace.watchArgv(host: desk.sshAlias) else {
+            flash(copy.t("That remote command was refused.", "这条远程命令不能用。"))
+            return
+        }
+        do {
+            try desk.sshWatch.launch(executable: "/usr/bin/ssh", arguments: Array(argv.dropFirst()))
+            desk.sshNote = copy.t("Watching.", "保持连接。")
+        } catch {
+            desk.sshNote = error.localizedDescription
+        }
+    }
+
+    func openRemoteSession() {
+        guard let host = SSHWorkspace.sessionHost(desk.sshAlias), SSHWorkspace.localCwd(remotePath: desk.sshAlias) == nil else {
+            flash(copy.t("That host is not an SSH alias.", "这不是一个 SSH 主机别名。"))
+            return
+        }
+        destination = .build
+        let anchor = client.workingDirectory
+        Task {
+            do {
+                try await client.newRemoteSession(host: host, localAnchor: anchor)
+                firstRunReason = nil
+                refreshWorkspace()
+            } catch {
+                present(error)
+            }
+        }
+    }
+
+    func readRemoteText() {
+        runSSHArgv(SSHWorkspace.remoteReadArgv(host: desk.sshAlias, relativePath: desk.sshRelative), timeout: 12)
+    }
+
+    func writeRemoteText() {
+        guard let argv = SSHWorkspace.remoteWriteArgv(host: desk.sshAlias, relativePath: desk.sshRelative) else {
+            flash(copy.t("That remote path is refused.", "这个远程路径不能用。"))
+            return
+        }
+        let text = desk.sshBody
+        Task.detached {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
+            process.arguments = Array(argv.dropFirst())
+            let stdin = Pipe()
+            process.standardInput = stdin
+            process.standardOutput = Pipe()
+            process.standardError = Pipe()
+            do {
+                try process.run()
+                if let data = text.data(using: .utf8) {
+                    stdin.fileHandleForWriting.write(data)
+                }
+                try? stdin.fileHandleForWriting.close()
+                process.waitUntilExit()
+            } catch {
+                await MainActor.run { self.desk.sshNote = error.localizedDescription }
+                return
+            }
+            let ok = process.terminationStatus == 0
+            await MainActor.run {
+                self.desk.sshNote = ok
+                    ? self.copy.t("Wrote the remote file.", "远程文件已写入。")
+                    : self.copy.t("The remote write failed.", "远程写入失败。")
+            }
+        }
+    }
+
+    func openRemoteTerminal() {
+        do {
+            _ = try client.openRemoteTerminal(host: desk.sshAlias)
+            desk.sshNote = copy.t("Remote terminal opened.", "远程终端已打开。")
+        } catch {
+            present(error)
+        }
+    }
+
+    func listRemoteSkills() {
+        runSSHArgv(SSHWorkspace.skillsArgv(host: desk.sshAlias), timeout: 12)
+    }
+
+    func forwardRemoteLoopback() {
+        guard let argv = SSHWorkspace.forwardArgv(host: desk.sshAlias, localPort: 8787, remotePort: 8787) else {
+            flash(copy.t("That remote command was refused.", "这条远程命令不能用。"))
+            return
+        }
+        do {
+            try desk.sshForward.launch(executable: "/usr/bin/ssh", arguments: Array(argv.dropFirst()))
+            desk.sshNote = copy.t("Forwarding.", "正在转发。")
+        } catch {
+            desk.sshNote = error.localizedDescription
+        }
+    }
+
+    private func runSSHArgv(_ argv: [String]?, timeout: TimeInterval) {
+        guard let argv, argv.count >= 2, argv[0] == "ssh" else {
+            flash(copy.t("That remote command was refused.", "这条远程命令不能用。"))
+            return
+        }
+        let arguments = Array(argv.dropFirst())
+        let cwd = client.workingDirectory
+        Task {
+            let result = TimedProcess.capture(
+                executable: URL(fileURLWithPath: "/usr/bin/ssh"),
+                arguments: arguments,
+                cwd: cwd,
+                timeout: timeout
+            )
+            let note = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            await MainActor.run {
+                if note.isEmpty {
+                    desk.sshNote = result.ok
+                        ? copy.t("Connected.", "已连通。")
+                        : copy.t("Could not connect.", "连不上。")
+                } else {
+                    desk.sshNote = String(note.prefix(500))
+                }
+            }
+        }
+    }
+
+    func checkPullRequests() {
+        let numbers = desk.prNumbers.split(separator: ",").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+        guard !numbers.isEmpty else {
+            desk.prNote = copy.t("Enter pull request numbers, separated by commas.", "填写 PR 编号，用逗号分开。")
+            return
+        }
+        Task {
+            var current: [String] = []
+            var readable = true
+            for number in numbers {
+                let result = TimedProcess.capture(
+                    executable: URL(fileURLWithPath: "/usr/bin/env"),
+                    arguments: ["gh", "pr", "view", "\(number)", "--json", "number,comments,reviews,statusCheckRollup"],
+                    cwd: client.workingDirectory,
+                    timeout: 12
+                )
+                if !result.ok || PRWatch.parse(json: result.text) == nil {
+                    readable = false
+                    break
+                }
+                current.append(result.text)
+            }
+            let follow = readable ? PRWatch.followUps(previousJSON: desk.previousPRJSON, currentJSON: current) : []
+            await MainActor.run {
+                if !readable {
+                    desk.prNote = copy.t("Could not read pull requests.", "读不到这些 Pull Request。")
+                    return
+                }
+                desk.previousPRJSON = current
+                if follow.isEmpty {
+                    desk.prNote = copy.t("No new comments, reviews, or checks.", "没有新的评论、评审或检查结果。")
+                    return
+                }
+                let body = follow.map(\.text).joined(separator: "\n")
+                if let sessionID = client.sessionID, !sessionID.isEmpty {
+                    desk.prNote = copy.t("Queued into this session.", "已排进当前会话。") + "\n" + body
+                    Task { await client.enqueueFollowUps(follow, sessionID: sessionID) }
+                } else {
+                    desk.prNote = copy.t("Found changes, and no session is open to receive them.", "有变化，但没有打开的会话可以接收。") + "\n" + body
+                }
+            }
+        }
+    }
+
+    func applyProxy() {
+        let trimmed = desk.proxyURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        desk.proxyURL = trimmed
+        UserDefaults.standard.set(trimmed, forKey: "proxyURL")
+        client.proxyURL = trimmed
+        flash(trimmed.isEmpty
+            ? copy.t("Proxy cleared. It applies the next time the agent starts.", "代理已清除。下次启动 agent 时生效。")
+            : copy.t("Proxy saved. It applies the next time the agent starts.", "代理已保存。下次启动 agent 时生效。"))
+    }
+
+    func copyDoctorReport() {
+        let detail = client.lastError ?? ""
+        let kind = Doctor.classify(
+            cliFound: locator.locate() != nil,
+            signedIn: client.authPresence.isReady,
+            probe: doctorProbe(detail),
+            agentCrashed: detail.localizedCaseInsensitiveContains("crash")
+        )
+        let report = Doctor.report(kind: kind, detail: detail)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(report, forType: .string)
+        desk.doctorNote = doctorSentence(kind)
+    }
+
+    private func doctorProbe(_ detail: String) -> RelayProbeResult? {
+        let text = detail.lowercased()
+        if text.contains("timed out") || text.contains("timeout") { return .timeout }
+        if text.contains("dns") || text.contains("resolve") { return .dns }
+        if text.contains("network") || text.contains("offline") || text.contains("connection") { return .other }
+        return nil
+    }
+
+    private func doctorSentence(_ kind: DoctorKind) -> String {
+        switch kind {
+        case .cliMissing:
+            return copy.t("grok was not found.", "没有找到 grok。")
+        case .auth:
+            return copy.t("grok is installed, and this Mac is not signed in.", "已找到 grok，但这台 Mac 还没登录。")
+        case .network:
+            return copy.t("The last error looks like a network problem.", "最近一次错误像是网络问题。")
+        case .agentCrash:
+            return copy.t("The agent crashed.", "agent 异常退出了。")
+        case .ok:
+            return copy.t("grok is installed and signed in. A redacted report is on the clipboard.", "grok 已安装并且已登录。打码后的报告已复制。")
+        }
+    }
+
+    func openDoctorLogs() {
+        let url = Doctor.logDirectory()
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(url)
+    }
+
+    func saveManualBinary() {
+        UserDefaults.standard.set(manualGrokPath, forKey: GrokBinaryLocator.manualPathKey)
+        retryLocate()
+    }
+
+    func addNaturalAutomation() {
+        let record = AutomationDraft.parse(desk.nlAutomation)
+        guard !record.prompt.isEmpty else { return }
+        addAutomation(record)
+        desk.automationLog = AutomationRuns.append(log: desk.automationLog, title: record.title, status: "saved")
+        desk.nlAutomation = ""
+    }
+
+    func openCompanion() {
+        desk.toggleCompanion(model: self)
     }
 
     func open(_ record: SessionRecord) {
@@ -1528,6 +2232,13 @@ final class AppModel: ObservableObject {
     }
 
     func forkCurrent() {
+        if let sessionID = client.sessionID {
+            let turnID = client.items.reversed().compactMap { item -> String? in
+                if case .assistant(let id, _, _) = item { return id }
+                return nil
+            }.first ?? "latest"
+            desk.lastFork = SessionLinks.fork(sessionID: sessionID, turnID: turnID)
+        }
         Task {
             do {
                 try await client.forkSession()
@@ -1644,8 +2355,21 @@ final class AppModel: ObservableObject {
         showPalette = false
     }
 
+    /// Sends one string and leaves the composer draft alone.
+    func sendText(_ text: String) {
+        let kept = draft
+        draft = text
+        sendDraft()
+        draft = kept
+    }
+
     func sendDraft() {
-        let text = applyGoalIfNeeded(draft)
+        var text = applyGoalIfNeeded(draft)
+        if !client.referenceSessionIDs.isEmpty {
+            text += "\n\n[ref " + client.referenceSessionIDs.joined(separator: " ") + "]"
+        }
+        UsageLedger.record(provider: desk.relayPreset.isEmpty ? "grok" : desk.relayPreset)
+        applyWriteGate(client.workingDirectory)
         historyCursor = nil
         recordPrompt(text)
         draft = ""
@@ -1681,11 +2405,9 @@ final class AppModel: ObservableObject {
     }
 
     func enqueueAside(_ text: String) {
-        destination = .build
         draft = ""
         showPalette = false
-        showInspector = true
-        inspectorDetailsVisible = true
+        presentInspectorTool(.aside)
         Task {
             do {
                 try await client.send(text: SessionFold.asidePrompt(text), kind: .aside)
@@ -1696,18 +2418,12 @@ final class AppModel: ObservableObject {
     }
 
     func openAsideComposer(prefill: String = "") {
-        destination = .build
-        showInspector = true
-        inspectorFocus = .aside
-        inspectorDetailsVisible = true
-        hiddenInspectorPanes.remove(InspectorPane.aside.rawValue)
-        persistInspectorPanes()
         showPalette = false
         mentionQuery = nil
         if !prefill.isEmpty {
             asideDraft = SessionFold.asideDisplay(prefill)
         }
-        focusAsideComposer = true
+        presentInspectorTool(.aside)
     }
 
     func sendAside() {
@@ -1934,8 +2650,7 @@ final class AppModel: ObservableObject {
 
     func openMemoryFile(_ file: MemoryFile) {
         previewedFile = file.url
-        showInspector = true
-        destination = .build
+        presentInspectorTool(.preview)
         showMemory = false
     }
 
@@ -2302,8 +3017,7 @@ final class AppModel: ObservableObject {
                 sendDraft()
             }
         case "/view-plan", "/show-plan", "/plan-view":
-            destination = .build
-            showInspector = true
+            presentInspectorTool(.tasks)
             client.setMode(.plan)
         case "/jump":
             if rest.isEmpty {
@@ -2325,10 +3039,10 @@ final class AppModel: ObservableObject {
             applyEffortCommand(rest)
         case "/always-approve":
             client.setMode(client.mode == .alwaysApprove ? .normal : .alwaysApprove)
-            flash(client.mode.title(chinese: language.resolved() == .chinese))
+            flash(client.mode.title(chinese: showsChinese))
         case "/auto":
             client.setMode(client.mode == .auto ? .normal : .auto)
-            flash(client.mode.title(chinese: language.resolved() == .chinese))
+            flash(client.mode.title(chinese: showsChinese))
         case "/multiline", "/ml":
             requireCmdEnter.toggle()
             flash(requireCmdEnter ? copy.requireCmdEnter : copy.t("Enter sends", "Enter 发送"))
@@ -2771,7 +3485,7 @@ final class AppModel: ObservableObject {
             return
         }
         client.effort = mapped
-        flash(mapped.title(chinese: language.resolved() == .chinese))
+        flash(mapped.title(chinese: showsChinese))
     }
 
     private func applyThemeCommand(_ rest: String) {
@@ -3184,11 +3898,135 @@ final class AppModel: ObservableObject {
         return url
     }
 
+    func applyPermissionTier(_ tier: PermissionTier) {
+        desk.permissionTier = tier.rawValue
+        client.permissionPolicy = desk.policy()
+        let decision = tier == .allowOnce
+            ? PermissionTier.allowOnce
+            : client.permissionPolicy.decision(nil, project: client.workingDirectory.path)
+        client.answerWithPolicy(decision)
+    }
+
+    func setProjectPermission(_ tier: PermissionTier) {
+        desk.setProjectTier(client.workingDirectory.path, tier: tier)
+        client.permissionPolicy = desk.policy()
+        client.answerWithPolicy(client.permissionPolicy.decision(nil, project: client.workingDirectory.path))
+    }
+
+    func followProjectDefault() {
+        desk.setProjectTier(client.workingDirectory.path, tier: nil)
+        client.permissionPolicy = desk.policy().clearingProject(client.workingDirectory.path)
+    }
+
+    func answerPermissionChoice(_ choice: PermissionChoice, sessionID: String?) {
+        let path = client.workingDirectory.path
+        let tier = desk.policy().decision(choice, project: path)
+        switch choice {
+        case .yolo:
+            desk.permissionTier = PermissionTier.yolo.rawValue
+        case .deny:
+            desk.setProjectTier(path, tier: .deny)
+        case .allowSession:
+            desk.setProjectTier(path, tier: .allowSession)
+        case .allowOnce, .ask:
+            break
+        }
+        client.permissionPolicy = desk.policy()
+        client.answerWithPolicy(tier, sessionID: sessionID)
+    }
+
+    func deliverInboundDraft() {
+        let text = desk.inboundDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        Task { await receiveBridge(text: text) }
+    }
+
+    func receiveBridge(text: String, channel: IMChannel? = nil, sender: String = "desk", quiet: Bool = false) async {
+        let channel = channel ?? desk.imChannel
+        let config: IMBridgeConfig
+        if let saved = desk.bridges.first(where: { $0.channel == channel }) {
+            config = saved
+        } else if channel == desk.imChannel {
+            config = IMBridgeConfig(channel: channel, fields: desk.imFields)
+        } else {
+            bridgeFailure(channel, quiet: quiet, en: "This bridge is not saved.", zh: "这个桥接还没保存。")
+            return
+        }
+        let payload = ["channel": channel.rawValue, "sender": sender, "text": text]
+        guard let inbound = IMRouter.accept(payload: payload, config: config) else {
+            bridgeFailure(channel, quiet: quiet, en: "This bridge is missing a field.", zh: "这个桥接还有空项。")
+            return
+        }
+        let known = Set(sessions.map(\.id) + client.workspaceIDs)
+        let route = IMRouter.route(
+            inbound: inbound,
+            trustedProjects: Array(desk.trustedPaths),
+            sessions: Array(known),
+            boundProject: client.workingDirectory.path
+        )
+        let delivered = await IMDelivery.deliver(route: route, client: client)
+        if !delivered {
+            bridgeFailure(channel, quiet: quiet, en: "This message was not sent. Trust the project, or use /p and /r with a known session.", zh: "这条没有送进去。先信任项目，或用 /p，以及已有会话的 /r。")
+        }
+        refreshWorkspace()
+    }
+
+    private func bridgeFailure(_ channel: IMChannel, quiet: Bool, en: String, zh: String) {
+        if quiet {
+            desk.bridgeNotes[channel.rawValue] = copy.t(en, zh)
+        } else {
+            flash(copy.t(en, zh))
+        }
+    }
+
+    func setExtension(kind: String, name: String, enabled: Bool) {
+        desk.extensionToggles = ExtensionToggles.set(desk.extensionToggles, kind: kind, name: name, enabled: enabled)
+        ExtensionGate.save(desk.extensionToggles, url: extensionToggleURL)
+        try? ExtensionGate.apply(home: currentAgentHome(), toggles: desk.extensionToggles)
+    }
+
+    func loadExtensionToggles() {
+        desk.extensionToggles = ExtensionGate.load(url: extensionToggleURL)
+    }
+
+    func currentAgentHome() -> URL {
+        if UserDefaults.standard.bool(forKey: "relayHomeApplied"),
+           UserDefaults.standard.string(forKey: "relayHomeMode") == RelayHomeMode.independent.rawValue {
+            return independentRelayHome
+        }
+        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".grok", isDirectory: true)
+    }
+
+    func syncAgentHome() {
+        let home: String
+        if UserDefaults.standard.bool(forKey: "relayHomeApplied"),
+           UserDefaults.standard.string(forKey: "relayHomeMode") == RelayHomeMode.independent.rawValue {
+            home = independentRelayHome.path
+        } else {
+            home = ""
+        }
+        client.grokHome = home
+        Task { try? await client.applyAgentHome(home) }
+    }
+
+    private var independentRelayHome: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("GrokDesktop/relay-home", isDirectory: true)
+    }
+
+    private var extensionToggleURL: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("GrokDesktop/extension-toggles.json")
+    }
+
     private func present(_ error: Error) {
-        flash(error.localizedDescription)
         if let acp = error as? ACPError, acp == .grokNotFound {
+            flash(shell(.errorCLI))
             firstRunReason = .missingCLI
-        } else if error.localizedDescription.lowercased().contains("auth")
+            return
+        }
+        flash(shell(.errorGeneric))
+        if error.localizedDescription.lowercased().contains("auth")
                     || error.localizedDescription.lowercased().contains("login")
                     || error.localizedDescription.lowercased().contains("unauthor") {
             firstRunReason = .unsigned

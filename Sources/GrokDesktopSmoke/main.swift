@@ -916,6 +916,80 @@ expect(
     !ChatScrollMath.isNearBottom(offset: 1100, visible: 800, content: 2000),
     "far from bottom is not near"
 )
+expect(
+    ChatScrollMath.clampedOriginY(originY: 2400, content: 2000, visible: 800) == 1200,
+    "origin past the folded transcript clamps to the bottom"
+)
+expect(
+    ChatScrollMath.clampedOriginY(originY: -40, content: 2000, visible: 800) == 0,
+    "origin above the transcript clamps to the top"
+)
+expect(
+    ChatScrollMath.clampedOriginY(originY: 400, content: 2000, visible: 800) == 400,
+    "origin inside the transcript stays"
+)
+expect(
+    ChatScrollMath.clampedOriginY(originY: 40, content: 500, visible: 800) == 0,
+    "a short transcript has no travel"
+)
+expect(
+    ChatScrollMath.kickOriginY(originY: 1200, content: 2000, visible: 800) == 1199,
+    "kick steps one point off the bottom"
+)
+expect(
+    ChatScrollMath.shouldRevealBottom(
+        previousContent: 5000,
+        content: 1800,
+        previousOffset: 4200,
+        previousVisible: 800
+    ),
+    "a fold while following the bottom reveals the latest rows"
+)
+expect(
+    !ChatScrollMath.shouldRevealBottom(
+        previousContent: 5000,
+        content: 1800,
+        previousOffset: 200,
+        previousVisible: 800
+    ),
+    "a fold while reading earlier rows does not jump"
+)
+expect(
+    !ChatScrollMath.shouldRevealBottom(
+        previousContent: 2000,
+        content: 1960,
+        previousOffset: 1200,
+        previousVisible: 800
+    ),
+    "a one-line shrink does not reveal"
+)
+expect(
+    ChatScrollMath.shouldFollowGrowth(
+        previousContent: 2000,
+        content: 2300,
+        previousOffset: 1200,
+        previousVisible: 800
+    ),
+    "a sent prompt follows the bottom"
+)
+expect(
+    !ChatScrollMath.shouldFollowGrowth(
+        previousContent: 2000,
+        content: 2300,
+        previousOffset: 100,
+        previousVisible: 800
+    ),
+    "reading earlier rows does not jump when a prompt arrives"
+)
+expect(
+    !ChatScrollMath.shouldFollowGrowth(
+        previousContent: 2000,
+        content: 2004,
+        previousOffset: 1200,
+        previousVisible: 800
+    ),
+    "a few points of growth do not move the scroll"
+)
 
 let timeoutDir = FileManager.default.temporaryDirectory.appendingPathComponent("gd-timeout-\(UUID().uuidString)", isDirectory: true)
 try! FileManager.default.createDirectory(at: timeoutDir, withIntermediateDirectories: true)
@@ -1411,6 +1485,37 @@ SessionFold.apply(
     onto: &harnessSnap
 )
 expect(harnessSnap.hookEvents.first?.blocked == true, "fold hook execution")
+let parsedHookRuns = HarnessEvents.hookEvents(from: SessionUpdate(
+    kind: .hookExecution,
+    raw: [
+        "event_name": "post_tool_use",
+        "runs": [
+            ["name": "global/settings:post_tool_use[0].hooks[0]", "status": ["status": "success", "elapsed_ms": 12]],
+            ["name": "plugin/codex/hooks:post_tool_use[0].hooks[0]", "status": ["status": "failed", "elapsed_ms": 4]]
+        ]
+    ]
+))
+expect(parsedHookRuns.count == 2, "a hook update splits into its runs")
+expect(parsedHookRuns[0].event == "post_tool_use" && parsedHookRuns[0].command == "settings", "hook run keeps the event and a short name")
+expect(parsedHookRuns[1].command == "codex" && parsedHookRuns[1].failed, "a failed hook run stays failed")
+var collapsedHooks = SessionSnapshot()
+SessionFold.apply(
+    SessionUpdate(kind: .hookExecution, raw: [
+        "event_name": "post_tool_use",
+        "runs": [["name": "global/settings:post_tool_use[0].hooks[0]", "status": ["status": "success"]]]
+    ]),
+    onto: &collapsedHooks
+)
+SessionFold.apply(
+    SessionUpdate(kind: .hookExecution, raw: [
+        "event_name": "post_tool_use",
+        "runs": [["name": "global/settings:post_tool_use[0].hooks[0]", "status": ["status": "success"]]]
+    ]),
+    onto: &collapsedHooks
+)
+expect(collapsedHooks.hookEvents.count == 1 && collapsedHooks.hookEvents[0].count == 2, "repeated hook runs collapse to one row")
+expect(HarnessEvents.hookRows(collapsedHooks.hookEvents).count == 1, "the inspector shows the collapsed row")
+expect(HarnessEvents.shortHookName("plugin/codex/hooks:session_start[0].hooks[0]") == "codex", "plugin hook name drops the path")
 expect(harnessSnap.checkpoints.first?.tokensBefore == 8000, "fold compaction checkpoint")
 expect(harnessSnap.checkpoints.first?.promptIndex == nil, "a checkpoint without an index does not invent one")
 expect(harnessSnap.scheduledTasks.first?.id == "loop-1", "fold scheduled task")
@@ -1848,6 +1953,103 @@ expect(!FileManager.default.fileExists(atPath: updateRoot.path), "clear removes 
 
 expect(RunningApp.blocker(appURL: URL(fileURLWithPath: "/tmp/GrokDesktop")) == .notInstalledApp, "a bare binary is not updated in place")
 expect(RunningApp.blocker(appURL: URL(fileURLWithPath: "/private/var/folders/x/AppTranslocation/d/Grok Desktop.app")) == .translocated, "a translocated app must be moved first")
+
+let reviewHome = InspectorAttention.choose(
+    pinned: nil,
+    available: [.changes, .tasks],
+    planNeedsApproval: false,
+    hasChanges: true,
+    hasCommands: false,
+    hasWork: true
+)
+expect(reviewHome == .changes, "file changes take the sidebar when nothing is pinned")
+let planFirst = InspectorAttention.choose(
+    pinned: nil,
+    available: [.changes, .tasks, .commands],
+    planNeedsApproval: true,
+    hasChanges: true,
+    hasCommands: true,
+    hasWork: true
+)
+expect(planFirst == .tasks, "a plan that needs approval stays in front of the diff")
+let pinnedDiff = InspectorAttention.choose(
+    pinned: .changes,
+    available: [.changes, .tasks],
+    planNeedsApproval: true,
+    hasChanges: false,
+    hasCommands: false,
+    hasWork: true
+)
+expect(pinnedDiff == .changes, "a chosen sidebar tab stays put")
+let droppedPin = InspectorAttention.choose(
+    pinned: .preview,
+    available: [.changes, .tasks],
+    planNeedsApproval: false,
+    hasChanges: true,
+    hasCommands: false,
+    hasWork: false
+)
+expect(droppedPin == .changes, "a closed preview gives the sidebar back to the diff")
+let commandFirst = InspectorAttention.choose(
+    pinned: nil,
+    available: [.changes, .tasks, .commands],
+    planNeedsApproval: false,
+    hasChanges: false,
+    hasCommands: true,
+    hasWork: true
+)
+expect(commandFirst == .commands, "a command takes the sidebar before any files change")
+let idleTasks = InspectorAttention.choose(
+    pinned: nil,
+    available: [.changes, .tasks],
+    planNeedsApproval: false,
+    hasChanges: false,
+    hasCommands: false,
+    hasWork: true
+)
+expect(idleTasks == .tasks, "a task list shows when nothing has changed yet")
+expect(
+    InspectorAttention.choose(
+        pinned: nil,
+        available: [],
+        planNeedsApproval: false,
+        hasChanges: true,
+        hasCommands: true,
+        hasWork: true
+    ) == nil,
+    "hidden sidebar tools are not opened"
+)
+
+let toolClosed = InspectorToolState(tool: nil, focused: false)
+let toolOpened = InspectorToolToggle.next(toolClosed, .toggle(.changes))
+expect(toolOpened == InspectorToolState(tool: .changes, focused: true), "a closed tool opens and takes the look")
+let toolRefocus = InspectorToolToggle.next(InspectorToolState(tool: .changes, focused: false), .toggle(.changes))
+expect(toolRefocus.tool == .changes && toolRefocus.focused, "looking at the conversation focuses the open tool")
+let toolShut = InspectorToolToggle.next(toolRefocus, .toggle(.changes))
+expect(toolShut.tool == nil && !toolShut.focused, "looking at the open tool closes it")
+let toolSwap = InspectorToolToggle.next(toolOpened, .toggle(.terminal))
+expect(toolSwap == InspectorToolState(tool: .terminal, focused: true), "another tool replaces the open one")
+let toolDismissed = InspectorToolToggle.next(toolSwap, .close)
+expect(toolDismissed.tool == nil && !toolDismissed.focused, "close clears the tool and leaves the column")
+let toolLeft = InspectorToolToggle.next(toolOpened, .focusLeft)
+expect(toolLeft.tool == .changes && !toolLeft.focused, "the conversation takes the look and leaves the tool open")
+let toolBack = InspectorToolToggle.next(toolLeft, .focusPane)
+expect(toolBack.tool == .changes && toolBack.focused, "the open tool takes the look back")
+let toolEmptyLook = InspectorToolToggle.next(toolClosed, .focusPane)
+expect(toolEmptyLook.tool == nil && !toolEmptyLook.focused, "an empty column cannot take the look")
+expect(!InspectorToolToggle.pressed(tool: .changes, state: toolOpened, changesEmpty: true), "empty changes are not pressed")
+expect(InspectorToolToggle.pressed(tool: .changes, state: toolOpened, changesEmpty: false), "changes with a diff stay pressed")
+expect(!InspectorToolToggle.pressed(tool: .terminal, state: toolOpened, changesEmpty: false), "a different tool is not pressed")
+expect(
+    InspectorToolToggle.pressed(tool: .terminal, state: InspectorToolState(tool: .terminal, focused: false), changesEmpty: true),
+    "a tool stays pressed without keyboard focus"
+)
+let toolHidden = InspectorToolToggle.toggle(columnVisible: false, state: toolOpened, tool: .preview)
+expect(toolHidden.columnVisible && toolHidden.state == InspectorToolState(tool: .preview, focused: true), "a hidden column opens onto the chosen tool")
+let toolStays = InspectorToolToggle.toggle(columnVisible: true, state: toolOpened, tool: .changes)
+expect(toolStays.columnVisible && toolStays.state.tool == nil, "closing the looked-at tool keeps the column")
+
+runFeatureParity()
 
 print("GrokDesktopSmoke ok")
 

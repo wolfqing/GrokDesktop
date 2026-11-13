@@ -16,6 +16,7 @@ struct DashboardView: View {
             )
 
             dispatchBar
+            laneLine
 
             if rows.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
@@ -61,6 +62,19 @@ struct DashboardView: View {
             if lhs.rank != rhs.rank { return lhs.rank < rhs.rank }
             return lhs.stamp > rhs.stamp
         }
+    }
+
+    private var laneLine: some View {
+        let needs = model.client.liveWorkspaces.filter {
+            SessionBoard.lane(needsInput: $0.permission != nil || $0.userQuestion != nil, working: $0.isTurnRunning) == .needsInput
+        }.count
+        let working = model.client.liveWorkspaces.filter {
+            SessionBoard.lane(needsInput: $0.permission != nil || $0.userQuestion != nil, working: $0.isTurnRunning) == .working
+        }.count
+        let done = model.unseenTurns.count
+        return Text(l10n.t("Needs you \(needs) · Working \(working) · Done \(done)", "需要你 \(needs) · 进行中 \(working) · 完成 \(done)"))
+            .font(.system(size: 12))
+            .foregroundStyle(palette.secondary)
     }
 
     private var dispatchBar: some View {
@@ -190,7 +204,7 @@ struct DashboardView: View {
                             : "checkmark.circle",
                         tint: workspace.permission != nil || workspace.userQuestion != nil ? palette.warning : palette.secondary,
                         title: statusText(workspace),
-                        trailing: workspace.mode.title(chinese: model.language.resolved() == .chinese)
+                        trailing: workspace.mode.title(chinese: model.showsChinese)
                     )
                     promptLine(headline(workspace))
                     repoLine(
@@ -247,7 +261,7 @@ struct DashboardView: View {
                     )
                     promptLine(turn.prompt.isEmpty ? turn.cwdName : turn.prompt)
                     repoLine(
-                        turn.cardLine(chinese: model.language.resolved() == .chinese),
+                        turn.cardLine(chinese: model.showsChinese),
                         path: turn.cwd
                     )
                 }
@@ -272,7 +286,7 @@ struct DashboardView: View {
         DispatchIsolation.line(
             folder: folder,
             place: isolated ? .isolatedCopy : .currentDirectory,
-            chinese: model.language.resolved() == .chinese
+            chinese: model.showsChinese
         )
     }
 

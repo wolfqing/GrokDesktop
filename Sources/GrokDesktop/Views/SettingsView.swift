@@ -50,8 +50,8 @@ struct SettingsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 2) {
                 groupLabel(l10n.general)
-                item(.account, l10n.account, "person")
-                item(.appearance, l10n.appearance, "paintbrush")
+                item(.account, model.shell(.settingsAccount), "person")
+                item(.appearance, model.shell(.settingsAppearance), "paintbrush")
                 item(.behavior, l10n.behavior, "switch.2")
                 item(.session, l10n.t("Session", "会话"), "clock")
                 groupLabel(l10n.grok).padding(.top, 14)
@@ -164,12 +164,23 @@ struct SettingsView: View {
                 }
             }
             if model.showLanguagePicker {
-                VStack(spacing: 6) {
-                    languageOption(.system, l10n.systemLanguage)
-                    languageOption(.english, l10n.english)
-                    languageOption(.chinese, l10n.chinese)
+                ScrollView {
+                    VStack(spacing: 6) {
+                        localeOption("system", l10n.systemLanguage)
+                        ForEach(LocaleCatalog.languageIDs, id: \.self) { id in
+                            localeOption(id, LocaleCatalog.endonym(id))
+                        }
+                    }
                 }
+                .frame(maxHeight: 220)
+                Text(model.shell(.settingsTitle))
+                    .font(.system(size: 12))
+                    .foregroundStyle(palette.secondary)
             }
+            Text(model.shell(.navSettings))
+                .font(.system(size: 12))
+                .foregroundStyle(palette.secondary)
+            AccountDeskSection()
             VStack(alignment: .leading, spacing: 8) {
                 statusLine(
                     model.client.authPresence == .signedIn
@@ -213,27 +224,30 @@ struct SettingsView: View {
     }
 
     private var languageLabel: String {
-        switch model.language {
-        case .system: return l10n.systemLanguage
-        case .english: return l10n.english
-        case .chinese: return l10n.chinese
-        }
+        if model.desk.localeID == "system" { return l10n.systemLanguage }
+        return LocaleCatalog.endonym(model.desk.localeID)
     }
 
-    private func languageOption(_ value: AppLanguage, _ title: String) -> some View {
+    private func localeOption(_ id: String, _ title: String) -> some View {
         Button {
-            model.language = value
+            model.desk.localeID = id
+            switch id {
+            case "en": model.language = .english
+            case "zh-Hans", "zh-Hant": model.language = .chinese
+            case "system": model.language = .system
+            default: model.objectWillChange.send()
+            }
             model.showLanguagePicker = false
         } label: {
             HStack {
                 Text(title)
                 Spacer()
-                if model.language == value {
+                if model.desk.localeID == id {
                     Image(systemName: "checkmark")
                 }
             }
             .padding(10)
-            .background(model.language == value ? palette.selected : palette.chip, in: RoundedRectangle(cornerRadius: 8))
+            .background(model.desk.localeID == id ? palette.selected : palette.chip, in: RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
     }
@@ -565,6 +579,8 @@ struct SettingsView: View {
             .padding(16)
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(palette.hairline))
 
+            UsageDeskSection()
+
             if model.accountUsage.hasPayAsYouGo {
                 HStack {
                     Text(l10n.t("Pay as you go", "按量付费"))
@@ -653,6 +669,7 @@ struct SettingsView: View {
                 model.grokConfig = model.configStore.load()
             }
             .buttonStyle(GrokSecondaryButtonStyle())
+            SessionDeskSection()
         }
         .padding(.top, 8)
     }
@@ -735,6 +752,7 @@ struct SettingsView: View {
                 model.configStore.openInEditor()
             }
             .buttonStyle(GrokSecondaryButtonStyle())
+            ExtensionDeskSection()
         }
         .padding(.top, 8)
         .onAppear {
@@ -905,6 +923,8 @@ struct SettingsView: View {
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             }
+
+            AdvancedDeskSection()
 
             VStack(alignment: .leading, spacing: 8) {
                 Text(l10n.t("Tools", "工具"))
@@ -1092,8 +1112,8 @@ struct SettingsView: View {
 
     private func title(for section: SettingsSection) -> String {
         switch section {
-        case .account: return l10n.account
-        case .appearance: return l10n.appearance
+        case .account: return model.shell(.settingsAccount)
+        case .appearance: return model.shell(.settingsAppearance)
         case .behavior: return l10n.behavior
         case .session: return l10n.t("Session", "会话")
         case .customize: return l10n.customize

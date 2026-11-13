@@ -151,7 +151,7 @@ public struct StagedAppUpdate: Codable, Equatable, Sendable {
     }
 }
 
-public struct AppUpdateCache {
+public struct AppUpdateCache: Sendable {
     public var root: URL
 
     public init(root: URL) {

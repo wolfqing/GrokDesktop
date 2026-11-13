@@ -27,9 +27,16 @@ public struct GrokBinaryLocator: Sendable {
         return nil
     }
 
+    public static let manualPathKey = "grokBinaryPath"
+
     public func candidates() -> [URL] {
         var urls: [URL] = []
         let home = FileManager.default.homeDirectoryForCurrentUser
+        if let manual = UserDefaults.standard.string(forKey: Self.manualPathKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !manual.isEmpty {
+            urls.append(URL(fileURLWithPath: manual))
+        }
 
         if let pathEnvironment {
             for entry in pathEnvironment.split(separator: ":") {

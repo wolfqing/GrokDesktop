@@ -7,10 +7,14 @@ struct ComposerView: View {
     @Environment(\.palette) private var palette
     @Environment(\.l10n) private var l10n
 
-    private var isChinese: Bool { model.language.resolved() == .chinese }
+    private var isChinese: Bool { model.showsChinese }
 
     @State private var showModelMenu = false
     @FocusState private var editorFocused: Bool
+    @StateObject private var speech = DictateCapture()
+    @State private var spoken = ""
+    @State private var speechBase = ""
+    @State private var discardSpoken = false
 
     private var draftImages: [URL] {
         PromptMedia.imageURLs(in: model.draft)
@@ -64,64 +68,73 @@ struct ComposerView: View {
                             model.showPalette = value.hasPrefix("/") && !value.contains(where: \.isWhitespace)
                             model.updateMentions(from: value)
                         }
+                    if !speech.status.isEmpty {
+                        Text(speech.status)
+                            .font(.system(size: 11))
+                            .foregroundStyle(palette.secondary)
+                    }
 
-                    HStack(spacing: 6) {
-                        GrokIconButton(
-                            systemImage: model.showAttachMenu ? "xmark" : "plus",
-                            size: 28,
-                            iconSize: 12.5,
-                            selected: model.showAttachMenu,
-                            cornerRadius: 8,
-                            helpText: l10n.t("Attach or mention (@)", "附加文件或引用 (@)")
-                        ) {
-                            showModelMenu = false
-                            model.showAttachMenu.toggle()
-                        }
-                        .popover(isPresented: $model.showAttachMenu, arrowEdge: .bottom) {
-                            attachMenu
-                        }
-
-                        modeMenu
-
-                        Spacer(minLength: 8)
-
-                        usageChip
-
-                        ModelEffortPicker(
-                            isOpen: $showModelMenu,
-                            modelID: $model.client.buildModel,
-                            choices: model.modelChoices,
-                            effort: $model.client.effort,
-                            chinese: isChinese,
-                            refreshChoices: { model.refreshModelChoices() },
-                            applyTier: { model.client.apply(tier: $0) }
-                        )
-
-                        if model.client.hasActiveWork {
-                            ComposerCircleButton(
-                                systemImage: "stop.fill",
-                                loading: model.client.isStopping,
-                                active: true,
-                                fill: palette.send,
-                                glyph: palette.sendGlyph,
-                                helpText: model.client.isStopping ? l10n.stopping : "\(l10n.stop) (Esc)"
+                    if speech.listening {
+                        recordingBar
+                    } else {
+                        HStack(spacing: 6) {
+                            GrokIconButton(
+                                systemImage: model.showAttachMenu ? "xmark" : "plus",
+                                size: 28,
+                                iconSize: 12.5,
+                                selected: model.showAttachMenu,
+                                cornerRadius: 8,
+                                helpText: l10n.t("Attach or mention (@)", "附加文件或引用 (@)")
                             ) {
-                                if !model.client.isStopping { model.client.stopWork() }
+                                showModelMenu = false
+                                model.showAttachMenu.toggle()
                             }
-                            .disabled(model.client.isStopping)
-                        }
+                            .popover(isPresented: $model.showAttachMenu, arrowEdge: .bottom) {
+                                attachMenu
+                            }
 
-                        ComposerCircleButton(
-                            systemImage: sendSymbol,
-                            loading: false,
-                            active: canSend,
-                            fill: canSend ? palette.send : palette.chip,
-                            glyph: canSend ? palette.sendGlyph : palette.tertiary,
-                            helpText: model.requireCmdEnter ? "⌘⏎" : "⏎"
-                        ) {
-                            submit()
+                            modeMenu
+
+                            Spacer(minLength: 8)
+
+                            usageChip
+
+                            ModelEffortPicker(
+                                isOpen: $showModelMenu,
+                                modelID: $model.client.buildModel,
+                                choices: model.modelChoices,
+                                effort: $model.client.effort,
+                                chinese: isChinese,
+                                refreshChoices: { model.refreshModelChoices() },
+                                applyTier: { model.client.apply(tier: $0) }
+                            )
+
+                            GrokIconButton(
+                                systemImage: "mic",
+                                size: 28,
+                                iconSize: 13.5,
+                                cornerRadius: 8,
+                                helpText: l10n.t("Speak", "口述")
+                            ) {
+                                toggleSpeech()
+                            }
+
+                            if model.client.hasActiveWork {
+                                ComposerCircleButton(
+                                    systemImage: "stop.fill",
+                                    loading: model.client.isStopping,
+                                    active: true,
+                                    fill: palette.send,
+                                    glyph: palette.sendGlyph,
+                                    helpText: model.client.isStopping ? l10n.stopping : "\(l10n.stop) (Esc)"
+                                ) {
+                                    if !model.client.isStopping { model.client.stopWork() }
+                                }
+                                .disabled(model.client.isStopping)
+                            }
+
+                            sendButton
                         }
-                        .disabled(!canSend)
                     }
                 }
                 .padding(.horizontal, 14)
@@ -171,6 +184,22 @@ struct ComposerView: View {
         }
         .onExitCommand {
             _ = model.handleEscape()
+        }
+        .onDisappear {
+            if speech.listening { commitSpoken() }
+        }
+        .onChange(of: speech.listening) { _, listening in
+            guard !listening else { return }
+            if discardSpoken {
+                discardSpoken = false
+                spoken = ""
+                return
+            }
+            let text = spoken.trimmingCharacters(in: .whitespacesAndNewlines)
+            spoken = ""
+            guard !text.isEmpty else { return }
+            model.suppressSuggest = true
+            model.draft = Self.spokenDraft(base: speechBase, spoken: text)
         }
         .background(ComposerKeyMonitor())
         .onPasteCommand(of: [.image, .fileURL]) { _ in
@@ -401,9 +430,107 @@ struct ComposerView: View {
 
     private var canSend: Bool {
         !model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || (speech.listening && !spoken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    }
+
+    private var sendButton: some View {
+        let active = canSend || speech.listening
+        return ComposerCircleButton(
+            systemImage: sendSymbol,
+            loading: false,
+            active: active,
+            fill: active ? palette.send : palette.chip,
+            glyph: active ? palette.sendGlyph : palette.tertiary,
+            helpText: model.requireCmdEnter ? "⌘⏎" : "⏎"
+        ) {
+            submit()
+        }
+        .disabled(!active)
+    }
+
+    private var recordingBar: some View {
+        HStack(spacing: 8) {
+            Button(action: cancelSpeech) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(palette.secondary)
+                    .frame(width: 30, height: 30)
+                    .background(palette.chip, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .help(l10n.t("Cancel", "取消"))
+
+            VoiceWaveform(levels: speech.levels, quiet: palette.secondary, loud: palette.text)
+                .frame(maxWidth: .infinity)
+                .frame(height: 30)
+
+            Button(action: finishSpeech) {
+                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                    .fill(palette.text)
+                    .frame(width: 9, height: 9)
+                    .frame(width: 30, height: 30)
+                    .background(palette.chip, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .help(l10n.t("Stop speaking", "说完"))
+
+            sendButton
+        }
+    }
+
+    private func toggleSpeech() {
+        guard !speech.listening else { return }
+        discardSpoken = false
+        spoken = ""
+        speechBase = model.draft
+        speech.toggle(
+            localeID: model.desk.localeID,
+            deniedSpeech: l10n.t("Speech recognition is off.", "语音识别没有打开。"),
+            deniedMic: l10n.t("The microphone is off.", "麦克风没有打开。"),
+            unavailable: l10n.t("Speech recognition is not available.", "这台 Mac 不能做语音识别。"),
+            onPartial: { applySpoken($0) },
+            onFinal: { applySpoken($0) }
+        )
+    }
+
+    private func applySpoken(_ text: String) {
+        spoken = text
+        model.suppressSuggest = true
+        model.draft = Self.spokenDraft(base: speechBase, spoken: text)
+    }
+
+    private func cancelSpeech() {
+        spoken = ""
+        discardSpoken = true
+        model.suppressSuggest = true
+        model.draft = speechBase
+        speech.stop()
+    }
+
+    private func finishSpeech() {
+        commitSpoken()
+    }
+
+    private func commitSpoken() {
+        let text = spoken.trimmingCharacters(in: .whitespacesAndNewlines)
+        spoken = ""
+        discardSpoken = true
+        speech.stop()
+        guard !text.isEmpty else { return }
+        model.suppressSuggest = true
+        model.draft = Self.spokenDraft(base: speechBase, spoken: text)
+    }
+
+    private static func spokenDraft(base: String, spoken: String) -> String {
+        let spoken = spoken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !spoken.isEmpty else { return base }
+        guard !base.isEmpty else { return spoken }
+        if base.last?.isWhitespace == true { return base + spoken }
+        return base + " " + spoken
     }
 
     private func submit(forceNow: Bool = false) {
+        if speech.listening { commitSpoken() }
         model.dismissComposerSuggestions()
         showModelMenu = false
         let text = model.draft.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -764,6 +891,41 @@ struct BusySendBar: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .grokCard(cornerRadius: 15)
+    }
+}
+
+private struct VoiceWaveform: View {
+    var levels: [CGFloat]
+    var quiet: Color
+    var loud: Color
+
+    var body: some View {
+        Canvas { context, size in
+            let columns = max(24, Int(size.width / 4.2))
+            let dot: CGFloat = 2.4
+            let pitch: CGFloat = 3.4
+            let mid = size.height / 2
+            let count = max(levels.count, 1)
+            for index in 0..<columns {
+                let x = (CGFloat(index) + 0.5) * size.width / CGFloat(columns)
+                let t = CGFloat(index) / CGFloat(max(columns - 1, 1))
+                let window = exp(-pow((t - 0.5) / 0.27, 2))
+                let sampleIndex = min(count - 1, Int(t * CGFloat(count - 1)))
+                let sample = levels.isEmpty ? 0 : levels[sampleIndex]
+                let now = levels.last ?? 0
+                let amp = min(1, (sample * 0.65 + now * 0.7) * (0.18 + 0.82 * window))
+                let dots = amp < 0.06 ? 1 : min(7, 1 + Int((amp * 6).rounded(.down)))
+                let span = CGFloat(dots - 1) * pitch
+                var y = mid - span / 2
+                let color = dots == 1 ? quiet.opacity(0.42) : loud.opacity(0.55 + amp * 0.4)
+                for _ in 0..<dots {
+                    let rect = CGRect(x: x - dot / 2, y: y - dot / 2, width: dot, height: dot)
+                    context.fill(Path(ellipseIn: rect), with: .color(color))
+                    y += pitch
+                }
+            }
+        }
+        .accessibilityHidden(true)
     }
 }
 

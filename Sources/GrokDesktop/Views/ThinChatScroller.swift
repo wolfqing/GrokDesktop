@@ -488,6 +488,7 @@ struct OverlayScrollbar: NSViewRepresentable {
 final class ChatScrollDriver {
     weak var scroll: NSScrollView?
     weak var knob: ScrollKnobView?
+    private var programmaticOrigins: [(y: CGFloat, until: Date)] = []
 
     func attach(_ scroll: NSScrollView) {
         let changed = self.scroll !== scroll
@@ -502,6 +503,16 @@ final class ChatScrollDriver {
         knob?.isDark = isDark
     }
 
+    func consumeProgrammatic(originY: CGFloat) -> Bool {
+        let now = Date()
+        programmaticOrigins.removeAll { $0.until < now }
+        guard let index = programmaticOrigins.firstIndex(where: { abs($0.y - originY) < 0.75 }) else {
+            return false
+        }
+        programmaticOrigins.remove(at: index)
+        return true
+    }
+
     func seek(to progress: CGFloat) {
         guard let scroll else { return }
         let clip = scroll.contentView
@@ -512,6 +523,52 @@ final class ChatScrollDriver {
             visible: max(clip.bounds.height, 1),
             flipped: document.isFlipped
         )
+        scrollProgrammatically(to: y, scroll: scroll, clip: clip)
+    }
+
+    /// Pulls the viewport back inside the document after the transcript shrinks.
+    func clampIfOutside() {
+        guard let scroll else { return }
+        let clip = scroll.contentView
+        guard let document = clip.documentView else { return }
+        let visible = max(clip.bounds.height, 1)
+        let content = max(document.bounds.height, visible)
+        let y = ChatScrollMath.clampedOriginY(originY: clip.bounds.origin.y, content: content, visible: visible)
+        guard abs(y - clip.bounds.origin.y) > 0.5 else { return }
+        scrollProgrammatically(to: y, scroll: scroll, clip: clip)
+    }
+
+    /// Nudges LazyVStack so the rows in view actually materialize, then pins to the bottom.
+    func revealBottom() {
+        guard let scroll else { return }
+        let clip = scroll.contentView
+        guard let document = clip.documentView else { return }
+        document.needsLayout = true
+        clip.needsLayout = true
+        scroll.layoutSubtreeIfNeeded()
+        let visible = max(clip.bounds.height, 1)
+        let content = max(document.bounds.height, visible)
+        let kick = ChatScrollMath.kickOriginY(originY: clip.bounds.origin.y, content: content, visible: visible)
+        if abs(kick - clip.bounds.origin.y) > 0.25 {
+            scrollProgrammatically(to: kick, scroll: scroll, clip: clip)
+        }
+        document.layoutSubtreeIfNeeded()
+        let settled = max(document.bounds.height, visible)
+        let bottom = ChatScrollMath.originY(
+            progress: 1,
+            content: settled,
+            visible: visible,
+            flipped: document.isFlipped
+        )
+        guard abs(bottom - clip.bounds.origin.y) > 0.5 else { return }
+        scrollProgrammatically(to: bottom, scroll: scroll, clip: clip)
+    }
+
+    private func scrollProgrammatically(to y: CGFloat, scroll: NSScrollView, clip: NSClipView) {
+        programmaticOrigins.append((y: y, until: Date().addingTimeInterval(0.4)))
+        if programmaticOrigins.count > 8 {
+            programmaticOrigins.removeFirst(programmaticOrigins.count - 8)
+        }
         NSAnimationContext.beginGrouping()
         NSAnimationContext.current.duration = 0
         clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: y))

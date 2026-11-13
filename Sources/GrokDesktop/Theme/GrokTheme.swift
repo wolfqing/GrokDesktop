@@ -1,3 +1,4 @@
+import GrokDesktopCore
 import SwiftUI
 
 enum AppearancePreference: String, CaseIterable, Identifiable {
@@ -112,22 +113,31 @@ enum InspectorPane: String, CaseIterable, Identifiable {
         case .shell: return chinese ? "终端" : "Terminal"
         }
     }
+
+    var tool: InspectorTool {
+        switch self {
+        case .context: return .context
+        case .work: return .tasks
+        case .terminals: return .commands
+        case .changes: return .changes
+        case .hooks: return .hooks
+        case .aside: return .aside
+        case .shell: return .terminal
+        }
+    }
 }
 
-enum InspectorFocus: String, CaseIterable, Identifiable {
-    case changes
-    case preview
-    case terminal
-    case aside
-
-    var id: String { rawValue }
-
+extension InspectorTool {
     var systemImage: String {
         switch self {
         case .changes: return "chevron.left.forwardslash.chevron.right"
         case .preview: return "eye"
         case .terminal: return "terminal"
         case .aside: return "text.bubble"
+        case .context: return "chart.pie"
+        case .tasks: return "checklist"
+        case .commands: return "terminal"
+        case .hooks: return "bolt.horizontal"
         }
     }
 
@@ -137,6 +147,10 @@ enum InspectorFocus: String, CaseIterable, Identifiable {
         case .preview: return chinese ? "预览" : "Preview"
         case .terminal: return chinese ? "终端" : "Terminal"
         case .aside: return chinese ? "顺便问" : "Aside"
+        case .context: return chinese ? "上下文" : "Context"
+        case .tasks: return chinese ? "任务" : "Tasks"
+        case .commands: return chinese ? "代理命令" : "Agent commands"
+        case .hooks: return chinese ? "钩子" : "Hooks"
         }
     }
 }

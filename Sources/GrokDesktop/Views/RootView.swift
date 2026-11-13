@@ -172,6 +172,7 @@ struct RootView: View {
         }
         .onAppear {
             model.prepareAttention()
+            model.resumeBridgeLive()
             if model.needsFolderPick {
                 model.needsFolderPick = false
                 model.chooseWorkingDirectory()
@@ -186,6 +187,7 @@ struct RootView: View {
         }
         .environment(\.palette, palette)
         .environment(\.l10n, model.copy)
+        .environmentObject(model.desk)
         .foregroundStyle(palette.text)
         .background(palette.canvas)
         .animation(.easeOut(duration: 0.16), value: model.toast)
@@ -261,7 +263,7 @@ struct RootView: View {
                                 Text(session.title)
                                     .font(.system(size: 13.5, weight: .medium))
                                     .lineLimit(1)
-                                Text(RelativeTime.meta(session, chinese: model.language.resolved() == .chinese))
+                                Text(RelativeTime.meta(session, chinese: model.showsChinese))
                                     .font(.system(size: 11))
                                     .foregroundStyle(palette.secondary)
                             }

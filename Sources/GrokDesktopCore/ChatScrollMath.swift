@@ -33,6 +33,56 @@ public enum ChatScrollMath {
 
     public static let jumpSlack: CGFloat = 56
     public static let releaseSlack: CGFloat = 8
+    /// A turn ending folds tool rows and thinking, so the transcript can shrink by this much in one pass.
+    public static let revealShrink: CGFloat = 64
+
+    /// Clip origin is only valid from the top of the document through `content - visible`.
+    /// Past that, the viewport is empty until the next user scroll clamps it.
+    public static func clampedOriginY(originY: CGFloat, content: CGFloat, visible: CGFloat) -> CGFloat {
+        let travel = max(content - visible, 0)
+        return min(max(originY, 0), travel)
+    }
+
+    /// One point inside the document, so a bottom pin can nudge LazyVStack into laying out the visible rows.
+    public static func kickOriginY(originY: CGFloat, content: CGFloat, visible: CGFloat) -> CGFloat {
+        let clamped = clampedOriginY(originY: originY, content: content, visible: visible)
+        let travel = max(content - visible, 0)
+        guard travel > 1 else { return clamped }
+        let stepped = clamped > 1 ? clamped - 1 : clamped + 1
+        return clampedOriginY(originY: stepped, content: content, visible: visible)
+    }
+
+    /// True when a shrink landed while the viewport was following the latest rows.
+    /// The clip origin is then often left in the gap the folded rows used to occupy.
+    public static func shouldRevealBottom(
+        previousContent: CGFloat,
+        content: CGFloat,
+        previousOffset: CGFloat,
+        previousVisible: CGFloat
+    ) -> Bool {
+        guard previousContent > 0, previousContent > content + revealShrink else { return false }
+        return isNearBottom(
+            offset: previousOffset,
+            visible: max(previousVisible, 1),
+            content: previousContent
+        )
+    }
+
+    /// True when new rows arrived under a viewport that was already following the latest line.
+    /// A few points of streaming should not yank the scroll; a sent prompt does.
+    public static func shouldFollowGrowth(
+        previousContent: CGFloat,
+        content: CGFloat,
+        previousOffset: CGFloat,
+        previousVisible: CGFloat
+    ) -> Bool {
+        guard previousContent > 0, content > previousContent + 8 else { return false }
+        return isNearBottom(
+            offset: previousOffset,
+            visible: max(previousVisible, 1),
+            content: previousContent
+        )
+    }
 
     public static func distanceFromBottom(offset: CGFloat, visible: CGFloat, content: CGFloat) -> CGFloat {
         max(content - offset - visible, 0)

@@ -150,10 +150,10 @@ final class AppUpdateCenter {
 
     private func download(_ release: AppRelease) {
         model?.appUpdateNotice = .downloading(release.version.raw)
-        let cache = self.cache
+        let root = cache.root
         downloadTask = Task { [weak self] in
             let failure = await Task.detached(priority: .utility) {
-                Self.prepare(release, cache: cache)
+                Self.prepare(release, cache: AppUpdateCache(root: root))
             }.value
             guard let self else { return }
             self.downloadTask = nil
