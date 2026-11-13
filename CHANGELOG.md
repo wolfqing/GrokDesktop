@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.35 - 2026-11-12
+
+Cleaner surfaces, hover states, and right-aligned sidebar controls.
+
+- Changes, Preview, Terminal, and Aside sit on the right next to the inspector toggle, collapsing to icons when the window narrows.
+- Layered Dark and Light surface tokens, 1px hairline borders, focus rings, semantic status badges, and hover micro-interactions across the three-pane workspace, Markdown code blocks, composer, and overlay sheets.
+- Inspector overview cards show live turn progress, context, tasks, agent commands, diffs, and hooks when no single tool is pinned.
+
 ## 0.1.34 - 2026-10-29
 
 The right side opens one tool at a time.
