@@ -84,6 +84,9 @@ final class AppModel: ObservableObject {
     @Published var showAbout = false
     @Published var showPalette = false
     @Published var showInspector = true
+    /// Path to the diff body hidden after a successful restore. A stale patch cannot bring the row back.
+    @Published var hiddenDiffFingerprints: [String: String] = [:]
+    private var diffReviewSessionID: String?
     @Published var inspectorWidth: CGFloat = GrokTheme.inspectorWidth
     /// One-shot request for the inspector to show a mode. The view clears it.
     @Published var inspectorFocusRequest: String?
@@ -1652,20 +1655,46 @@ final class AppModel: ObservableObject {
         showWorktrees = false
     }
 
-    func reviewDiff(action: DiffReview.Action, paths: [String]) {
+    func clearDiffReview() {
+        hiddenDiffFingerprints = [:]
+        diffReviewSessionID = client.sessionID
+    }
+
+    func isDiffHidden(_ file: DiffFile) -> Bool {
+        hiddenDiffFingerprints[file.path] == Self.diffFingerprint(file)
+    }
+
+    /// Put the files back. Each row that actually becomes clean leaves the list.
+    func restoreDiffs(_ files: [DiffFile]) {
+        alignDiffReviewSession()
+        let pending = files.filter { !isDiffHidden($0) }
+        guard !pending.isEmpty else { return }
         let root = client.workingDirectory
-        let files = paths.map { path in
-            let url = root.appendingPathComponent(path)
-            let working = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
-            let baseline = TimedProcess.git(cwd: root, ["show", "HEAD:\(path)"]) ?? ""
-            return ReviewedFile(path: path, baseline: baseline, working: working)
+        let restored = Set(DiffReview.restore(paths: pending.map(\.path), root: root))
+        for file in pending where restored.contains(file.path) {
+            hiddenDiffFingerprints[file.path] = Self.diffFingerprint(file)
         }
-        do {
-            _ = try DiffReview.apply(action: action, files: files, paths: paths, root: root)
-            Task { await client.refreshGit() }
-        } catch {
-            flash(error.localizedDescription)
+        let missed = pending.map(\.path).filter { !restored.contains($0) }
+        if !missed.isEmpty {
+            let names = missed.map { URL(fileURLWithPath: $0).lastPathComponent }.joined(separator: "、")
+            flash(copy.t("Couldn't put \(names) back.", "没法还原 \(names)。"))
         }
+        Task { await client.refreshGit() }
+    }
+
+    private func alignDiffReviewSession() {
+        let sid = client.sessionID ?? ""
+        if sid != diffReviewSessionID {
+            hiddenDiffFingerprints = [:]
+            diffReviewSessionID = sid
+        }
+    }
+
+    private static func diffFingerprint(_ file: DiffFile) -> String {
+        file.lines
+            .filter { $0.kind == .added || $0.kind == .removed }
+            .map(\.text)
+            .joined(separator: "\n")
     }
 
     func saveAccountKey(_ secret: String) {

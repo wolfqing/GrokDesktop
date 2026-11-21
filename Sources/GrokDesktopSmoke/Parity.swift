@@ -209,6 +209,28 @@ func runFeatureParity() {
         _ = try DiffReview.apply(action: .revert, files: files, paths: ["one.txt", "two.txt"], root: diffRoot)
         expect(try String(contentsOf: diffRoot.appendingPathComponent("one.txt"), encoding: .utf8) == "base-one", "revert one")
         expect(try String(contentsOf: diffRoot.appendingPathComponent("two.txt"), encoding: .utf8) == "base-two", "revert batch")
+
+        let repo = parityRoot.appendingPathComponent("diff-repo", isDirectory: true)
+        try fm.createDirectory(at: repo, withIntermediateDirectories: true)
+        func gitRepo(_ args: [String]) -> ProcessCapture {
+            TimedProcess.capture(
+                executable: URL(fileURLWithPath: "/usr/bin/git"),
+                arguments: ["-C", repo.path] + args,
+                cwd: repo
+            )
+        }
+        expect(gitRepo(["init"]).ok, "review repo init")
+        expect(gitRepo(["config", "user.email", "review@example.com"]).ok, "review repo email")
+        expect(gitRepo(["config", "user.name", "review"]).ok, "review repo name")
+        try "base".write(to: repo.appendingPathComponent("one.txt"), atomically: true, encoding: .utf8)
+        expect(gitRepo(["add", "one.txt"]).ok, "review repo add")
+        expect(gitRepo(["commit", "-m", "base"]).ok, "review repo commit")
+        try "changed".write(to: repo.appendingPathComponent("one.txt"), atomically: true, encoding: .utf8)
+        try "fresh".write(to: repo.appendingPathComponent("two.txt"), atomically: true, encoding: .utf8)
+        expect(DiffReview.restore(paths: ["one.txt", "two.txt"], root: repo) == ["one.txt", "two.txt"], "restore tracked and new")
+        expect(try String(contentsOf: repo.appendingPathComponent("one.txt"), encoding: .utf8) == "base", "restore writes HEAD")
+        expect(!fm.fileExists(atPath: repo.appendingPathComponent("two.txt").path), "restore removes a new file")
+        expect(DiffReview.restore(paths: ["../outside.txt"], root: repo).isEmpty, "restore refuses a path outside the repo")
     }
     print("pass diff")
 

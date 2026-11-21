@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.38 - 2026-11-21
+
+The changes list no longer asks you to accept each file.
+
+- Edits are already on disk. The column shows the files and the line counts.
+- Revert puts a file back. It appears when you point at that row, and on the row's menu. Revert all sits in the section title. A file that goes back leaves the list.
+- Refreshing the list no longer blanks it first.
+
 ## 0.1.37 - 2026-11-20
 
 Choosing a model or a reasoning effort no longer quits the app.

@@ -27,7 +27,11 @@ struct InspectorView: View {
         .onChange(of: model.client.isTurnRunning) { wasRunning, running in
             if wasRunning, !running {
                 model.refreshWorkspace()
+                Task { await model.client.refreshGit() }
             }
+        }
+        .onChange(of: model.client.sessionID) { _, _ in
+            model.clearDiffReview()
         }
         .onChange(of: model.focusAsideComposer) { _, focus in
             if focus {
@@ -962,7 +966,17 @@ struct InspectorView: View {
 
     private var changesSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            paneHeader(l10n.changes) { EmptyView() }
+            paneHeader(l10n.changes) {
+                if !visibleDiffs.isEmpty {
+                    Button(l10n.t("Revert all", "全部还原")) {
+                        model.restoreDiffs(visibleDiffs)
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(palette.secondary)
+                    .help(l10n.t("Put these files back. The list clears.", "把这些文件放回去。列表会清空。"))
+                }
+            }
             if model.workspace.isRepo {
                 HStack(spacing: 6) {
                     Image(systemName: "arrow.triangle.branch")
@@ -972,30 +986,19 @@ struct InspectorView: View {
                         .font(.system(size: 11.5, weight: .medium, design: .monospaced))
                         .foregroundStyle(palette.secondary)
                     Spacer()
-                    Text("+\(model.workspace.insertions)")
+                    Text("+\(changeCounts.added)")
                         .font(.system(size: 11, weight: .medium, design: .monospaced))
                         .foregroundStyle(palette.success)
-                    Text("-\(model.workspace.deletions)")
+                    Text("-\(changeCounts.removed)")
                         .font(.system(size: 11, weight: .medium, design: .monospaced))
                         .foregroundStyle(palette.danger)
                 }
             }
-            if !model.client.gitStatusText.isEmpty {
-                Text(model.client.gitStatusText)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(palette.secondary)
-                    .textSelection(.enabled)
-            }
-            if !scannedDiffs.isEmpty {
-                HStack(spacing: 8) {
-                    diffAction(l10n.t("Accept all", "全部接受"), .accept, scannedDiffs.map(\.path))
-                    diffAction(l10n.t("Reject all", "全部拒绝"), .reject, scannedDiffs.map(\.path))
-                    diffAction(l10n.t("Revert all", "全部还原"), .revert, scannedDiffs.map(\.path))
+            if !visibleDiffs.isEmpty {
+                ForEach(Array(visibleDiffs.enumerated()), id: \.element.id) { index, file in
+                    DiffFileBlock(file: file, startsOpen: index == visibleDiffs.count - 1)
                 }
-                ForEach(Array(scannedDiffs.enumerated()), id: \.element.id) { index, file in
-                    DiffFileBlock(file: file, startsOpen: index == scannedDiffs.count - 1)
-                }
-            } else if !model.client.gitDiffText.isEmpty {
+            } else if scannedDiffs.isEmpty, !model.client.gitDiffText.isEmpty {
                 Text(model.client.gitDiffText)
                     .font(.system(size: 11, design: .monospaced))
                     .textSelection(.enabled)
@@ -1006,7 +1009,7 @@ struct InspectorView: View {
                     asDiff: DiffNote.looksLikeDiff(model.client.gitDiffText)
                 )
             }
-            if model.client.hunks.isEmpty && scannedDiffs.isEmpty && model.client.gitDiffText.isEmpty {
+            if diffListIsEmpty && !repoHasDelta {
                 Text(l10n.t("No session diffs yet.", "这一轮还没有 diff。"))
                     .font(.system(size: 12))
                     .foregroundStyle(palette.secondary)
@@ -1054,14 +1057,37 @@ struct InspectorView: View {
         }
     }
 
-    private func diffAction(_ title: String, _ action: DiffReview.Action, _ paths: [String]) -> some View {
-        Button(title) { model.reviewDiff(action: action, paths: paths) }
-            .buttonStyle(GrokSecondaryButtonStyle())
-            .font(.system(size: 11))
-    }
-
     private var scannedDiffs: [DiffFile] {
         diffCache.files(for: model.client.gitDiffText)
+    }
+
+    private var visibleDiffs: [DiffFile] {
+        scannedDiffs.filter { !model.isDiffHidden($0) }
+    }
+
+    private var diffListIsEmpty: Bool {
+        model.client.hunks.isEmpty && scannedDiffs.isEmpty && model.client.gitDiffText.isEmpty
+    }
+
+    private var repoHasDelta: Bool {
+        model.workspace.isRepo && (model.workspace.insertions + model.workspace.deletions) > 0
+    }
+
+    /// Header totals follow the files on screen. Workspace numstat is only the stand-in before that list arrives.
+    private var changeCounts: (added: Int, removed: Int) {
+        if !scannedDiffs.isEmpty {
+            return (
+                visibleDiffs.reduce(0) { $0 + $1.added },
+                visibleDiffs.reduce(0) { $0 + $1.removed }
+            )
+        }
+        if !model.client.hunks.isEmpty {
+            return (
+                model.client.hunks.reduce(0) { $0 + $1.added },
+                model.client.hunks.reduce(0) { $0 + $1.removed }
+            )
+        }
+        return (model.workspace.insertions, model.workspace.deletions)
     }
 
     private func sectionTitle(_ title: String) -> some View {
@@ -1166,6 +1192,7 @@ private struct DiffFileBlock: View {
     @Environment(\.palette) private var palette
     @Environment(\.l10n) private var l10n
     @State private var expanded: Bool
+    @State private var hovering = false
 
     init(file: DiffFile, startsOpen: Bool = false) {
         self.file = file
@@ -1206,12 +1233,22 @@ private struct DiffFileBlock: View {
                 }
                 .buttonStyle(.plain)
                 .help(file.path)
-                .contextMenu { ChatLinkContextButtons(url: url) }
+                .contextMenu {
+                    Button(l10n.t("Revert", "还原")) {
+                        model.restoreDiffs([file])
+                    }
+                    ChatLinkContextButtons(url: url)
+                }
 
                 Spacer()
-                diffMini(l10n.t("Accept", "接受"), .accept)
-                diffMini(l10n.t("Reject", "拒绝"), .reject)
-                diffMini(l10n.t("Revert", "还原"), .revert)
+                if hovering {
+                    reviewButton(
+                        l10n.t("Revert", "还原"),
+                        help: l10n.t("Put this file back. It leaves the list.", "把这个文件放回去。这一行会消失。")
+                    ) {
+                        model.restoreDiffs([file])
+                    }
+                }
                 Text("+\(file.added)")
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .foregroundStyle(palette.success)
@@ -1219,6 +1256,7 @@ private struct DiffFileBlock: View {
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .foregroundStyle(palette.danger)
             }
+            .onHover { hovering = $0 }
             if expanded {
                 VStack(alignment: .leading, spacing: 1) {
                     ForEach(Array(file.lines.prefix(40).enumerated()), id: \.offset) { _, line in
@@ -1253,11 +1291,12 @@ private struct DiffFileBlock: View {
         }
     }
 
-    private func diffMini(_ title: String, _ action: DiffReview.Action) -> some View {
-        Button(title) { model.reviewDiff(action: action, paths: [file.path]) }
+    private func reviewButton(_ title: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
             .buttonStyle(.plain)
             .font(.system(size: 11, weight: .medium))
             .foregroundStyle(palette.secondary)
+            .help(help)
     }
 
     private func color(for kind: DiffLine.Kind) -> Color {

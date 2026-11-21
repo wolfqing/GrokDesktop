@@ -320,7 +320,7 @@ public final class ACPClient: ObservableObject {
                 "protocolVersion": 1,
                 "clientInfo": [
                     "name": "GrokDesktop",
-                    "version": "0.1.37"
+                    "version": "0.1.38"
                 ],
                 "clientCapabilities": [
                     "fs": [
@@ -1226,23 +1226,22 @@ public final class ACPClient: ObservableObject {
     }
 
     public func refreshGit() async {
-        gitStatusText = ""
-        gitDiffText = ""
         let agentCWD = reportedSessionCWD(localPath: workingDirectory.path)
+        var nextStatus = ""
+        var nextDiff = ""
         if let status = try? await request(method: "x.ai/git/status", params: ["cwd": agentCWD]) {
-            gitStatusText = Self.pretty(status.result)
+            nextStatus = Self.pretty(status.result)
         }
         if let diffs = try? await request(method: "x.ai/git/diffs", params: ["cwd": agentCWD]) {
             let extracted = DiffScan.extractPatch(from: diffs.result)
-            gitDiffText = extracted.isEmpty ? Self.pretty(diffs.result) : extracted
+            nextDiff = extracted.isEmpty ? Self.pretty(diffs.result) : extracted
         }
-        if gitDiffText.isEmpty {
+        if nextDiff.isEmpty {
             let cwd = workingDirectory
-            gitDiffText = await Task.detached { DiffScan.workspaceDiff(cwd: cwd) }.value
+            nextDiff = await Task.detached { DiffScan.workspaceDiff(cwd: cwd) }.value
         }
-        if gitStatusText.isEmpty, gitDiffText.isEmpty {
-            // keep WorkspaceSnapshot as the fallback
-        }
+        gitStatusText = nextStatus
+        gitDiffText = nextDiff
     }
 
     public func listRemoteFiles(query: String) async -> [URL] {

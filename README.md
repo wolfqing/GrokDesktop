@@ -22,7 +22,9 @@ Community project. Not an official xAI / SpaceXAI product.
 
 ## Install
 
-**Download:** [Grok-Desktop-0.1.37.zip](https://github.com/wolfqing/GrokDesktop/releases/download/v0.1.37/Grok-Desktop-0.1.37.zip) · [All releases](https://github.com/wolfqing/GrokDesktop/releases) · [Changelog](CHANGELOG.md)
+**Download:** [Grok-Desktop-0.1.38.zip](https://github.com/wolfqing/GrokDesktop/releases/download/v0.1.38/Grok-Desktop-0.1.38.zip) · [All releases](https://github.com/wolfqing/GrokDesktop/releases) · [Changelog](CHANGELOG.md)
+
+**From 0.1.37.** The changes list no longer asks you to accept each file. Point at a row to put that file back, or use Revert all in the section title.
 
 **From 0.1.36.** Choosing a model or a reasoning effort no longer quits the app. The menu stays open and changes height with the page.
 
