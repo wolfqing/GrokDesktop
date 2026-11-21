@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.37 - 2026-11-20
+
+Choosing a model or a reasoning effort no longer quits the app.
+
+- The menu grows when you open the model list or the effort list. That resize happens after the current layout pass, so the window stays up.
+- The choice still updates the chip, and the menu returns to its first page.
+
 ## 0.1.36 - 2026-11-13
 
 Text stays in place when the window changes size, and the composer scrolls.
